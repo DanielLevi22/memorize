@@ -824,7 +824,7 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
             <BarChart data={forecastData.chartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} />
-              <YAxis tickLine={false} axisLine={false} tickMargin={8} />
+              <YAxis tickLine={false} axisLine={false} tickMargin={8} domain={[0, 'auto']} />
               <ChartTooltip content={<ChartTooltipContent />} />
               <Bar dataKey="Revisões" fill="var(--color-Revisões)" radius={[4, 4, 0, 0]} />
             </BarChart>
@@ -1048,7 +1048,7 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
                 <BarChart data={intervalsData.chartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={8} />
-                  <YAxis tickLine={false} axisLine={false} tickMargin={8} />
+                  <YAxis tickLine={false} axisLine={false} tickMargin={8} domain={[0, 'auto']} />
                   <ChartTooltip content={<ChartTooltipContent />} />
                   <Bar dataKey="count" fill="var(--color-count)" radius={[3, 3, 0, 0]} />
                 </BarChart>
@@ -1074,7 +1074,7 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
                   <BarChart data={fsrsData.difficultyChartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={8} />
-                    <YAxis tickLine={false} axisLine={false} tickMargin={8} />
+                    <YAxis tickLine={false} axisLine={false} tickMargin={8} domain={[0, 'auto']} />
                     <ChartTooltip content={<ChartTooltipContent />} />
                     <Bar dataKey="count" fill="var(--color-count)" radius={[3, 3, 0, 0]} />
                   </BarChart>
@@ -1109,7 +1109,7 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
                   <BarChart data={fsrsData.stabilityChartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={8} />
-                    <YAxis tickLine={false} axisLine={false} tickMargin={8} />
+                    <YAxis tickLine={false} axisLine={false} tickMargin={8} domain={[0, 'auto']} />
                     <ChartTooltip content={<ChartTooltipContent />} />
                     <Bar dataKey="count" fill="var(--color-count)" radius={[3, 3, 0, 0]} />
                   </BarChart>
@@ -1143,7 +1143,7 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
                 <BarChart data={intervalsData.chartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={8} />
-                  <YAxis tickLine={false} axisLine={false} tickMargin={8} />
+                  <YAxis tickLine={false} axisLine={false} tickMargin={8} domain={[0, 'auto']} />
                   <ChartTooltip content={<ChartTooltipContent />} />
                   <Bar dataKey="count" fill="var(--color-count)" radius={[3, 3, 0, 0]} />
                 </BarChart>
@@ -1166,7 +1166,7 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
                 <BarChart data={easeData.chartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
                   <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={8} />
-                  <YAxis tickLine={false} axisLine={false} tickMargin={8} />
+                  <YAxis tickLine={false} axisLine={false} tickMargin={8} domain={[0, 'auto']} />
                   <ChartTooltip content={<ChartTooltipContent />} />
                   <Bar dataKey="count" fill="var(--color-count)" radius={[3, 3, 0, 0]} />
                 </BarChart>
@@ -1271,7 +1271,7 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
             <BarChart data={buttonsData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={8} />
-              <YAxis tickLine={false} axisLine={false} tickMargin={8} />
+              <YAxis tickLine={false} axisLine={false} tickMargin={8} domain={[0, 'auto']} />
               <ChartTooltip content={<ChartTooltipContent />} />
               <Bar dataKey="Errei (1)" fill="var(--color-Errei-1)" radius={[3, 3, 0, 0]} />
               <Bar dataKey="Difícil (2)" fill="var(--color-Difícil-2)" radius={[3, 3, 0, 0]} />
@@ -1306,7 +1306,7 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
             <BarChart data={addedCardsData.chartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} />
-              <YAxis tickLine={false} axisLine={false} tickMargin={8} />
+              <YAxis tickLine={false} axisLine={false} tickMargin={8} domain={[0, 'auto']} />
               <ChartTooltip content={<ChartTooltipContent />} />
               <Bar dataKey="Criados" fill="var(--color-Criados)" radius={[3, 3, 0, 0]} />
             </BarChart>
