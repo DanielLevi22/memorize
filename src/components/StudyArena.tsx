@@ -336,6 +336,29 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
     }
   };
 
+  // ⌨️ Keyboard shortcuts (defined after handlers are ready)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+      if (e.key === 'Escape') {
+        onCancel();
+      } else if ((e.key === ' ' || e.key === 'Spacebar') && !isFlipped) {
+        e.preventDefault();
+        handleReveal();
+      } else if (e.key === '1' && isFlipped) {
+        e.preventDefault(); handleGrade(1);
+      } else if (e.key === '2' && isFlipped) {
+        e.preventDefault(); handleGrade(2);
+      } else if (e.key === '3' && isFlipped) {
+        e.preventDefault(); handleGrade(3);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isFlipped, onCancel]);
+
   return (
     <div className="flex flex-col h-full gap-5">
       {/* Navbar de Estudo */}
@@ -680,36 +703,55 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
             {currentCard.audio && !isAudioTextRevealed ? 'Revelar Texto (Inglês)' : 'Revelar Resposta'}
           </Button>
         ) : (
-          <div className="grid grid-cols-3 gap-2.5 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <Button 
-              className="flex flex-col h-auto py-3 rounded-xl font-bold bg-red-500/10 border border-red-500/20 hover:bg-red-500 hover:text-zinc-50 text-red-500 dark:text-red-400 text-sm gap-0.5 cursor-pointer"
-              onClick={() => handleGrade(1)}
-            >
-              <span>Errei</span>
-              <span className="text-[10px] font-medium opacity-70">
-                {getFriendlyInterval(currentCard, 1)}
+          <>
+            <div className="grid grid-cols-3 gap-2.5 animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <Button 
+                className="flex flex-col h-auto py-3 rounded-xl font-bold bg-red-500/10 border border-red-500/20 hover:bg-red-500 hover:text-zinc-50 text-red-500 dark:text-red-400 text-sm gap-0.5 cursor-pointer"
+                onClick={() => handleGrade(1)}
+              >
+                <span>Errei</span>
+                <span className="text-[10px] font-medium opacity-70">
+                  {getFriendlyInterval(currentCard, 1)}
+                </span>
+              </Button>
+              <Button 
+                className="flex flex-col h-auto py-3 rounded-xl font-bold bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500 hover:text-zinc-950 dark:hover:text-zinc-950 text-amber-500 text-sm gap-0.5 cursor-pointer"
+                onClick={() => handleGrade(2)}
+              >
+                <span>Difícil</span>
+                <span className="text-[10px] font-medium opacity-70">
+                  {getFriendlyInterval(currentCard, 2)}
+                </span>
+              </Button>
+              <Button 
+                className="flex flex-col h-auto py-3 rounded-xl font-bold bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500 hover:text-zinc-50 text-emerald-600 dark:text-emerald-400 text-sm gap-0.5 cursor-pointer"
+                onClick={() => handleGrade(3)}
+              >
+                <span>Fácil</span>
+                <span className="text-[10px] font-medium opacity-70">
+                  {getFriendlyInterval(currentCard, 3)}
+                </span>
+              </Button>
+            </div>
+            {/* Shortcut hints */}
+            <div className="flex items-center justify-center gap-4 mt-2">
+              <span className="text-[9px] text-muted-foreground/50 flex items-center gap-1">
+                <kbd className="bg-muted border border-border px-1 py-0.5 rounded text-[8px] font-bold">1</kbd> Errei
               </span>
-            </Button>
-            
-            <Button 
-              className="flex flex-col h-auto py-3 rounded-xl font-bold bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500 hover:text-zinc-950 dark:hover:text-zinc-950 text-amber-500 text-sm gap-0.5 cursor-pointer"
-              onClick={() => handleGrade(2)}
-            >
-              <span>Difícil</span>
-              <span className="text-[10px] font-medium opacity-70">
-                {getFriendlyInterval(currentCard, 2)}
+              <span className="text-[9px] text-muted-foreground/50 flex items-center gap-1">
+                <kbd className="bg-muted border border-border px-1 py-0.5 rounded text-[8px] font-bold">2</kbd> Difícil
               </span>
-            </Button>
-            
-            <Button 
-              className="flex flex-col h-auto py-3 rounded-xl font-bold bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500 hover:text-zinc-50 text-emerald-600 dark:text-emerald-400 text-sm gap-0.5 cursor-pointer"
-              onClick={() => handleGrade(3)}
-            >
-              <span>Fácil</span>
-              <span className="text-[10px] font-medium opacity-70">
-                {getFriendlyInterval(currentCard, 3)}
+              <span className="text-[9px] text-muted-foreground/50 flex items-center gap-1">
+                <kbd className="bg-muted border border-border px-1 py-0.5 rounded text-[8px] font-bold">3</kbd> Fácil
               </span>
-            </Button>
+            </div>
+          </>
+        )}
+        {!isFlipped && (
+          <div className="flex items-center justify-center mt-2">
+            <span className="text-[9px] text-muted-foreground/50 flex items-center gap-1">
+              <kbd className="bg-muted border border-border px-1.5 py-0.5 rounded text-[8px] font-bold">Espaço</kbd> revelar
+            </span>
           </div>
         )}
       </div>

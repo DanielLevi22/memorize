@@ -25,6 +25,9 @@ interface SettingsPageProps {
   setTtsVoice: (voice: string) => void;
   autoPlayAudio: boolean;
   setAutoPlayAudio: (v: boolean) => void;
+  // Notifications
+  requestNotificationPermission: () => Promise<NotificationPermission>;
+  getNotificationPermission: () => NotificationPermission | 'unsupported';
 }
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({
@@ -48,8 +51,11 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   setTtsVoice,
   autoPlayAudio,
   setAutoPlayAudio,
+  requestNotificationPermission,
+  getNotificationPermission,
 }) => {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission | 'unsupported'>(() => getNotificationPermission());
 
   useEffect(() => {
     const loadVoices = () => {
@@ -137,12 +143,45 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             <span className="text-sm font-semibold text-foreground">Notificações Diárias</span>
             <span className="text-[11px] text-muted-foreground">Lembrar de revisar cards pendentes</span>
           </div>
-          <input 
-            type="checkbox" 
-            className="w-4 h-4 accent-primary bg-muted border-border rounded cursor-pointer"
-            checked={notificationsEnabled}
-            onChange={(e) => setNotificationsEnabled(e.target.checked)}
-          />
+          <div className="flex items-center gap-2">
+            {notifPermission === 'unsupported' && (
+              <span className="text-[10px] font-bold text-muted-foreground">Não suportado</span>
+            )}
+            {notifPermission === 'denied' && (
+              <span className="text-[10px] font-bold text-destructive bg-destructive/10 border border-destructive/20 px-2 py-0.5 rounded-full">
+                Bloqueado — libere no navegador
+              </span>
+            )}
+            {notifPermission === 'granted' && (
+              <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+                ✅ Ativo
+              </span>
+            )}
+            {notifPermission === 'default' && (
+              <button
+                className="text-[10px] font-bold text-primary bg-primary/10 border border-primary/20 px-2.5 py-1 rounded-full cursor-pointer hover:bg-primary/20 transition-colors"
+                onClick={async () => {
+                  const result = await requestNotificationPermission();
+                  setNotifPermission(result);
+                  setNotificationsEnabled(result === 'granted');
+                }}
+              >
+                Ativar permissão
+              </button>
+            )}
+            <input
+              type="checkbox"
+              className="w-4 h-4 accent-primary bg-muted border-border rounded cursor-pointer"
+              checked={notificationsEnabled}
+              onChange={(e) => {
+                setNotificationsEnabled(e.target.checked);
+                if (e.target.checked && notifPermission === 'default') {
+                  requestNotificationPermission().then(r => setNotifPermission(r));
+                }
+              }}
+              disabled={notifPermission !== 'granted'}
+            />
+          </div>
         </div>
       </div>
 

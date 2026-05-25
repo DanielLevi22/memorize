@@ -30,6 +30,10 @@ import { CardPreviewModal } from './components/CardPreviewModal';
 import { ImportModal } from './components/ImportModal';
 import { StatsDashboard } from './components/StatsDashboard';
 import { SrsAlgorithmsDocs } from './components/SrsAlgorithmsDocs';
+import { GlobalSearch } from './components/GlobalSearch';
+
+// Utilitários
+import { setupNotifications, requestNotificationPermission, getNotificationPermission, clearAppBadge } from './utils/notifications';
 
 // Componentes Shadcn UI
 import { Button } from './components/ui/button';
@@ -148,6 +152,9 @@ function App() {
   const [selectedStudyTags, setSelectedStudyTags] = useState<string[]>([]);
   const [selectedStudyMode, setSelectedStudyMode] = useState<'classic' | 'writing' | 'speaking'>('classic');
 
+  // --- BUSCA GLOBAL ---
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+
   // --- SUPORTE A PWA ---
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
@@ -202,12 +209,36 @@ function App() {
     localStorage.setItem('memorize_algo', selectedAlgo);
   }, [selectedAlgo]);
 
+  // --- CTRL+K GLOBAL SEARCH LISTENER ---
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsSearchOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   // --- CÁLCULOS E ESTATÍSTICAS DO DASHBOARD ---
   const todayStr = new Date().toISOString().split('T')[0];
 
   const totalNew = cards ? cards.filter(c => c.interval === 0).length : 0;
   const totalDue = cards ? cards.filter(c => c.interval > 0 && c.dueDate <= todayStr).length : 0;
   const totalLearned = cards ? cards.filter(c => c.interval > 0 && c.dueDate > todayStr).length : 0;
+
+  // --- NOTIFICAÇÕES (dispara quando totalDue muda) ---
+  useEffect(() => {
+    if (notificationsEnabled) {
+      setupNotifications(totalNew + totalDue);
+    }
+  }, [totalNew, totalDue, notificationsEnabled]);
+
+  // Limpa badge ao entrar no estudo
+  useEffect(() => {
+    if (currentView === 'study') clearAppBadge();
+  }, [currentView]);
 
   // --- OPERAÇÕES CRUD DE DECKS ---
   const handleOpenNewDeckModal = () => {
@@ -923,7 +954,17 @@ function App() {
             </div>
 
             {/* Top Navigation Menu (Simplified - Sync only) */}
-            <div className="hidden md:flex items-center">
+            <div className="hidden md:flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs font-extrabold px-3.5 py-1.5 rounded-lg cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all duration-150 border border-border/80 gap-2"
+                onClick={() => setIsSearchOpen(true)}
+              >
+                <Search size={13} />
+                Buscar
+                <kbd className="hidden sm:inline text-[9px] bg-muted border border-border px-1 rounded font-bold">Ctrl K</kbd>
+              </Button>
               <Button
                 variant="ghost"
                 size="sm"
@@ -1048,6 +1089,8 @@ function App() {
                 setTtsVoice={setTtsVoice}
                 autoPlayAudio={autoPlayAudio}
                 setAutoPlayAudio={setAutoPlayAudio}
+                requestNotificationPermission={requestNotificationPermission}
+                getNotificationPermission={getNotificationPermission}
               />
             )}
 
@@ -1309,6 +1352,24 @@ function App() {
       {activeDeckMenuId && (
         <div className="fixed inset-0 z-10" onClick={() => setActiveDeckMenuId(null)} />
       )}
+
+      {/* BUSCA GLOBAL (Ctrl+K) */}
+      <GlobalSearch
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        cards={cards}
+        decks={decks}
+        onNavigateToCard={(card) => {
+          setActiveTab('cards');
+          setCurrentView('dashboard');
+          setSearchTerm(card.front.replace(/<[^>]*>/g, ''));
+        }}
+        onNavigateToDeck={(deck) => {
+          setActiveTab('dashboard');
+          setCurrentView('dashboard');
+          setSelectedDeckId(deck.id);
+        }}
+      />
     </div>
   );
 }

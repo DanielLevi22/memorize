@@ -1,0 +1,306 @@
+/* c:\pessoal\memorize\src\components\GlobalSearch.css */
+
+.gs-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 10vh;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+.gs-backdrop {
+  position: absolute;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
+  animation: gs-fade-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.gs-modal {
+  position: relative;
+  z-index: 101;
+  width: 100%;
+  max-width: 640px;
+  background: var(--card);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: gs-scale-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Dark mode overrides for shadow and colors */
+.dark .gs-modal {
+  background: rgba(30, 30, 30, 0.85);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+.gs-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.gs-input-icon {
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+
+.gs-input {
+  flex: 1;
+  height: 1.5rem;
+  font-size: 0.95rem;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--foreground);
+}
+
+.gs-input::placeholder {
+  color: var(--muted-foreground);
+}
+
+.gs-clear-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 9999px;
+  color: var(--muted-foreground);
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.gs-clear-btn:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.gs-esc-badge {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.35rem;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+}
+
+.gs-list {
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 0.5rem;
+  overscroll-behavior: contain;
+}
+
+.gs-empty {
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
+}
+
+.gs-empty-hint {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  opacity: 0.6;
+}
+
+.gs-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.gs-group-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-foreground);
+  padding: 0.5rem 0.75rem 0.25rem;
+}
+
+.gs-clear-recents {
+  font-size: 0.75rem;
+  color: var(--destructive);
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  transition: all 0.2s;
+}
+
+.gs-clear-recents:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.gs-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, color 0.15s;
+}
+
+/* cmdk selected item classes */
+.gs-item[data-selected="true"] {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.gs-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.gs-icon-muted {
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
+.gs-icon-primary {
+  background: rgba(59, 130, 246, 0.1);
+  color: rgb(59, 130, 246);
+}
+
+.gs-icon-accent {
+  background: rgba(139, 92, 246, 0.1);
+  color: rgb(139, 92, 246);
+}
+
+.gs-item-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.gs-item-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gs-item-sub {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gs-item[data-selected="true"] .gs-item-sub {
+  color: inherit;
+  opacity: 0.8;
+}
+
+.gs-item-deck {
+  font-weight: 600;
+}
+
+.gs-item-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.gs-badge {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 9999px;
+  font-weight: 500;
+}
+
+.gs-badge-due {
+  background: rgba(239, 68, 68, 0.1);
+  color: rgb(239, 68, 68);
+}
+
+.gs-badge-lapse {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  background: rgba(245, 158, 11, 0.1);
+  color: rgb(245, 158, 11);
+}
+
+.gs-badge-tag {
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
+.gs-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.25rem;
+  background: var(--muted);
+  border-top: 1px solid var(--border);
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.gs-footer-hints {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.gs-footer-hints kbd {
+  background: var(--card);
+  border: 1px solid var(--border);
+  padding: 0.1rem 0.3rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.7rem;
+  font-family: monospace;
+}
+
+.gs-footer-count {
+  font-weight: 500;
+}
+
+@keyframes gs-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes gs-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
