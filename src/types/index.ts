@@ -20,6 +20,14 @@ export interface Card {
   repetitions: number; // Contagem de repetições acertadas consecutivas
   lapses: number; // Contagem de falhas (Erros)
   dueDate: string; // Data da próxima revisão no formato "YYYY-MM-DD"
+
+  // FSRS (Free Spaced Repetition Scheduler) Fields
+  difficulty?: number; // D (dificuldade) no FSRS, de 1 a 10
+  stability?: number;  // S (estabilidade) no FSRS, em dias
+  lastReview?: number; // timestamp MS da última revisão realizada
+  
+  // Organização e Categorização
+  tags?: string[]; // Etiquetas/Tags do cartão
   
   createdAt: number;
   updatedAt: number;

@@ -1,15 +1,107 @@
 import type { Card } from '../types';
 
+// FSRS v4 default parameters
+const FSRS_W = [
+  0.4, 0.6, 2.4, 5.8,      // w[0]-w[3]: initial stability for grades 1, 2, 3, 4
+  4.93, 0.94, 0.86, 0.01,  // w[4]-w[7]: difficulty parameters
+  1.49, 0.14, 0.94,        // w[8]-w[10]: successful recall stability parameters
+  2.18, 0.05, 0.34, 1.26,  // w[11]-w[14]: forgetting stability parameters
+  0.29, 2.61               // w[15]-w[16]: scaling parameters
+];
+
 /**
- * Calcula o próximo agendamento do cartão usando uma adaptação simplificada do algoritmo SM-2.
- * Projetado para 3 botões na UI:
- * 1 = Errei (Again)
- * 2 = Difícil (Hard)
- * 3 = Fácil (Easy)
- * 
- * @param card O estado atual do cartão
- * @param rating A nota de revisão dada pelo usuário (1, 2 ou 3)
- * @returns Um objeto contendo os campos atualizados do cartão
+ * Calcula o agendamento de revisão baseado no algoritmo FSRS v4.
+ */
+export function calculateFSRSReview(card: Card, rating: number): {
+  interval: number;
+  ease: number;
+  repetitions: number;
+  lapses: number;
+  dueDate: string;
+  difficulty: number;
+  stability: number;
+  lastReview: number;
+} {
+  // Mapeamento: 1 (Errei) -> 1 (Again), 2 (Difícil) -> 2 (Hard), 3 (Fácil) -> 4 (Easy)
+  const g = rating === 1 ? 1 : rating === 2 ? 2 : 4;
+  
+  let difficulty = card.difficulty;
+  let stability = card.stability;
+  let lastReview = card.lastReview;
+  let { repetitions, lapses } = card;
+
+  const nowMs = Date.now();
+  const isFirstReview = difficulty === undefined || stability === undefined || lastReview === undefined;
+
+  let nextDifficulty = 5;
+  let nextStability = 1;
+
+  if (isFirstReview) {
+    // --- PRIMEIRA REVISÃO (CARD NOVO) ---
+    nextStability = FSRS_W[g - 1];
+    nextDifficulty = FSRS_W[4] - FSRS_W[5] * (g - 3);
+    nextDifficulty = Math.max(1, Math.min(10, nextDifficulty));
+    
+    if (g === 1) {
+      repetitions = 0;
+      lapses += 1;
+    } else {
+      repetitions = 1;
+    }
+  } else {
+    // --- REVISÕES SEGUINTES ---
+    const elapsedMs = Math.max(0, nowMs - lastReview);
+    const t = elapsedMs / (24 * 60 * 60 * 1000); // tempo decorrido em dias
+
+    // Calcular probabilidade de recall atual R
+    const R = Math.pow(0.9, t / stability);
+
+    // Atualizar Dificuldade
+    const diffDelta = -FSRS_W[6] * (g - 3);
+    const initialDiff = FSRS_W[4] - FSRS_W[5] * (g - 3);
+    nextDifficulty = difficulty + diffDelta;
+    // Mean reversion
+    nextDifficulty = FSRS_W[7] * initialDiff + (1 - FSRS_W[7]) * nextDifficulty;
+    nextDifficulty = Math.max(1, Math.min(10, nextDifficulty));
+
+    // Atualizar Estabilidade
+    if (g > 1) {
+      // Recall bem-sucedido
+      const hardnessFactor = g === 2 ? FSRS_W[15] : 1;
+      const baseStab = 1 + Math.exp(FSRS_W[8]) * (11 - nextDifficulty) * Math.pow(stability, -FSRS_W[9]) * (Math.exp(FSRS_W[10] * (1 - R)) - 1) * hardnessFactor;
+      nextStability = stability * baseStab;
+      repetitions += 1;
+    } else {
+      // Falha de recall (forgetting)
+      const baseStab = FSRS_W[11] * Math.pow(nextDifficulty, -FSRS_W[12]) * (Math.pow(stability + 1, FSRS_W[13]) - 1) * Math.exp(FSRS_W[14] * (1 - R));
+      nextStability = Math.max(0.1, baseStab);
+      repetitions = 0;
+      lapses += 1;
+    }
+  }
+
+  nextStability = Math.max(0.1, Math.min(36500, nextStability));
+  const nextInterval = Math.max(1, Math.round(nextStability));
+
+  const nextDueDate = new Date();
+  nextDueDate.setDate(nextDueDate.getDate() + nextInterval);
+  const dueDateStr = nextDueDate.toISOString().split('T')[0];
+
+  return {
+    interval: nextInterval,
+    ease: card.ease || 2.5,
+    repetitions,
+    lapses,
+    dueDate: dueDateStr,
+    difficulty: nextDifficulty,
+    stability: nextStability,
+    lastReview: nowMs
+  };
+}
+
+/**
+ * Calcula o próximo agendamento do cartão usando uma adaptação simplificada do algoritmo SM-2 ou FSRS v4.
+ * Dependendo de qual está ativo no localStorage.
  */
 export function calculateNextReview(card: Card, rating: number): {
   interval: number;
@@ -17,55 +109,49 @@ export function calculateNextReview(card: Card, rating: number): {
   repetitions: number;
   lapses: number;
   dueDate: string;
+  difficulty?: number;
+  stability?: number;
+  lastReview?: number;
 } {
-  let { interval, ease, repetitions, lapses } = card;
+  const selectedAlgo = typeof window !== 'undefined' ? (localStorage.getItem('memorize_algo') || 'SM-2') : 'SM-2';
+  if (selectedAlgo === 'FSRS') {
+    return calculateFSRSReview(card, rating);
+  }
 
-  // Valor padrão de facilidade mínima e máxima
+  // --- ALGORITMO SM-2 CLÁSSICO ---
+  let { interval, ease, repetitions, lapses } = card;
   const minEase = 1.3;
   const defaultEase = 2.5;
 
   if (ease < minEase) ease = defaultEase;
 
   if (rating === 1) {
-    // --- ERREI (AGAIN) ---
     repetitions = 0;
     lapses += 1;
-    // Reduz significativamente a facilidade do cartão
     ease = Math.max(minEase, ease - 0.2);
-    // Deve ser revisado amanhã (1 dia)
     interval = 1;
   } else if (rating === 2) {
-    // --- DIFÍCIL (HARD) ---
-    // Estabelece repetições consecutivas caso estivesse zerado, senão mantém
     repetitions = repetitions === 0 ? 1 : repetitions;
-    // Reduz ligeiramente a facilidade
     ease = Math.max(minEase, ease - 0.15);
-    
-    // Cálculo do intervalo com fator moderado
     if (repetitions === 1) {
       interval = 1;
     } else if (repetitions === 2) {
-      interval = 3; // Menor que o padrão de acertos fáceis
+      interval = 3;
     } else {
       interval = Math.max(2, Math.round(interval * ease * 0.75));
     }
   } else {
-    // --- FÁCIL (EASY) ---
     repetitions += 1;
-    // Aumenta a facilidade do cartão (tornando revisões futuras mais espaçadas)
     ease = ease + 0.15;
-
-    // Cálculo do intervalo no SM-2 clássico
     if (repetitions === 1) {
-      interval = 1; // 1 dia
+      interval = 1;
     } else if (repetitions === 2) {
-      interval = 6; // 6 dias
+      interval = 6;
     } else {
       interval = Math.max(6, Math.round(interval * ease));
     }
   }
 
-  // Calcular a data de vencimento (dueDate) com base no novo intervalo em dias
   const nextDueDate = new Date();
   nextDueDate.setDate(nextDueDate.getDate() + interval);
   const dueDateStr = nextDueDate.toISOString().split('T')[0];
@@ -81,7 +167,6 @@ export function calculateNextReview(card: Card, rating: number): {
 
 /**
  * Retorna o rótulo de tempo estimado do próximo intervalo formatado para a UI do botão.
- * Útil para dar feedback ao usuário sobre quando o cartão voltará (ex: "Amanhã", "3 dias", "10 dias").
  */
 export function getFriendlyInterval(card: Card, rating: number): string {
   const next = calculateNextReview(card, rating);

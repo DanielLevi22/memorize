@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { 
-  Flame, Plus, Layers, Sparkles, Menu, User, 
-  Search, Settings, Trophy, BookOpen, Trash2, Sun, Moon,
-  ChevronLeft, ChevronRight, Pencil, Upload, Download
+  Flame, Plus, Sparkles, Menu, User, 
+  Search, Settings, Sun, Moon,
+  ChevronLeft, LayoutDashboard, TrendingUp, HelpCircle
 } from 'lucide-react';
 
 // Banco de Dados e Types
@@ -14,21 +14,26 @@ import type { Deck, Card } from './types';
 import { calculateNextReview } from './utils/srs';
 import { getStreak, recordStudy } from './utils/streak';
 
+// Páginas do Projeto
+import { DashboardPage } from './pages/DashboardPage';
+import { CardsPage } from './pages/CardsPage';
+import { ProfilePage } from './pages/ProfilePage';
+import { SettingsPage } from './pages/SettingsPage';
+
 // Componentes do Projeto
-import { DeckCard } from './components/DeckCard';
 import { DeckModal } from './components/DeckModal';
 import { CardModal } from './components/CardModal';
 import { StudyArena } from './components/StudyArena';
 import { CongratsScreen } from './components/CongratsScreen';
 import { CardPreviewModal } from './components/CardPreviewModal';
 import { ImportModal } from './components/ImportModal';
+import { StatsDashboard } from './components/StatsDashboard';
+import { SrsAlgorithmsDocs } from './components/SrsAlgorithmsDocs';
 
 // Componentes Shadcn UI
 import { Button } from './components/ui/button';
-import { Input } from './components/ui/input';
-import { Card as ShadcnCard } from './components/ui/card';
 import { Sheet, SheetContent } from './components/ui/sheet';
-import { Progress } from './components/ui/progress';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './components/ui/dialog';
 
 const stripHtmlTags = (str: string) => {
   if (!str) return '';
@@ -57,7 +62,7 @@ function App() {
   // --- ESTADO DA SIDEBAR E NAVEGAÇÃO INTERNA ---
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDesktopSidebarOpen, setIsDesktopSidebarOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState<'decks' | 'profile' | 'cards' | 'settings'>('decks');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'algorithms'>('dashboard');
   const [searchTerm, setSearchTerm] = useState('');
 
   const toggleSidebar = () => {
@@ -68,8 +73,14 @@ function App() {
     }
   };
   
-  // --- ESTADO DE CONFIGURAÇÕES FICTÍCIAS ---
-  const [selectedAlgo, setSelectedAlgo] = useState<'SM-2' | 'FSRS'>('SM-2');
+  // --- ESTADO DE CONFIGURAÇÕES PERSISTIDAS E FICTÍCIAS ---
+  const [selectedAlgo, setSelectedAlgo] = useState<'SM-2' | 'FSRS'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('memorize_algo');
+      if (saved === 'SM-2' || saved === 'FSRS') return saved;
+    }
+    return 'SM-2';
+  });
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
 
   // --- ESTADOS DE MODAIS ---
@@ -86,10 +97,40 @@ function App() {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 24;
+  const [activeDeckMenuId, setActiveDeckMenuId] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // --- ESTADOS DE SESSÃO E STREAK ---
   const [streak, setStreak] = useState(0);
   const [sessionCardsStudied, setSessionCardsStudied] = useState(0);
+  const [isStudyFilterModalOpen, setIsStudyFilterModalOpen] = useState(false);
+  const [deckToStudyId, setDeckToStudyId] = useState<string | null>(null);
+  const [selectedStudyTags, setSelectedStudyTags] = useState<string[]>([]);
+  const [selectedStudyMode, setSelectedStudyMode] = useState<'classic' | 'writing' | 'speaking'>('classic');
+
+  // --- SUPORTE A PWA ---
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log(`User choice outcome: ${outcome}`);
+    setDeferredPrompt(null);
+  };
 
   // --- QUERIES REATIVAS (INDEXEDDB VIA DEXIE) ---
   const decks = useLiveQuery(() => db.decks.toArray());
@@ -116,6 +157,10 @@ function App() {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm]);
+
+  useEffect(() => {
+    localStorage.setItem('memorize_algo', selectedAlgo);
+  }, [selectedAlgo]);
 
   // --- CÁLCULOS E ESTATÍSTICAS DO DASHBOARD ---
   const todayStr = new Date().toISOString().split('T')[0];
@@ -179,7 +224,7 @@ function App() {
     setIsPreviewModalOpen(true);
   };
 
-  const handleSaveCard = async (front: string, back: string, context: string, audioBlob?: Blob | null) => {
+  const handleSaveCard = async (front: string, back: string, context: string, audioBlob: Blob | null, tags: string[]) => {
     if (cardToEdit) {
       // Editar Cartão Existente
       await db.cards.update(cardToEdit.id, {
@@ -187,6 +232,7 @@ function App() {
         back,
         context,
         audio: audioBlob || undefined,
+        tags,
         updatedAt: Date.now()
       });
       setIsCardModalOpen(false);
@@ -202,6 +248,7 @@ function App() {
         back,
         context,
         audio: audioBlob || undefined,
+        tags,
         interval: 0,
         ease: 2.5,
         repetitions: 0,
@@ -218,10 +265,33 @@ function App() {
   };
 
   // --- FLUXO DE ESTUDO ---
+  const getDeckTags = (deckId: string) => {
+    if (!cards) return [];
+    const deckCards = cards.filter(c => c.deckId === deckId);
+    const allTags = new Set<string>();
+    deckCards.forEach(c => {
+      if (c.tags) {
+        c.tags.forEach(t => allTags.add(t));
+      }
+    });
+    return Array.from(allTags);
+  };
+
+  const getFilteredCardsCount = (deckId: string, activeTags: string[]) => {
+    if (!cards) return 0;
+    return cards.filter(c => {
+      const matchesDeck = c.deckId === deckId;
+      const matchesDue = c.interval === 0 || c.dueDate <= todayStr;
+      const matchesTags = activeTags.length === 0 || (c.tags && c.tags.some(t => activeTags.includes(t)));
+      return matchesDeck && matchesDue && matchesTags;
+    }).length;
+  };
+
+  // --- FLUXO DE ESTUDO ---
   const handleStartStudy = (deckId: string) => {
-    setSelectedDeckId(deckId);
-    setSessionCardsStudied(0);
-    setCurrentView('study');
+    setDeckToStudyId(deckId);
+    setSelectedStudyTags([]);
+    setIsStudyFilterModalOpen(true);
   };
 
   const handleGradeCard = async (card: Card, rating: number) => {
@@ -360,15 +430,29 @@ function App() {
     }
   };
 
+  // --- SINCRONIZAÇÃO ANKI SIMULADA ---
+  const handleSync = () => {
+    setIsSyncing(true);
+    setTimeout(() => {
+      setIsSyncing(false);
+      alert('Sincronização concluída! Todos os baralhos, cartões e revisões locais estão 100% atualizados.');
+    }, 800);
+  };
+
   // --- FLUXO NAVEGAÇÃO SIDEBAR ---
-  const handleNavigateFromSidebar = (tab: 'decks' | 'profile' | 'cards' | 'settings') => {
+  const handleNavigateFromSidebar = (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'algorithms') => {
     setActiveTab(tab);
     setCurrentView('dashboard');
     setIsSidebarOpen(false);
   };
 
   const cardsToStudy = cards && selectedDeckId
-    ? cards.filter(c => c.deckId === selectedDeckId && (c.interval === 0 || c.dueDate <= todayStr))
+    ? cards.filter(c => {
+        const matchesDeck = c.deckId === selectedDeckId;
+        const matchesDue = c.interval === 0 || c.dueDate <= todayStr;
+        const matchesTags = selectedStudyTags.length === 0 || (c.tags && c.tags.some(t => selectedStudyTags.includes(t)));
+        return matchesDeck && matchesDue && matchesTags;
+      })
     : [];
 
   const selectedDeck = decks?.find(d => d.id === selectedDeckId);
@@ -377,7 +461,8 @@ function App() {
     ? cards.filter(c => 
         c.front.toLowerCase().includes(searchTerm.toLowerCase()) || 
         c.back.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        c.context.toLowerCase().includes(searchTerm.toLowerCase())
+        c.context.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (c.tags && c.tags.some(t => t.toLowerCase().includes(searchTerm.toLowerCase())))
       )
     : [];
 
@@ -392,6 +477,44 @@ function App() {
   const earnedXp = totalRevisionsCount * 15;
   const userLevel = Math.floor(earnedXp / 100) + 1;
   const xpNeededForNextLevel = 100 - (earnedXp % 100);
+
+  const getTodaysStats = () => {
+    if (!revisions) return { count: 0, minutes: 0, sPerCard: 0 };
+    const startOfTodayMs = new Date().setHours(0, 0, 0, 0);
+    const todaysRevisions = revisions.filter(r => r.timestamp >= startOfTodayMs);
+    
+    if (todaysRevisions.length === 0) {
+      return { count: 0, minutes: 0, sPerCard: 0 };
+    }
+
+    // Sort chronologically
+    const sorted = [...todaysRevisions].sort((a, b) => a.timestamp - b.timestamp);
+    let totalSeconds = 0;
+    
+    for (let i = 0; i < sorted.length; i++) {
+      if (i === 0) {
+        totalSeconds += 10; // Default estimate
+      } else {
+        const diff = (sorted[i].timestamp - sorted[i - 1].timestamp) / 1000;
+        if (diff < 60) {
+          totalSeconds += diff;
+        } else {
+          totalSeconds += 10; // Cap
+        }
+      }
+    }
+
+    const minutes = totalSeconds / 60;
+    const sPerCard = totalSeconds / todaysRevisions.length;
+
+    return {
+      count: todaysRevisions.length,
+      minutes: parseFloat(minutes.toFixed(2)),
+      sPerCard: parseFloat(sPerCard.toFixed(2))
+    };
+  };
+
+  const stats = getTodaysStats();
 
   return (
     <div className="app-container min-h-screen flex flex-row bg-background text-foreground relative font-sans w-full">
@@ -429,24 +552,42 @@ function App() {
             <Button 
               variant="ghost"
               className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
-                activeTab === 'decks' 
+                activeTab === 'dashboard' 
                   ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
               }`}
               onClick={() => {
-                setActiveTab('decks');
+                setActiveTab('dashboard');
                 setCurrentView('dashboard');
               }}
             >
               <div className="flex items-center gap-3">
-                <BookOpen size={16} />
-                <span>Meus Decks</span>
+                <LayoutDashboard size={16} />
+                <span>Dashboard</span>
               </div>
               {totalDue > 0 && (
                 <span className="text-[10px] font-bold bg-destructive text-destructive-foreground px-2 py-0.5 rounded-full">
                   {totalDue}
                 </span>
               )}
+            </Button>
+
+            <Button 
+              variant="ghost"
+              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+                activeTab === 'stats' 
+                  ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+              }`}
+              onClick={() => {
+                setActiveTab('stats');
+                setCurrentView('dashboard');
+              }}
+            >
+              <div className="flex items-center gap-3">
+                <TrendingUp size={16} />
+                <span>Estatísticas</span>
+              </div>
             </Button>
 
             <Button 
@@ -512,6 +653,24 @@ function App() {
                 <span>Configurações</span>
               </div>
             </Button>
+
+            <Button 
+              variant="ghost"
+              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+                activeTab === 'algorithms' 
+                  ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+              }`}
+              onClick={() => {
+                setActiveTab('algorithms');
+                setCurrentView('dashboard');
+              }}
+            >
+              <div className="flex items-center gap-3">
+                <HelpCircle size={16} />
+                <span>Algoritmos SRS</span>
+              </div>
+            </Button>
           </nav>
         </div>
 
@@ -545,21 +704,36 @@ function App() {
                   <Button 
                     variant="ghost"
                     className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
-                      activeTab === 'decks' 
+                      activeTab === 'dashboard' 
                         ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
                         : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                     }`}
-                    onClick={() => handleNavigateFromSidebar('decks')}
+                    onClick={() => handleNavigateFromSidebar('dashboard')}
                   >
                     <div className="flex items-center gap-3">
-                      <BookOpen size={16} />
-                      <span>Meus Decks</span>
+                      <LayoutDashboard size={16} />
+                      <span>Dashboard</span>
                     </div>
                     {totalDue > 0 && (
                       <span className="text-[10px] font-bold bg-destructive text-destructive-foreground px-2 py-0.5 rounded-full">
                         {totalDue}
                       </span>
                     )}
+                  </Button>
+
+                  <Button 
+                    variant="ghost"
+                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+                      activeTab === 'stats' 
+                        ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                    }`}
+                    onClick={() => handleNavigateFromSidebar('stats')}
+                  >
+                    <div className="flex items-center gap-3">
+                      <TrendingUp size={16} />
+                      <span>Estatísticas</span>
+                    </div>
                   </Button>
 
                   <Button 
@@ -616,6 +790,21 @@ function App() {
                       <span>Configurações</span>
                     </div>
                   </Button>
+
+                  <Button 
+                    variant="ghost"
+                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+                      activeTab === 'algorithms' 
+                        ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                    }`}
+                    onClick={() => handleNavigateFromSidebar('algorithms')}
+                  >
+                    <div className="flex items-center gap-3">
+                      <HelpCircle size={16} />
+                      <span>Algoritmos SRS</span>
+                    </div>
+                  </Button>
                 </nav>
               </div>
 
@@ -644,6 +833,19 @@ function App() {
             <div className="flex items-center gap-2">
               <Sparkles className="text-primary fill-primary/10" size={18} />
               <h1 className="font-extrabold text-lg text-foreground tracking-tight">Memorize</h1>
+            </div>
+
+            {/* Top Navigation Menu (Simplified - Sync only) */}
+            <div className="hidden md:flex items-center">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs font-extrabold px-3.5 py-1.5 rounded-lg cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all duration-150 border border-border/80"
+                onClick={handleSync}
+                disabled={isSyncing}
+              >
+                {isSyncing ? 'Sincronizando...' : '🔄 Sincronizar'}
+              </Button>
             </div>
 
             <div className="flex items-center gap-2">
@@ -677,415 +879,95 @@ function App() {
         {currentView === 'dashboard' && (
           <main className="flex-1 p-5 pb-24 overflow-y-auto w-full">
             
-            {/* TAB 1: DECKS */}
-            {activeTab === 'decks' && (
-              <div className="space-y-6 w-full max-w-none px-2 md:px-6">
-                {/* Stats Overview */}
-                <section className="grid grid-cols-3 gap-3">
-                  <ShadcnCard className="bg-card border-border text-center p-3.5 rounded-2xl shadow-sm">
-                    <div className="font-black text-2xl text-blue-500 tracking-tight">{totalNew}</div>
-                    <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mt-0.5">Novos</div>
-                  </ShadcnCard>
-                  <ShadcnCard className="bg-card border-border text-center p-3.5 rounded-2xl shadow-sm">
-                    <div className="font-black text-2xl text-amber-500 tracking-tight">{totalDue}</div>
-                    <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mt-0.5">A Revisar</div>
-                  </ShadcnCard>
-                  <ShadcnCard className="bg-card border-border text-center p-3.5 rounded-2xl shadow-sm">
-                    <div className="font-black text-2xl text-emerald-500 tracking-tight">{totalLearned}</div>
-                    <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mt-0.5">Ok</div>
-                  </ShadcnCard>
-                </section>
-                {/* Decks Section */}
-                <section className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h2 className="font-extrabold text-md text-foreground tracking-tight">📁 Meus Decks</h2>
-                    <div className="flex items-center gap-3">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-xs h-8 font-semibold border-border bg-card hover:bg-muted text-foreground cursor-pointer rounded-xl gap-1.5 px-3"
-                        onClick={() => setIsImportModalOpen(true)}
-                        title="Importar decks e progresso"
-                      >
-                        <Upload size={13} /> Importar Decks
-                      </Button>
-                      <span className="text-[11px] text-muted-foreground font-bold shrink-0">
-                        {decks ? decks.length : 0} decks
-                      </span>
-                    </div>
-                  </div>
-
-                  {decks && decks.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
-                      {decks.map(deck => (
-                        <DeckCard
-                          key={deck.id}
-                          deck={deck}
-                          cards={cards || []}
-                          onStudy={handleStartStudy}
-                          onAddCard={handleOpenAddCardModal}
-                          onEditDeck={handleOpenEditDeckModal}
-                          onDeleteDeck={handleDeleteDeck}
-                          onExportDeck={handleExportDeck}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center text-center p-12 gap-4 text-muted-foreground border border-border border-dashed rounded-2xl">
-                      <Layers size={40} className="text-muted-foreground/60" />
-                      <div className="space-y-1">
-                        <h3 className="font-bold text-sm text-foreground">Nenhum deck criado</h3>
-                        <p className="text-xs max-w-[240px] mx-auto">Crie um deck de estudos e adicione seus primeiros cartões para começar a aprender.</p>
-                      </div>
-                      <Button 
-                        className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold gap-1.5 cursor-pointer text-xs h-9 px-4 rounded-lg mt-2" 
-                        onClick={handleOpenNewDeckModal}
-                      >
-                        <Plus size={14} /> Criar Primeiro Deck
-                      </Button>
-                    </div>
-                  )}
-                </section>
-              </div>
+            {/* TAB 1: DASHBOARD (DECKS) */}
+            {activeTab === 'dashboard' && (
+              <DashboardPage
+                decks={decks}
+                cards={cards}
+                todayStr={todayStr}
+                totalNew={totalNew}
+                totalDue={totalDue}
+                totalLearned={totalLearned}
+                activeDeckMenuId={activeDeckMenuId}
+                setActiveDeckMenuId={setActiveDeckMenuId}
+                handleOpenNewDeckModal={handleOpenNewDeckModal}
+                setIsImportModalOpen={setIsImportModalOpen}
+                handleStartStudy={handleStartStudy}
+                handleOpenAddCardModal={handleOpenAddCardModal}
+                handleOpenEditDeckModal={handleOpenEditDeckModal}
+                handleExportDeck={handleExportDeck}
+                handleDeleteDeck={handleDeleteDeck}
+                stats={stats}
+              />
             )}
 
             {/* TAB 2: BANCO DE CARDS */}
             {activeTab === 'cards' && (
-              <div className="space-y-4 w-full max-w-none px-2 md:px-6">
-                <div className="flex items-center justify-between">
-                  <h2 className="font-extrabold text-md text-foreground tracking-tight">🔍 Banco de Cards</h2>
-                  <span className="text-[11px] text-muted-foreground font-bold">
-                    {cards ? cards.length : 0} cartões
-                  </span>
-                </div>
-
-                {/* Input de Busca */}
-                <div className="relative">
-                  <Input
-                    type="text"
-                    className="pl-10 bg-card border-border text-foreground focus-visible:ring-ring focus-visible:border-primary placeholder:text-muted-foreground/60 h-11 rounded-xl"
-                    placeholder="Buscar palavra, significado ou contexto..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
-                  <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground/60">
-                    <Search size={16} />
-                  </div>
-                </div>
-
-                {/* Lista de cartões filtrados */}
-                {filteredCards.length > 0 ? (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
-                      {paginatedCards.map(card => {
-                        const deck = decks?.find(d => d.id === card.deckId);
-                        return (
-                          <div 
-                            key={card.id} 
-                            className="p-4 bg-card border border-border rounded-xl space-y-2 hover:border-muted-foreground/30 hover:shadow-md transition-all cursor-pointer shadow-sm relative group break-words"
-                            onClick={() => handleOpenPreviewModal(card)}
-                          >
-                            <div className="flex justify-between items-center text-xs">
-                              <span className="px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 font-bold uppercase tracking-wider text-[9px] truncate max-w-[120px]">
-                                {deck ? deck.name.replace(/[^a-zA-Z0-9\s]/g, '').trim() : 'Sem Deck'}
-                              </span>
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-muted-foreground font-medium text-[10px]">
-                                  {card.interval === 0 ? 'Novo' : `Int: ${card.interval}d`} (F.Fac: {card.ease.toFixed(1)})
-                                </span>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground cursor-pointer hover:bg-muted p-0 shrink-0"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setCardToEdit(card);
-                                    setIsCardModalOpen(true);
-                                  }}
-                                  title="Editar Cartão"
-                                >
-                                  <Pencil size={11} />
-                                </Button>
-                              </div>
-                            </div>
-                            <div className="font-bold text-sm text-foreground">{stripHtmlTags(card.front)}</div>
-                            <div className="text-muted-foreground text-xs font-semibold">{stripHtmlTags(card.back)}</div>
-                            {card.context && (
-                              <div className="text-[10px] text-muted-foreground/80 font-medium italic border-l-2 border-border pl-2 mt-1">
-                                {stripHtmlTags(card.context)}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Controles de Paginação */}
-                    {totalPages > 1 && (
-                      <div className="flex flex-col sm:flex-row items-center justify-between border-t border-border/50 pt-4 mt-2 gap-3">
-                        <div className="text-xs font-semibold text-muted-foreground">
-                          Mostrando {Math.min(filteredCards.length, (currentPage - 1) * ITEMS_PER_PAGE + 1)}-{Math.min(filteredCards.length, currentPage * ITEMS_PER_PAGE)} de {filteredCards.length} cartões
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 w-8 p-0 cursor-pointer border-border bg-card hover:bg-muted text-foreground font-bold"
-                            disabled={currentPage === 1}
-                            onClick={() => setCurrentPage(1)}
-                            title="Primeira página"
-                          >
-                            &laquo;
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 w-8 p-0 cursor-pointer border-border bg-card hover:bg-muted text-foreground"
-                            disabled={currentPage === 1}
-                            onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                            title="Página anterior"
-                          >
-                            <ChevronLeft size={14} />
-                          </Button>
-                          <span className="text-xs font-bold text-foreground px-2">
-                            {currentPage} / {totalPages}
-                          </span>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 w-8 p-0 cursor-pointer border-border bg-card hover:bg-muted text-foreground"
-                            disabled={currentPage === totalPages}
-                            onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                            title="Próxima página"
-                          >
-                            <ChevronRight size={14} />
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 w-8 p-0 cursor-pointer border-border bg-card hover:bg-muted text-foreground font-bold"
-                            disabled={currentPage === totalPages}
-                            onClick={() => setCurrentPage(totalPages)}
-                            title="Última página"
-                          >
-                            &raquo;
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center justify-center text-center p-14 gap-3 text-muted-foreground">
-                    <Search size={32} className="text-muted-foreground/60" />
-                    <div className="space-y-0.5">
-                      <h3 className="font-bold text-sm text-foreground">Nenhum cartão encontrado</h3>
-                      <p className="text-xs max-w-[200px] mx-auto">Nenhum cartão corresponde aos termos de busca inseridos.</p>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <CardsPage
+                cards={cards}
+                decks={decks}
+                searchTerm={searchTerm}
+                setSearchTerm={setSearchTerm}
+                filteredCards={filteredCards}
+                paginatedCards={paginatedCards}
+                currentPage={currentPage}
+                setCurrentPage={setCurrentPage}
+                totalPages={totalPages}
+                ITEMS_PER_PAGE={ITEMS_PER_PAGE}
+                handleOpenPreviewModal={handleOpenPreviewModal}
+                setCardToEdit={setCardToEdit}
+                setIsCardModalOpen={setIsCardModalOpen}
+                stripHtmlTags={stripHtmlTags}
+              />
             )}
 
-            {/* TAB 3: MEU PERFIL */}
+            {/* TAB 3: ESTATÍSTICAS */}
+            {activeTab === 'stats' && (
+              <StatsDashboard decks={decks} cards={cards} revisions={revisions} selectedAlgo={selectedAlgo} />
+            )}
+
+            {/* TAB 5: MEU PERFIL */}
             {activeTab === 'profile' && (
-              <div className="space-y-6 w-full max-w-none px-2 md:px-6">
-                <ShadcnCard className="bg-card border-border p-6 text-center flex flex-col items-center gap-3 rounded-2xl shadow-sm max-w-2xl mx-auto">
-                  <div className="w-20 h-20 rounded-full bg-gradient-to-br from-violet-600 to-violet-400 flex items-center justify-center font-black text-3xl border-2 border-border shadow-xl text-zinc-50 shadow-violet-600/10">
-                    👤
-                  </div>
-                  <div className="space-y-0.5">
-                    <h3 className="font-extrabold text-lg text-foreground">Daniel Oliveira</h3>
-                    <span className="inline-block px-3 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 text-xs font-bold">
-                      Nível {userLevel} • {earnedXp} XP totais
-                    </span>
-                  </div>
-                  
-                  {/* Barra de Progresso de Nível */}
-                  <div className="w-full space-y-1.5 mt-2">
-                    <Progress value={earnedXp % 100} className="h-2 bg-muted" />
-                    <div className="flex justify-between text-[10px] text-muted-foreground font-bold">
-                      <span>{earnedXp % 100} / 100 XP</span>
-                      <span>Falta {xpNeededForNextLevel} XP para Nív. {userLevel + 1}</span>
-                    </div>
-                  </div>
-                </ShadcnCard>
-
-                {/* Seção Conquistas */}
-                <div className="space-y-3">
-                  <h2 className="font-extrabold text-md text-foreground tracking-tight">🏅 Minhas Conquistas</h2>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                    {/* Badge 1 */}
-                    <div className={`p-4 bg-card border border-border rounded-xl flex flex-col items-center text-center gap-2 hover:bg-muted/30 transition-colors shadow-sm ${
-                       (decks && decks.length > 0) ? '' : 'opacity-40'
-                    }`}>
-                      <div className="w-10 h-10 rounded-full bg-muted border border-border flex items-center justify-center text-amber-500">
-                        <Plus size={18} />
-                      </div>
-                      <span className="font-bold text-xs text-foreground">Primeiro Deck</span>
-                      <span className="text-[10px] text-muted-foreground font-semibold leading-snug">Criou o seu primeiro deck local</span>
-                    </div>
-
-                    {/* Badge 2 */}
-                    <div className={`p-4 bg-card border border-border rounded-xl flex flex-col items-center text-center gap-2 hover:bg-muted/30 transition-colors shadow-sm ${
-                      streak > 0 ? '' : 'opacity-40'
-                    }`}>
-                      <div className="w-10 h-10 rounded-full bg-muted border border-border flex items-center justify-center text-amber-500">
-                        <Flame size={18} />
-                      </div>
-                      <span className="font-bold text-xs text-foreground">Hábito de Estudo</span>
-                      <span className="text-[10px] text-muted-foreground font-semibold leading-snug">Completou 1 dia de ofensiva</span>
-                    </div>
-
-                    {/* Badge 3 */}
-                    <div className={`p-4 bg-card border border-border rounded-xl flex flex-col items-center text-center gap-2 hover:bg-muted/30 transition-colors shadow-sm ${
-                      totalRevisionsCount >= 5 ? '' : 'opacity-40'
-                    }`}>
-                      <div className="w-10 h-10 rounded-full bg-muted border border-border flex items-center justify-center text-amber-500">
-                        <Trophy size={18} />
-                      </div>
-                      <span className="font-bold text-xs text-foreground">Foco de Aço</span>
-                      <span className="text-[10px] text-muted-foreground font-semibold leading-snug">Revisou mais de 5 cartões</span>
-                    </div>
-
-                    {/* Badge 4 */}
-                    <div className="p-4 bg-card border border-border rounded-xl flex flex-col items-center text-center gap-2 hover:bg-muted/30 transition-colors opacity-40 shadow-sm">
-                      <div className="w-10 h-10 rounded-full bg-muted border border-border flex items-center justify-center text-muted-foreground">
-                        <Sparkles size={18} />
-                      </div>
-                      <span className="font-bold text-xs text-muted-foreground">Mestre</span>
-                      <span className="text-[10px] text-muted-foreground/60 font-semibold leading-snug">Memorizou mais de 100 cards</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <ProfilePage
+                streak={streak}
+                userLevel={userLevel}
+                earnedXp={earnedXp}
+                xpNeededForNextLevel={xpNeededForNextLevel}
+                totalRevisionsCount={totalRevisionsCount}
+                decksCount={decks ? decks.length : 0}
+              />
             )}
 
             {/* TAB 4: CONFIGURAÇÕES */}
             {activeTab === 'settings' && (
-              <div className="space-y-4 w-full max-w-none px-2 md:px-6">
-                <h2 className="font-extrabold text-md text-foreground tracking-tight">⚙️ Configurações</h2>
+              <SettingsPage
+                theme={theme}
+                setTheme={setTheme}
+                selectedAlgo={selectedAlgo}
+                setSelectedAlgo={setSelectedAlgo}
+                notificationsEnabled={notificationsEnabled}
+                setNotificationsEnabled={setNotificationsEnabled}
+                cards={cards}
+                handleExportFullBackup={handleExportFullBackup}
+                setIsImportModalOpen={setIsImportModalOpen}
+                handleResetAllData={handleResetAllData}
+                setActiveTab={setActiveTab}
+                setCurrentView={setCurrentView}
+                deferredPrompt={deferredPrompt}
+                handleInstallApp={handleInstallApp}
+              />
+            )}
 
-                <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/60 shadow-sm">
-                  <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider px-4 pt-4 pb-2 bg-muted/20">
-                    Preferências de Interface & SRS
-                  </div>
-                  
-                  {/* Seletor de Tema Claro/Escuro */}
-                  <div className="flex items-center justify-between p-4 bg-card">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-sm font-semibold text-foreground">Tema do Aplicativo</span>
-                      <span className="text-[11px] text-muted-foreground">Alternar entre claro e escuro</span>
-                    </div>
-                    <select 
-                      className="bg-muted border border-border text-foreground px-3 py-1.5 rounded-lg text-xs font-semibold outline-none cursor-pointer focus:border-muted-foreground/45"
-                      value={theme}
-                      onChange={(e) => setTheme(e.target.value as 'light' | 'dark')}
-                    >
-                      <option value="light">Claro ☀️</option>
-                      <option value="dark">Escuro 🌙</option>
-                    </select>
-                  </div>
-
-                  <div className="flex items-center justify-between p-4 bg-card">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-sm font-semibold text-foreground">Algoritmo Spaced Repetition</span>
-                      <span className="text-[11px] text-muted-foreground">Escolha a fórmula do agendamento</span>
-                    </div>
-                    <select 
-                      className="bg-muted border border-border text-foreground px-3 py-1.5 rounded-lg text-xs font-semibold outline-none cursor-pointer focus:border-muted-foreground/45"
-                      value={selectedAlgo}
-                      onChange={(e) => setSelectedAlgo(e.target.value as 'SM-2' | 'FSRS')}
-                    >
-                      <option value="SM-2">SM-2 (Clássico)</option>
-                      <option value="FSRS">FSRS v4 (Moderno - Beta)</option>
-                    </select>
-                  </div>
-
-                  <div className="flex items-center justify-between p-4 bg-card">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-sm font-semibold text-foreground">Notificações Diárias</span>
-                      <span className="text-[11px] text-muted-foreground">Lembrar de revisar cards pendentes</span>
-                    </div>
-                    <input 
-                      type="checkbox" 
-                      className="w-4 h-4 accent-primary bg-muted border-border rounded cursor-pointer"
-                      checked={notificationsEnabled}
-                      onChange={(e) => setNotificationsEnabled(e.target.checked)}
-                    />
-                  </div>
-                </div>
-
-                <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/60 shadow-sm">
-                  <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider px-4 pt-4 pb-2 bg-muted/20">
-                    Sobre & Armazenamento
-                  </div>
-                  
-                  <div className="flex items-center justify-between p-4 bg-card text-sm">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="font-semibold text-foreground">Banco de Dados Local</span>
-                      <span className="text-[11px] text-muted-foreground">Plataforma IndexedDB (Dexie)</span>
-                    </div>
-                    <span className="text-xs font-bold text-primary">Ativo</span>
-                  </div>
-
-                  <div className="flex items-center justify-between p-4 bg-card text-sm">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="font-semibold text-foreground">Tamanho no Disco</span>
-                      <span className="text-[11px] text-muted-foreground">Cards e estatísticas salvas localmente</span>
-                    </div>
-                    <span className="text-xs font-bold text-muted-foreground">
-                      ~{(cards ? JSON.stringify(cards).length / 1024 : 0).toFixed(2)} KB
-                    </span>
-                  </div>
-                </div>
-
-                <div className="bg-card border border-border rounded-2xl p-5 space-y-3 shadow-sm">
-                  <div className="text-[10px] text-primary font-bold uppercase tracking-wider">
-                    Backup & Restauração
-                  </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    Exporte sua base de dados completa (incluindo áudios e progresso) ou restaure a partir de um arquivo de backup do Memorize.
-                  </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                    <Button
-                      variant="outline"
-                      className="border-border bg-muted/20 hover:bg-muted text-foreground font-semibold cursor-pointer h-10 text-xs rounded-xl gap-2 justify-center"
-                      onClick={handleExportFullBackup}
-                    >
-                      <Download size={14} /> Exportar Backup
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className="border-border bg-muted/20 hover:bg-muted text-foreground font-semibold cursor-pointer h-10 text-xs rounded-xl gap-2 justify-center"
-                      onClick={() => setIsImportModalOpen(true)}
-                    >
-                      <Upload size={14} /> Restaurar Backup
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="bg-card border border-border rounded-2xl p-5 space-y-3 shadow-sm">
-                  <div className="text-[10px] text-destructive font-bold uppercase tracking-wider">
-                    Zona de Perigo
-                  </div>
-                  <Button 
-                    variant="outline"
-                    className="w-full border-destructive/20 bg-destructive/5 hover:bg-destructive hover:text-destructive-foreground text-destructive font-semibold cursor-pointer py-5 text-xs rounded-xl"
-                    onClick={handleResetAllData}
-                  >
-                    <Trash2 size={14} className="mr-1.5" />
-                    Limpar todos os dados locais
-                  </Button>
-                </div>
-              </div>
+            {/* TAB 6: ALGORITMOS */}
+            {activeTab === 'algorithms' && (
+              <SrsAlgorithmsDocs />
             )}
 
           </main>
         )}
 
         {/* Floating Action Button (decks view only, responsive positioning) */}
-        {currentView === 'dashboard' && activeTab === 'decks' && decks && decks.length > 0 && (
+        {currentView === 'dashboard' && activeTab === 'dashboard' && decks && decks.length > 0 && (
           <div className="fixed bottom-6 right-6 md:right-8 z-10">
             <Button 
               onClick={handleOpenNewDeckModal}
@@ -1109,6 +991,7 @@ function App() {
                 setSelectedDeckId(null);
               }}
               onFinishSession={handleFinishStudySession}
+              studyMode={selectedStudyMode}
             />
           </main>
         )}
@@ -1173,11 +1056,153 @@ function App() {
         deckName={cardToPreview ? (decks?.find(d => d.id === cardToPreview.deckId)?.name || '') : ''}
       />
 
+      {/* Dialog para Filtrar Estudo por Tags */}
+      {isStudyFilterModalOpen && deckToStudyId && (
+        <Dialog open={isStudyFilterModalOpen} onOpenChange={(open) => !open && setIsStudyFilterModalOpen(false)}>
+          <DialogContent className="bg-card border-border text-foreground max-w-xs sm:max-w-md rounded-lg p-5">
+            <DialogHeader>
+              <DialogTitle className="font-semibold text-lg text-foreground flex items-center gap-2">
+                ⚙️ Configurar Sessão de Estudos
+              </DialogTitle>
+              <span className="text-[10px] text-primary font-bold uppercase tracking-wider block mt-1">
+                Deck: {decks?.find(d => d.id === deckToStudyId)?.name.replace(/[^a-zA-Z0-9\s]/g, '').trim() || ''}
+              </span>
+            </DialogHeader>
+
+            <div className="flex flex-col gap-4 mt-3">
+              {getDeckTags(deckToStudyId).length > 0 && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-muted-foreground">
+                    Estudar apenas cartões com as tags:
+                  </label>
+                  <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto p-2 border border-border rounded-xl bg-background/50">
+                    {getDeckTags(deckToStudyId).map((tag) => {
+                      const isSelected = selectedStudyTags.includes(tag);
+                      return (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => {
+                            if (isSelected) {
+                              setSelectedStudyTags(prev => prev.filter(t => t !== tag));
+                            } else {
+                              setSelectedStudyTags(prev => [...prev, tag]);
+                            }
+                          }}
+                          className={`text-xs px-2.5 py-1 rounded-full border transition-all duration-200 cursor-pointer ${
+                            isSelected
+                              ? 'bg-primary border-primary text-primary-foreground font-semibold shadow-sm'
+                              : 'bg-muted/40 border-border hover:bg-muted text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          #{tag}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <span className="text-[10px] text-muted-foreground block">
+                    * Se nenhuma tag for selecionada, você estudará todos os cartões pendentes deste baralho.
+                  </span>
+                </div>
+              )}
+
+              <div className="space-y-2 border-t border-border/60 pt-3">
+                <label className="text-xs font-bold text-muted-foreground">
+                  Modo de Estudo:
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStudyMode('classic')}
+                    className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-200 cursor-pointer ${
+                      selectedStudyMode === 'classic'
+                        ? 'bg-primary/10 border-primary text-foreground font-semibold shadow-sm ring-1 ring-primary/30'
+                        : 'bg-muted/30 border-border hover:bg-muted text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <span className="text-lg mb-1">🎴</span>
+                    <span className="text-xs font-bold block">Clássico</span>
+                    <span className="text-[8px] opacity-75 leading-tight block mt-0.5">Frente/Verso</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStudyMode('writing')}
+                    className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-200 cursor-pointer ${
+                      selectedStudyMode === 'writing'
+                        ? 'bg-primary/10 border-primary text-foreground font-semibold shadow-sm ring-1 ring-primary/30'
+                        : 'bg-muted/30 border-border hover:bg-muted text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <span className="text-lg mb-1">✍️</span>
+                    <span className="text-xs font-bold block">Escrita</span>
+                    <span className="text-[8px] opacity-75 leading-tight block mt-0.5">Digitar Resposta</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStudyMode('speaking')}
+                    className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all duration-200 cursor-pointer ${
+                      selectedStudyMode === 'speaking'
+                        ? 'bg-primary/10 border-primary text-foreground font-semibold shadow-sm ring-1 ring-primary/30'
+                        : 'bg-muted/30 border-border hover:bg-muted text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    <span className="text-lg mb-1">🗣️</span>
+                    <span className="text-xs font-bold block">Fala</span>
+                    <span className="text-[8px] opacity-75 leading-tight block mt-0.5">Pronunciar Mic</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-primary/5 border border-primary/20 rounded-xl flex items-center justify-between">
+                <span className="text-xs font-bold text-foreground">Cartões Selecionados:</span>
+                <span className="text-xs font-black bg-primary/20 text-primary px-2.5 py-1 rounded-lg">
+                  {getFilteredCardsCount(deckToStudyId, selectedStudyTags)} cartões pendentes
+                </span>
+              </div>
+            </div>
+
+            <DialogFooter className="flex flex-row gap-2 mt-4 sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1 sm:flex-initial border-border bg-muted/30 hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
+                onClick={() => {
+                  setIsStudyFilterModalOpen(false);
+                  setDeckToStudyId(null);
+                  setSelectedStudyTags([]);
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                className="flex-1 sm:flex-initial bg-primary hover:bg-primary/90 text-primary-foreground cursor-pointer font-bold disabled:opacity-50"
+                disabled={getFilteredCardsCount(deckToStudyId, selectedStudyTags) === 0}
+                onClick={() => {
+                  setSelectedDeckId(deckToStudyId);
+                  setSessionCardsStudied(0);
+                  setCurrentView('study');
+                  setIsStudyFilterModalOpen(false);
+                }}
+              >
+                Iniciar Estudo
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
       <ImportModal
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
         decks={decks}
       />
+
+      {activeDeckMenuId && (
+        <div className="fixed inset-0 z-10" onClick={() => setActiveDeckMenuId(null)} />
+      )}
     </div>
   );
 }

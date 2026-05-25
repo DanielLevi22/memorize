@@ -37,6 +37,29 @@ export const CardPreviewModal: React.FC<CardPreviewModalProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  const speakText = (text: string, lang: 'en' | 'pt') => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) {
+      console.warn("Speech Synthesis not supported in this browser");
+      return;
+    }
+    
+    window.speechSynthesis.cancel();
+    
+    const cleanText = stripHtmlTags(text);
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utterance.lang = lang === 'en' ? 'en-US' : 'pt-BR';
+    
+    setIsPlaying(true);
+    utterance.onend = () => {
+      setIsPlaying(false);
+    };
+    utterance.onerror = () => {
+      setIsPlaying(false);
+    };
+    
+    window.speechSynthesis.speak(utterance);
+  };
+
   useEffect(() => {
     // Reset da revelação e flip ao abrir novo card
     setIsFlipped(false);
@@ -83,30 +106,35 @@ export const CardPreviewModal: React.FC<CardPreviewModalProps> = ({
 
   const handlePlayAudio = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (!audioUrl) return;
-    try {
-      if (isPlaying && activeAudioRef.current) {
-        activeAudioRef.current.pause();
-        setIsPlaying(false);
-        return;
-      }
+    
+    if (card.audio) {
+      if (!audioUrl) return;
+      try {
+        if (isPlaying && activeAudioRef.current) {
+          activeAudioRef.current.pause();
+          setIsPlaying(false);
+          return;
+        }
 
-      if (activeAudioRef.current) {
-        activeAudioRef.current.pause();
-        activeAudioRef.current = null;
-      }
+        if (activeAudioRef.current) {
+          activeAudioRef.current.pause();
+          activeAudioRef.current = null;
+        }
 
-      const audio = new Audio(audioUrl);
-      activeAudioRef.current = audio;
-      setIsPlaying(true);
-      audio.play().catch(() => setIsPlaying(false));
-      audio.onended = () => {
+        const audio = new Audio(audioUrl);
+        activeAudioRef.current = audio;
+        setIsPlaying(true);
+        audio.play().catch(() => setIsPlaying(false));
+        audio.onended = () => {
+          setIsPlaying(false);
+          activeAudioRef.current = null;
+        };
+      } catch (err) {
+        console.error(err);
         setIsPlaying(false);
-        activeAudioRef.current = null;
-      };
-    } catch (err) {
-      console.error(err);
-      setIsPlaying(false);
+      }
+    } else {
+      speakText(card.front, 'en');
     }
   };
 
@@ -161,18 +189,16 @@ export const CardPreviewModal: React.FC<CardPreviewModalProps> = ({
                 </div>
               ) : (
                 <div className="flex-1 flex flex-col justify-center items-center text-center gap-3">
-                  {audioUrl && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="absolute top-4 right-4 h-7 w-7 text-primary hover:bg-primary/10 rounded-full cursor-pointer"
-                      onClick={handlePlayAudio}
-                      title="Ouvir áudio"
-                    >
-                      <Volume2 size={14} className={isPlaying ? 'animate-pulse' : ''} />
-                    </Button>
-                  )}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute top-4 right-4 h-7 w-7 text-primary hover:bg-primary/10 rounded-full cursor-pointer"
+                    onClick={handlePlayAudio}
+                    title="Ouvir áudio"
+                  >
+                    <Volume2 size={14} className={isPlaying ? 'animate-pulse' : ''} />
+                  </Button>
                   <h2 
                     className="font-extrabold text-xl tracking-tight text-foreground leading-snug"
                     dangerouslySetInnerHTML={{ __html: card.front }}
@@ -194,6 +220,15 @@ export const CardPreviewModal: React.FC<CardPreviewModalProps> = ({
                       }}
                     />
                   )}
+                  {card.tags && card.tags.length > 0 && (
+                    <div className="flex flex-wrap justify-center gap-1 mt-1">
+                      {card.tags.map((tag, tIdx) => (
+                        <span key={tIdx} className="text-[9px] font-semibold bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full">
+                          #{tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -204,18 +239,16 @@ export const CardPreviewModal: React.FC<CardPreviewModalProps> = ({
                 Significado
               </span>
               
-              {audioUrl && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="absolute top-4 right-4 h-7 w-7 text-primary hover:bg-primary/10 rounded-full cursor-pointer"
-                  onClick={handlePlayAudio}
-                  title="Ouvir áudio"
-                >
-                  <Volume2 size={14} className={isPlaying ? 'animate-pulse' : ''} />
-                </Button>
-              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute top-4 right-4 h-7 w-7 text-primary hover:bg-primary/10 rounded-full cursor-pointer"
+                onClick={handlePlayAudio}
+                title="Ouvir áudio"
+              >
+                <Volume2 size={14} className={isPlaying ? 'animate-pulse' : ''} />
+              </Button>
 
               <div className="flex-1 flex flex-col justify-center items-center text-center gap-3">
                 <span 
@@ -231,6 +264,15 @@ export const CardPreviewModal: React.FC<CardPreviewModalProps> = ({
                   <div className="text-xs text-foreground font-medium italic p-2.5 bg-muted/30 border-l-2 border-primary rounded w-full text-left leading-relaxed">
                     <strong className="text-primary text-[10px] uppercase not-italic block mb-0.5">Exemplo:</strong>
                     <span dangerouslySetInnerHTML={{ __html: card.context }} />
+                  </div>
+                )}
+                {card.tags && card.tags.length > 0 && (
+                  <div className="flex flex-wrap justify-center gap-1 mt-1">
+                    {card.tags.map((tag, tIdx) => (
+                      <span key={tIdx} className="text-[9px] font-semibold bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full">
+                        #{tag}
+                      </span>
+                    ))}
                   </div>
                 )}
               </div>

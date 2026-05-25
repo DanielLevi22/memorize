@@ -5,7 +5,7 @@ import { parseCSV } from '../utils/csv';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { Upload, AlertTriangle } from 'lucide-react';
+import { Upload, AlertTriangle, Plus, Layers } from 'lucide-react';
 import JSZip from 'jszip';
 
 interface ImportModalProps {
@@ -43,10 +43,10 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [fileName, setFileName] = useState('');
   const [parsedData, setParsedData] = useState<string[][]>([]);
   const [skipHeader, setSkipHeader] = useState(true);
+  const [importDestinationMode, setImportDestinationMode] = useState<'create' | 'append'>('create');
   const [selectedDeckId, setSelectedDeckId] = useState<string>('');
   const [newDeckName, setNewDeckName] = useState('');
   const [newDeckDesc, setNewDeckDesc] = useState('');
-  const [isCreatingDeck, setIsCreatingDeck] = useState(false);
 
   // Estados específicos de APKG
   const [isApkg, setIsApkg] = useState(false);
@@ -78,7 +78,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       setJsonFileName('');
       setJsonContent('');
       setIsImporting(false);
-      setIsCreatingDeck(false);
+      setImportDestinationMode('create');
       setNewDeckName('');
       setNewDeckDesc('');
       setIsApkg(false);
@@ -88,19 +88,10 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       if (decks && decks.length > 0) {
         setSelectedDeckId(decks[0].id);
       } else {
-        setSelectedDeckId('new-deck');
-        setIsCreatingDeck(true);
+        setSelectedDeckId('');
       }
     }
   }, [isOpen, decks]);
-
-  useEffect(() => {
-    if (selectedDeckId === 'new-deck') {
-      setIsCreatingDeck(true);
-    } else {
-      setIsCreatingDeck(false);
-    }
-  }, [selectedDeckId]);
 
   // --- PARSEAR ARQUIVO CSV/TXT OU APKG ---
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -144,6 +135,31 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
         const dbBuffer = await dbFile.async('uint8array');
         const db = new SQL.Database(dbBuffer);
+
+        // Tentar extrair o nome do baralho do SQLite do Anki
+        let extractedDeckName = '';
+        try {
+          const colDecksResult = db.exec("SELECT decks FROM col");
+          if (colDecksResult.length > 0 && colDecksResult[0].values.length > 0) {
+            const decksJsonStr = colDecksResult[0].values[0][0] as string;
+            const decksObj = JSON.parse(decksJsonStr);
+            const deckNames = Object.values(decksObj)
+              .map((d: any) => d.name)
+              .filter(name => name && name.toLowerCase() !== 'default');
+            if (deckNames.length > 0) {
+              const rawName = deckNames[0];
+              const parts = rawName.split('::');
+              extractedDeckName = parts[parts.length - 1];
+            }
+          }
+        } catch (err) {
+          console.warn("Falha ao extrair nome do baralho das tabelas do Anki", err);
+        }
+
+        if (!extractedDeckName) {
+          extractedDeckName = file.name.replace(/\.apkg$/i, '');
+        }
+        setNewDeckName(extractedDeckName);
 
         // 5. Ler timestamp de criação para converter devidamente o vencimento
         let crt = 0;
@@ -253,6 +269,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       }
     } else {
       setIsApkg(false);
+      const cleanFileName = file.name.replace(/\.(csv|txt)$/i, '');
+      setNewDeckName(cleanFileName);
       const reader = new FileReader();
       reader.onload = (event) => {
         const text = event.target?.result as string;
@@ -314,12 +332,17 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
     try {
       setIsImporting(true);
-      let targetDeckId = selectedDeckId;
+      let targetDeckId = '';
       const todayStr = new Date().toISOString().split('T')[0];
 
-      // Se for para criar um novo deck
-      if (selectedDeckId === 'new-deck') {
-        const deckNameClean = newDeckName.trim() || 'Novo Deck Importado';
+      if (importDestinationMode === 'create') {
+        const deckNameClean = newDeckName.trim();
+        if (!deckNameClean) {
+          alert('Por favor, digite o nome do novo baralho.');
+          setIsImporting(false);
+          return;
+        }
+
         const newDeck: Deck = {
           id: crypto.randomUUID(),
           name: '📚 ' + deckNameClean.replace(/^[📚📁]\s*/, ''),
@@ -329,6 +352,13 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         };
         await db.decks.add(newDeck);
         targetDeckId = newDeck.id;
+      } else {
+        if (!selectedDeckId) {
+          alert('Por favor, selecione um baralho existente para anexar os cartões.');
+          setIsImporting(false);
+          return;
+        }
+        targetDeckId = selectedDeckId;
       }
 
       const startIndex = isApkg ? 0 : (skipHeader ? 1 : 0);
@@ -585,33 +615,98 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   )}
                 </div>
 
-                {/* Seleção do Deck de Destino */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-xs font-bold text-muted-foreground">Deck de Destino</label>
-                    <select
-                      className="bg-background border border-border text-foreground px-3 py-1.5 rounded-lg text-xs font-semibold outline-none cursor-pointer focus:border-primary w-full h-9"
-                      value={selectedDeckId}
-                      onChange={(e) => setSelectedDeckId(e.target.value)}
+                {/* Destino da Importação (Anexar ou Criar Novo) */}
+                <div className="space-y-3.5">
+                  <label className="text-xs font-bold text-muted-foreground block">
+                    Onde deseja salvar os cartões?
+                  </label>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Opção Criar Novo Baralho */}
+                    <button
+                      type="button"
+                      onClick={() => setImportDestinationMode('create')}
+                      className={`flex items-start gap-3 p-3 rounded-xl border text-left cursor-pointer transition-all duration-200 ${
+                        importDestinationMode === 'create'
+                          ? 'border-primary bg-primary/5 text-foreground ring-1 ring-primary'
+                          : 'border-border bg-background hover:bg-muted/40 text-muted-foreground hover:text-foreground'
+                      }`}
                     >
-                      {decks.map(deck => (
-                        <option key={deck.id} value={deck.id}>{deck.name}</option>
-                      ))}
-                      <option value="new-deck">+ [Criar Novo Deck]</option>
-                    </select>
+                      <div className={`p-2 rounded-lg shrink-0 ${
+                        importDestinationMode === 'create' ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground'
+                      }`}>
+                        <Plus size={16} />
+                      </div>
+                      <div className="space-y-0.5">
+                        <span className="text-xs font-bold block text-foreground">Criar novo baralho</span>
+                        <span className="text-[10px] leading-snug block text-muted-foreground">
+                          Cria um baralho novo com o nome do arquivo ou conteúdo.
+                        </span>
+                      </div>
+                    </button>
+
+                    {/* Opção Anexar a Existente */}
+                    <button
+                      type="button"
+                      disabled={!decks || decks.length === 0}
+                      onClick={() => setImportDestinationMode('append')}
+                      className={`flex items-start gap-3 p-3 rounded-xl border text-left cursor-pointer transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
+                        importDestinationMode === 'append'
+                          ? 'border-primary bg-primary/5 text-foreground ring-1 ring-primary'
+                          : 'border-border bg-background hover:bg-muted/40 text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      <div className={`p-2 rounded-lg shrink-0 ${
+                        importDestinationMode === 'append' ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground'
+                      }`}>
+                        <Layers size={16} />
+                      </div>
+                      <div className="space-y-0.5">
+                        <span className="text-xs font-bold block text-foreground">Anexar a baralho existente</span>
+                        <span className="text-[10px] leading-snug block text-muted-foreground">
+                          Adiciona os cartões importados a um baralho existente.
+                        </span>
+                      </div>
+                    </button>
                   </div>
 
-                  {isCreatingDeck && (
-                    <div className="flex flex-col gap-1.5 animate-in fade-in duration-200">
-                      <label className="text-xs font-bold text-muted-foreground">Nome do Novo Deck *</label>
-                      <Input
-                        type="text"
-                        placeholder="Nome do deck..."
-                        className="bg-background border-border text-foreground focus-visible:ring-primary focus-visible:border-primary text-xs h-9"
-                        value={newDeckName}
-                        onChange={(e) => setNewDeckName(e.target.value)}
-                        required={isCreatingDeck}
-                      />
+                  {importDestinationMode === 'create' ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 animate-in fade-in slide-in-from-top-1 duration-200">
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-xs font-bold text-muted-foreground">Nome do Novo Baralho *</label>
+                        <Input
+                          type="text"
+                          placeholder="Nome do baralho..."
+                          className="bg-background border-border text-foreground focus-visible:ring-primary focus-visible:border-primary text-xs h-9"
+                          value={newDeckName}
+                          onChange={(e) => setNewDeckName(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-xs font-bold text-muted-foreground">Descrição (Opcional)</label>
+                        <Input
+                          type="text"
+                          placeholder="Descrição do baralho..."
+                          className="bg-background border-border text-foreground focus-visible:ring-primary focus-visible:border-primary text-xs h-9"
+                          value={newDeckDesc}
+                          onChange={(e) => setNewDeckDesc(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-1.5 pt-1 animate-in fade-in slide-in-from-top-1 duration-200">
+                      <label className="text-xs font-bold text-muted-foreground">Selecionar Baralho Existente *</label>
+                      <select
+                        className="bg-background border border-border text-foreground px-3 py-1.5 rounded-lg text-xs font-semibold outline-none cursor-pointer focus:border-primary w-full h-9"
+                        value={selectedDeckId}
+                        onChange={(e) => setSelectedDeckId(e.target.value)}
+                        required
+                      >
+                        {decks.map(deck => (
+                          <option key={deck.id} value={deck.id}>{deck.name}</option>
+                        ))}
+                      </select>
                     </div>
                   )}
                 </div>
