@@ -41,6 +41,7 @@ const ChartContainer = React.forwardRef<
     <ChartContext.Provider value={{ config }}>
       <div
         ref={ref}
+        data-chart={chartId}
         style={
           {
             "--color-chart-1": "var(--chart-1)",

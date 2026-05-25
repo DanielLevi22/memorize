@@ -960,10 +960,10 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
               accuracy: { label: "Acurácia (%)", color: "#10b981" }
             }}
           >
-            <ComposedChart data={reviewsHistoryData.chartData} margin={{ top: 10, right: -15, left: -25, bottom: 0 }}>
+            <ComposedChart data={reviewsHistoryData.chartData} margin={{ top: 10, right: 25, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} />
-              <YAxis yAxisId="left" tickLine={false} axisLine={false} tickMargin={8} />
+              <YAxis yAxisId="left" tickLine={false} axisLine={false} tickMargin={8} domain={[0, 'auto']} />
               <YAxis yAxisId="right" orientation="right" tickLine={false} axisLine={false} tickMargin={8} domain={[0, 100]} tickFormatter={(val) => `${val}%`} />
               <ChartTooltip content={<ChartTooltipContent formatter={(value: any, name: string) => (name === 'accuracy' || name === 'Acurácia (%)') ? `${value}%` : value} />} />
               <Bar yAxisId="left" dataKey="value" fill="var(--color-value)" radius={[4, 4, 0, 0]} />
@@ -1230,11 +1230,11 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
 
         <div className="h-64 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={hourlyDistributionData} margin={{ top: 10, right: -15, left: -25, bottom: 0 }}>
+            <ComposedChart data={hourlyDistributionData} margin={{ top: 10, right: 25, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="hour" tickLine={false} axisLine={false} tickMargin={8} />
-              <YAxis yAxisId="left" tickLine={false} axisLine={false} tickMargin={8} />
-              <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tickLine={false} axisLine={false} tickMargin={8} />
+              <YAxis yAxisId="left" tickLine={false} axisLine={false} tickMargin={8} domain={[0, 'auto']} />
+              <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tickLine={false} axisLine={false} tickMargin={8} tickFormatter={(val) => `${val}%`} />
               <RechartsTooltip />
               <Bar yAxisId="left" dataKey="Quantidade" fill="#3b82f6" radius={[3, 3, 0, 0]} barSize={20} />
               <Line yAxisId="right" type="monotone" dataKey="Aprovação (%)" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} />
