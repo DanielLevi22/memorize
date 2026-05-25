@@ -35,6 +35,9 @@ interface StudyArenaProps {
   onCancel: () => void;
   onFinishSession: (studiedCount: number) => void;
   studyMode?: 'classic' | 'writing' | 'speaking';
+  ttsRate?: number;
+  ttsVoice?: string;
+  autoPlayAudio?: boolean;
 }
 
 export const StudyArena: React.FC<StudyArenaProps> = ({
@@ -43,7 +46,10 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
   onGradeCard,
   onCancel,
   onFinishSession,
-  studyMode = 'classic'
+  studyMode = 'classic',
+  ttsRate = 1.0,
+  ttsVoice = '',
+  autoPlayAudio = true
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
@@ -75,6 +81,17 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
     const cleanText = stripHtmlTags(text);
     const utterance = new SpeechSynthesisUtterance(cleanText);
     utterance.lang = lang === 'en' ? 'en-US' : 'pt-BR';
+    utterance.rate = ttsRate;
+
+    // Apply selected voice if configured
+    if (ttsVoice) {
+      const voices = window.speechSynthesis.getVoices();
+      const matched = voices.find(v => v.name === ttsVoice);
+      if (matched) {
+        utterance.voice = matched;
+        utterance.lang = matched.lang;
+      }
+    }
     
     setIsPlaying(true);
     utterance.onend = () => {
@@ -121,17 +138,19 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
           url = URL.createObjectURL(currentCard.audio);
           setAudioUrl(url);
 
-          const audio = new Audio(url);
-          activeAudioRef.current = audio;
-          setIsPlaying(true);
-          audio.play().catch(e => {
-            console.log("Auto-play impedido pelo navegador ou erro:", e);
-            setIsPlaying(false);
-          });
+          if (autoPlayAudio) {
+            const audio = new Audio(url);
+            activeAudioRef.current = audio;
+            setIsPlaying(true);
+            audio.play().catch(e => {
+              console.log("Auto-play impedido pelo navegador ou erro:", e);
+              setIsPlaying(false);
+            });
 
-          audio.onended = () => {
-            setIsPlaying(false);
-          };
+            audio.onended = () => {
+              setIsPlaying(false);
+            };
+          }
         } catch (err) {
           console.error("Erro ao carregar áudio:", err);
           setIsPlaying(false);
@@ -139,8 +158,10 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
       } else {
         setAudioUrl(null);
         setIsPlaying(false);
-        // Auto-play do TTS em inglês
-        speakText(currentCard.front, 'en');
+        // Auto-play do TTS em inglês (only when enabled)
+        if (autoPlayAudio) {
+          speakText(currentCard.front, 'en');
+        }
       }
     }
 

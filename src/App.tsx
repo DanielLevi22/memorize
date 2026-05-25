@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { 
   Flame, Plus, Sparkles, Menu, User, 
   Search, Settings, Sun, Moon,
-  ChevronLeft, LayoutDashboard, TrendingUp, HelpCircle
+  ChevronLeft, LayoutDashboard, TrendingUp, HelpCircle, ClipboardList
 } from 'lucide-react';
 
 // Banco de Dados e Types
@@ -19,6 +19,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { CardsPage } from './pages/CardsPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { SettingsPage } from './pages/SettingsPage';
+import { HistoryPage } from './pages/HistoryPage';
 
 // Componentes do Projeto
 import { DeckModal } from './components/DeckModal';
@@ -62,7 +63,7 @@ function App() {
   // --- ESTADO DA SIDEBAR E NAVEGAÇÃO INTERNA ---
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDesktopSidebarOpen, setIsDesktopSidebarOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'algorithms'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'algorithms' | 'history'>('dashboard');
   const [searchTerm, setSearchTerm] = useState('');
 
   const toggleSidebar = () => {
@@ -73,7 +74,7 @@ function App() {
     }
   };
   
-  // --- ESTADO DE CONFIGURAÇÕES PERSISTIDAS E FICTÍCIAS ---
+  // --- ESTADO DE CONFIGURAÇÕES PERSISTIDAS ---
   const [selectedAlgo, setSelectedAlgo] = useState<'SM-2' | 'FSRS'>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('memorize_algo');
@@ -82,6 +83,45 @@ function App() {
     return 'SM-2';
   });
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+
+  // --- CONFIGURAÇÕES DE TTS E ÁUDIO ---
+  const [ttsRate, setTtsRate] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('memorize_tts_rate');
+      return saved ? parseFloat(saved) : 1.0;
+    }
+    return 1.0;
+  });
+
+  const [ttsVoice, setTtsVoice] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('memorize_tts_voice') || '';
+    }
+    return '';
+  });
+
+  const [autoPlayAudio, setAutoPlayAudio] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('memorize_auto_play_audio');
+      return saved !== 'false';
+    }
+    return true;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('memorize_tts_rate', ttsRate.toString());
+  }, [ttsRate]);
+
+  useEffect(() => {
+    localStorage.setItem('memorize_tts_voice', ttsVoice);
+  }, [ttsVoice]);
+
+  useEffect(() => {
+    localStorage.setItem('memorize_auto_play_audio', autoPlayAudio.toString());
+  }, [autoPlayAudio]);
+
+  // --- ESTADOS DE SESSÃO CRAM (REFORÇO) ---
+  const [cramSessionCards, setCramSessionCards] = useState<Card[] | null>(null);
 
   // --- ESTADOS DE MODAIS ---
   const [isDeckModalOpen, setIsDeckModalOpen] = useState(false);
@@ -295,6 +335,10 @@ function App() {
   };
 
   const handleGradeCard = async (card: Card, rating: number) => {
+    if (cramSessionCards) {
+      // Sessão Cram não altera agendamento nem registra revisão
+      return;
+    }
     const nextFields = calculateNextReview(card, rating);
     await db.cards.update(card.id, {
       ...nextFields,
@@ -316,6 +360,7 @@ function App() {
     setStreak(updatedStreak.currentStreak);
     setSessionCardsStudied(studiedCount);
     setCurrentView('congrats');
+    setCramSessionCards(null);
   };
 
   // --- EXPORTAÇÃO E BACKUP ---
@@ -440,20 +485,29 @@ function App() {
   };
 
   // --- FLUXO NAVEGAÇÃO SIDEBAR ---
-  const handleNavigateFromSidebar = (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'algorithms') => {
+  const handleNavigateFromSidebar = (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'algorithms' | 'history') => {
     setActiveTab(tab);
     setCurrentView('dashboard');
     setIsSidebarOpen(false);
   };
 
-  const cardsToStudy = cards && selectedDeckId
-    ? cards.filter(c => {
-        const matchesDeck = c.deckId === selectedDeckId;
-        const matchesDue = c.interval === 0 || c.dueDate <= todayStr;
-        const matchesTags = selectedStudyTags.length === 0 || (c.tags && c.tags.some(t => selectedStudyTags.includes(t)));
-        return matchesDeck && matchesDue && matchesTags;
-      })
-    : [];
+  const handleStartCramSession = (cramCards: Card[]) => {
+    setCramSessionCards(cramCards);
+    setSessionCardsStudied(0);
+    setSelectedStudyMode('classic');
+    setCurrentView('study');
+  };
+
+  const cardsToStudy = cramSessionCards 
+    ? cramSessionCards
+    : (cards && selectedDeckId
+        ? cards.filter(c => {
+            const matchesDeck = c.deckId === selectedDeckId;
+            const matchesDue = c.interval === 0 || c.dueDate <= todayStr;
+            const matchesTags = selectedStudyTags.length === 0 || (c.tags && c.tags.some(t => selectedStudyTags.includes(t)));
+            return matchesDeck && matchesDue && matchesTags;
+          })
+        : []);
 
   const selectedDeck = decks?.find(d => d.id === selectedDeckId);
 
@@ -657,6 +711,24 @@ function App() {
             <Button 
               variant="ghost"
               className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+                activeTab === 'history' 
+                  ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+              }`}
+              onClick={() => {
+                setActiveTab('history');
+                setCurrentView('dashboard');
+              }}
+            >
+              <div className="flex items-center gap-3">
+                <ClipboardList size={16} />
+                <span>Histórico</span>
+              </div>
+            </Button>
+
+            <Button 
+              variant="ghost"
+              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
                 activeTab === 'algorithms' 
                   ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
@@ -788,6 +860,21 @@ function App() {
                     <div className="flex items-center gap-3">
                       <Settings size={16} />
                       <span>Configurações</span>
+                    </div>
+                  </Button>
+
+                  <Button 
+                    variant="ghost"
+                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+                      activeTab === 'history' 
+                        ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                    }`}
+                    onClick={() => handleNavigateFromSidebar('history')}
+                  >
+                    <div className="flex items-center gap-3">
+                      <ClipboardList size={16} />
+                      <span>Histórico</span>
                     </div>
                   </Button>
 
@@ -955,6 +1042,20 @@ function App() {
                 setCurrentView={setCurrentView}
                 deferredPrompt={deferredPrompt}
                 handleInstallApp={handleInstallApp}
+                ttsRate={ttsRate}
+                setTtsRate={setTtsRate}
+                ttsVoice={ttsVoice}
+                setTtsVoice={setTtsVoice}
+                autoPlayAudio={autoPlayAudio}
+                setAutoPlayAudio={setAutoPlayAudio}
+              />
+            )}
+
+            {/* TAB 5: HISTÓRICO */}
+            {activeTab === 'history' && (
+              <HistoryPage
+                cards={cards}
+                onStartCramSession={handleStartCramSession}
               />
             )}
 
@@ -983,15 +1084,19 @@ function App() {
         {currentView === 'study' && (
           <main className="flex-1 p-5 overflow-y-auto w-full max-w-5xl mx-auto flex flex-col justify-center">
             <StudyArena
-              deckName={selectedDeck ? selectedDeck.name : ''}
+              deckName={selectedDeck ? selectedDeck.name : 'Sessão de Reforço'}
               cardsToStudy={cardsToStudy}
               onGradeCard={handleGradeCard}
               onCancel={() => {
                 setCurrentView('dashboard');
                 setSelectedDeckId(null);
+                setCramSessionCards(null);
               }}
               onFinishSession={handleFinishStudySession}
               studyMode={selectedStudyMode}
+              ttsRate={ttsRate}
+              ttsVoice={ttsVoice}
+              autoPlayAudio={autoPlayAudio}
             />
           </main>
         )}
@@ -1005,6 +1110,7 @@ function App() {
               onBackToDashboard={() => {
                 setCurrentView('dashboard');
                 setSelectedDeckId(null);
+                setCramSessionCards(null);
               }}
             />
           </main>

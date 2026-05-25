@@ -1,5 +1,5 @@
-import React from 'react';
-import { HelpCircle, Download, Upload, Trash2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { HelpCircle, Download, Upload, Trash2, Volume2 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import type { Card } from '../types';
 
@@ -18,6 +18,13 @@ interface SettingsPageProps {
   setCurrentView: (view: "dashboard" | "study" | "congrats") => void;
   deferredPrompt: any;
   handleInstallApp: () => void;
+  // TTS
+  ttsRate: number;
+  setTtsRate: (rate: number) => void;
+  ttsVoice: string;
+  setTtsVoice: (voice: string) => void;
+  autoPlayAudio: boolean;
+  setAutoPlayAudio: (v: boolean) => void;
 }
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({
@@ -34,8 +41,42 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   setActiveTab,
   setCurrentView,
   deferredPrompt,
-  handleInstallApp
+  handleInstallApp,
+  ttsRate,
+  setTtsRate,
+  ttsVoice,
+  setTtsVoice,
+  autoPlayAudio,
+  setAutoPlayAudio,
 }) => {
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+
+  useEffect(() => {
+    const loadVoices = () => {
+      const all = window.speechSynthesis?.getVoices() ?? [];
+      // Show English voices first, then all others
+      const sorted = [
+        ...all.filter(v => v.lang.startsWith('en')),
+        ...all.filter(v => !v.lang.startsWith('en')),
+      ];
+      setVoices(sorted);
+    };
+    loadVoices();
+    window.speechSynthesis?.addEventListener('voiceschanged', loadVoices);
+    return () => window.speechSynthesis?.removeEventListener('voiceschanged', loadVoices);
+  }, []);
+
+  const previewVoice = () => {
+    window.speechSynthesis?.cancel();
+    const utt = new SpeechSynthesisUtterance('This is how I sound. Keep going!');
+    utt.rate = ttsRate;
+    if (ttsVoice) {
+      const matched = voices.find(v => v.name === ttsVoice);
+      if (matched) { utt.voice = matched; utt.lang = matched.lang; }
+    }
+    window.speechSynthesis?.speak(utt);
+  };
+
   return (
     <div className="space-y-4 w-full max-w-none px-2 md:px-6">
       <h2 className="font-extrabold text-md text-foreground tracking-tight">⚙️ Configurações</h2>
@@ -101,6 +142,76 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             className="w-4 h-4 accent-primary bg-muted border-border rounded cursor-pointer"
             checked={notificationsEnabled}
             onChange={(e) => setNotificationsEnabled(e.target.checked)}
+          />
+        </div>
+      </div>
+
+      {/* TTS SETTINGS */}
+      <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/60 shadow-sm">
+        <div className="flex items-center justify-between px-4 pt-4 pb-2 bg-muted/20">
+          <div className="flex items-center gap-2">
+            <Volume2 size={12} className="text-primary" />
+            <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">
+              Voz &amp; Áudio (TTS)
+            </span>
+          </div>
+          <button
+            onClick={previewVoice}
+            className="text-[10px] font-bold text-primary hover:underline cursor-pointer"
+          >
+            Prévia de voz ▶
+          </button>
+        </div>
+
+        {/* Rate slider */}
+        <div className="flex items-center justify-between p-4 bg-card gap-4">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-sm font-semibold text-foreground">Velocidade da Fala</span>
+            <span className="text-[11px] text-muted-foreground">Taxa da síntese de voz (TTS)</span>
+          </div>
+          <div className="flex items-center gap-3 flex-shrink-0">
+            <input
+              type="range"
+              min="0.5" max="2" step="0.1"
+              value={ttsRate}
+              onChange={e => setTtsRate(parseFloat(e.target.value))}
+              className="w-28 accent-primary cursor-pointer"
+            />
+            <span className="text-xs font-black text-primary w-8 text-right">{ttsRate.toFixed(1)}x</span>
+          </div>
+        </div>
+
+        {/* Voice selector */}
+        <div className="flex items-center justify-between p-4 bg-card gap-4">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-sm font-semibold text-foreground">Voz / Sotaque</span>
+            <span className="text-[11px] text-muted-foreground">Escolha entre as vozes do seu dispositivo</span>
+          </div>
+          <select
+            className="bg-muted border border-border text-foreground px-3 py-1.5 rounded-lg text-xs font-semibold outline-none cursor-pointer focus:border-muted-foreground/45 max-w-[200px]"
+            value={ttsVoice}
+            onChange={e => setTtsVoice(e.target.value)}
+          >
+            <option value="">Padrão do navegador</option>
+            {voices.map(v => (
+              <option key={v.name} value={v.name}>
+                {v.name} ({v.lang})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Autoplay toggle */}
+        <div className="flex items-center justify-between p-4 bg-card">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-sm font-semibold text-foreground">Reproduzir Áudio Automaticamente</span>
+            <span className="text-[11px] text-muted-foreground">Tocar áudio ao exibir cada cartão</span>
+          </div>
+          <input
+            type="checkbox"
+            className="w-4 h-4 accent-primary bg-muted border-border rounded cursor-pointer"
+            checked={autoPlayAudio}
+            onChange={e => setAutoPlayAudio(e.target.checked)}
           />
         </div>
       </div>
