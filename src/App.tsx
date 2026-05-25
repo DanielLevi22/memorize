@@ -140,6 +140,19 @@ function App() {
     localStorage.setItem('memorize_gemini_api_key', geminiApiKey);
   }, [geminiApiKey]);
 
+  // --- CONFIGURAÇÃO DE META DIÁRIA ---
+  const [dailyGoal, setDailyGoal] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('memorize_daily_goal');
+      return saved ? parseInt(saved, 10) : 20;
+    }
+    return 20;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('memorize_daily_goal', dailyGoal.toString());
+  }, [dailyGoal]);
+
   // --- ESTADOS DE SESSÃO CRAM (REFORÇO) ---
   const [cramSessionCards, setCramSessionCards] = useState<Card[] | null>(null);
 
@@ -1081,6 +1094,7 @@ function App() {
                 handleDeleteDeck={handleDeleteDeck}
                 stats={stats}
                 handleOpenAiModal={() => setIsAiModalOpen(true)}
+                dailyGoal={dailyGoal}
               />
             )}
 
@@ -1148,6 +1162,8 @@ function App() {
                 getNotificationPermission={getNotificationPermission}
                 geminiApiKey={geminiApiKey}
                 setGeminiApiKey={setGeminiApiKey}
+                dailyGoal={dailyGoal}
+                setDailyGoal={setDailyGoal}
               />
             )}
 
@@ -1207,6 +1223,8 @@ function App() {
             <CongratsScreen
               streak={streak}
               cardsStudied={sessionCardsStudied}
+              dailyGoal={dailyGoal}
+              studiedTodayCount={stats.count}
               onBackToDashboard={() => {
                 setCurrentView('dashboard');
                 setSelectedDeckId(null);

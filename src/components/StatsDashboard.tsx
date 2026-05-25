@@ -44,7 +44,7 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
   const [forecastHorizon, setForecastHorizon] = useState<'1m' | '3m' | '1y' | 'all'>('1m');
   const [forecastAccumulated, setForecastAccumulated] = useState<boolean>(false);
 
-  const [reviewsPeriod, setReviewsPeriod] = useState<'1m' | '3m' | '1y'>('1m');
+  const [reviewsPeriod, setReviewsPeriod] = useState<'7d' | '1m' | '3m' | '1y'>('1m');
   const [reviewsType, setReviewsType] = useState<'count' | 'time'>('count');
 
   const [easeScope] = useState<'all' | 'mature'>('all');
@@ -240,7 +240,7 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
 
   // --- 4. REVISÕES (HISTÓRICO) ---
   const reviewsHistoryData = useMemo(() => {
-    const limitDays = reviewsPeriod === '1m' ? 30 : reviewsPeriod === '3m' ? 90 : 365;
+    const limitDays = reviewsPeriod === '7d' ? 7 : reviewsPeriod === '1m' ? 30 : reviewsPeriod === '3m' ? 90 : 365;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -289,9 +289,14 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
 
     const chartData = datesList.map(dateStr => {
       const formattedDate = dateStr.substring(8, 10) + '/' + dateStr.substring(5, 7);
+      const dayRevs = revsByDay[dateStr] || [];
+      const correctCount = dayRevs.filter(r => r.rating > 1).length;
+      const totalCount = dayRevs.length;
+      const accuracy = totalCount > 0 ? Math.round((correctCount / totalCount) * 100) : null;
       return {
         date: formattedDate,
-        value: reviewsType === 'count' ? counts[dateStr] : times[dateStr]
+        value: reviewsType === 'count' ? counts[dateStr] : times[dateStr],
+        accuracy
       };
     });
 
@@ -940,22 +945,30 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
               value={reviewsPeriod}
               onChange={(e) => setReviewsPeriod(e.target.value as any)}
             >
-              <option value="1m">1 Mês</option>
-              <option value="3m">3 Meses</option>
+              <option value="7d">7 Dias</option>
+              <option value="1m">30 Dias</option>
+              <option value="3m">90 Dias</option>
               <option value="1y">1 Ano</option>
             </select>
           </div>
         </div>
 
         <div className="h-64 w-full">
-          <ChartContainer config={{ "value": { label: reviewsType === 'count' ? "Revisões" : "Minutos", color: "#3b82f6" } }}>
-            <BarChart data={reviewsHistoryData.chartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+          <ChartContainer 
+            config={{ 
+              value: { label: reviewsType === 'count' ? "Revisões" : "Minutos", color: "#3b82f6" },
+              accuracy: { label: "Acurácia (%)", color: "#10b981" }
+            }}
+          >
+            <ComposedChart data={reviewsHistoryData.chartData} margin={{ top: 10, right: -15, left: -25, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} />
-              <YAxis tickLine={false} axisLine={false} tickMargin={8} />
-              <ChartTooltip content={<ChartTooltipContent />} />
-              <Bar dataKey="value" fill="var(--color-value)" radius={[4, 4, 0, 0]} />
-            </BarChart>
+              <YAxis yAxisId="left" tickLine={false} axisLine={false} tickMargin={8} />
+              <YAxis yAxisId="right" orientation="right" tickLine={false} axisLine={false} tickMargin={8} domain={[0, 100]} tickFormatter={(val) => `${val}%`} />
+              <ChartTooltip content={<ChartTooltipContent formatter={(value: any, name: string) => (name === 'accuracy' || name === 'Acurácia (%)') ? `${value}%` : value} />} />
+              <Bar yAxisId="left" dataKey="value" fill="var(--color-value)" radius={[4, 4, 0, 0]} />
+              <Line yAxisId="right" type="monotone" dataKey="accuracy" stroke="var(--color-accuracy)" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls />
+            </ComposedChart>
           </ChartContainer>
         </div>
 

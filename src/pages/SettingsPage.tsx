@@ -31,6 +31,9 @@ interface SettingsPageProps {
   // Gemini API Key
   geminiApiKey: string;
   setGeminiApiKey: (key: string) => void;
+  // Daily Goal
+  dailyGoal: number;
+  setDailyGoal: (goal: number) => void;
 }
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({
@@ -58,6 +61,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   getNotificationPermission,
   geminiApiKey,
   setGeminiApiKey,
+  dailyGoal,
+  setDailyGoal,
 }) => {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [notifPermission, setNotifPermission] = useState<NotificationPermission | 'unsupported'>(() => getNotificationPermission());
@@ -160,6 +165,25 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             >
               <HelpCircle size={16} />
             </Button>
+          </div>
+        </div>
+
+        {/* Meta Diária */}
+        <div className="flex items-center justify-between p-4 bg-card">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-sm font-semibold text-foreground">Meta Diária de Cards</span>
+            <span className="text-[11px] text-muted-foreground">Quantidade de cartões para estudar por dia</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <input 
+              type="number"
+              min="1"
+              max="500"
+              className="bg-muted border border-border text-foreground px-2 py-1 rounded-lg text-xs font-bold outline-none cursor-pointer focus:border-muted-foreground/45 w-16 text-center h-9"
+              value={dailyGoal}
+              onChange={(e) => setDailyGoal(Math.max(1, parseInt(e.target.value, 10) || 1))}
+            />
+            <span className="text-xs text-muted-foreground font-semibold">cards</span>
           </div>
         </div>
 

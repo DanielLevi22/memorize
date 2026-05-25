@@ -26,6 +26,7 @@ interface DashboardPageProps {
     sPerCard: number;
   };
   handleOpenAiModal: () => void;
+  dailyGoal: number;
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
@@ -46,6 +47,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   handleDeleteDeck,
   stats,
   handleOpenAiModal,
+  dailyGoal,
 }) => {
   return (
     <div className="space-y-6 w-full max-w-none px-2 md:px-6">
@@ -63,6 +65,48 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           <div className="font-black text-2xl text-emerald-500 tracking-tight">{totalLearned}</div>
           <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mt-0.5">Ok</div>
         </ShadcnCard>
+      </section>
+
+      {/* Barra de Progresso da Meta Diária */}
+      <section className="bg-card border border-border p-4.5 rounded-2xl shadow-sm relative overflow-hidden">
+        {/* Glow de Meta Batida */}
+        {stats.count >= dailyGoal && (
+          <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/5 via-teal-500/5 to-emerald-500/5 animate-pulse pointer-events-none" />
+        )}
+        
+        <div className="flex items-center justify-between relative z-10">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">🎯</span>
+            <div className="flex flex-col">
+              <span className="text-sm font-bold text-foreground">Meta Diária</span>
+              <span className="text-[11px] text-muted-foreground font-semibold">
+                {stats.count >= dailyGoal 
+                  ? "Parabéns! Meta diária batida hoje. 🎉" 
+                  : "Mantenha o foco e complete sua meta diária!"}
+              </span>
+            </div>
+          </div>
+          <span className="text-xs font-black text-foreground">
+            {stats.count} / {dailyGoal} <span className="text-muted-foreground font-semibold">cards</span>
+          </span>
+        </div>
+        
+        <div className="mt-3.5 relative w-full h-3 bg-muted rounded-full overflow-hidden border border-border/40 z-10">
+          <div 
+            className={`h-full rounded-full transition-all duration-700 ease-out ${
+              stats.count >= dailyGoal 
+                ? 'bg-gradient-to-r from-emerald-500 to-teal-500 shadow-[0_0_10px_rgba(16,185,129,0.4)]' 
+                : 'bg-gradient-to-r from-blue-500 to-indigo-500'
+            }`}
+            style={{ width: `${Math.min(100, Math.round((stats.count / dailyGoal) * 100))}%` }}
+          />
+        </div>
+
+        {stats.count >= dailyGoal && (
+          <div className="mt-2 text-[10px] text-emerald-500 font-extrabold tracking-wide uppercase text-right relative z-10 flex items-center justify-end gap-1">
+            <span>✨</span> Meta Diária Batida!
+          </div>
+        )}
       </section>
 
       {/* Decks Section */}
