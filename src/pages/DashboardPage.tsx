@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Upload, Layers } from 'lucide-react';
+import { Plus, Upload, Layers, Sparkles } from 'lucide-react';
 import { Card as ShadcnCard } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import type { Deck, Card } from '../types';
@@ -25,6 +25,7 @@ interface DashboardPageProps {
     minutes: number;
     sPerCard: number;
   };
+  handleOpenAiModal: () => void;
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
@@ -43,7 +44,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   handleOpenEditDeckModal,
   handleExportDeck,
   handleDeleteDeck,
-  stats
+  stats,
+  handleOpenAiModal,
 }) => {
   return (
     <div className="space-y-6 w-full max-w-none px-2 md:px-6">
@@ -68,6 +70,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         <div className="flex items-center justify-between">
           <h2 className="font-extrabold text-md text-foreground tracking-tight">📁 Baralhos</h2>
           <div className="flex items-center gap-2">
+            <Button
+              variant="default"
+              size="sm"
+              className="text-xs h-8 font-bold bg-violet-600 text-zinc-50 hover:bg-violet-700 cursor-pointer rounded-xl gap-1.5 px-3 border-none shadow-sm shadow-violet-500/20"
+              onClick={handleOpenAiModal}
+              title="Gerar baralho inteligente com Inteligência Artificial"
+            >
+              <Sparkles size={13} /> Gerar com IA
+            </Button>
             <Button
               variant="default"
               size="sm"

@@ -31,6 +31,8 @@ import { ImportModal } from './components/ImportModal';
 import { StatsDashboard } from './components/StatsDashboard';
 import { SrsAlgorithmsDocs } from './components/SrsAlgorithmsDocs';
 import { GlobalSearch } from './components/GlobalSearch';
+import { AiGeneratorModal } from './components/AiGeneratorModal';
+import { getTagColors } from './utils/tagColors';
 
 // Utilitários
 import { setupNotifications, requestNotificationPermission, getNotificationPermission, clearAppBadge } from './utils/notifications';
@@ -123,6 +125,20 @@ function App() {
   useEffect(() => {
     localStorage.setItem('memorize_auto_play_audio', autoPlayAudio.toString());
   }, [autoPlayAudio]);
+
+  // --- ESTADO API GEMINI ---
+  const [geminiApiKey, setGeminiApiKey] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('memorize_gemini_api_key') || '';
+    }
+    return '';
+  });
+
+  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('memorize_gemini_api_key', geminiApiKey);
+  }, [geminiApiKey]);
 
   // --- ESTADOS DE SESSÃO CRAM (REFORÇO) ---
   const [cramSessionCards, setCramSessionCards] = useState<Card[] | null>(null);
@@ -504,6 +520,44 @@ function App() {
       alert("Dados limpos com sucesso! O aplicativo será reiniciado.");
       window.location.reload();
     }
+  };
+
+  // --- IMPORTAR CARDS GERADOS POR IA ---
+  const handleImportGeneratedCards = async (
+    deckNameOrId: string,
+    isNewDeck: boolean,
+    newDeckDescription: string,
+    cardsList: Array<{ front: string; back: string; context: string }>
+  ) => {
+    let deckId = deckNameOrId;
+
+    if (isNewDeck) {
+      deckId = crypto.randomUUID();
+      await db.decks.add({
+        id: deckId,
+        name: deckNameOrId,
+        description: newDeckDescription,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      });
+    }
+
+    const newCards: Card[] = cardsList.map((c) => ({
+      id: crypto.randomUUID(),
+      deckId,
+      front: c.front,
+      back: c.back,
+      context: c.context,
+      interval: 0,
+      ease: 2.5,
+      repetitions: 0,
+      lapses: 0,
+      dueDate: todayStr,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    }));
+
+    await db.cards.bulkAdd(newCards);
   };
 
   // --- SINCRONIZAÇÃO ANKI SIMULADA ---
@@ -1026,6 +1080,7 @@ function App() {
                 handleExportDeck={handleExportDeck}
                 handleDeleteDeck={handleDeleteDeck}
                 stats={stats}
+                handleOpenAiModal={() => setIsAiModalOpen(true)}
               />
             )}
 
@@ -1091,6 +1146,8 @@ function App() {
                 setAutoPlayAudio={setAutoPlayAudio}
                 requestNotificationPermission={requestNotificationPermission}
                 getNotificationPermission={getNotificationPermission}
+                geminiApiKey={geminiApiKey}
+                setGeminiApiKey={setGeminiApiKey}
               />
             )}
 
@@ -1227,6 +1284,7 @@ function App() {
                   <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto p-2 border border-border rounded-xl bg-background/50">
                     {getDeckTags(deckToStudyId).map((tag) => {
                       const isSelected = selectedStudyTags.includes(tag);
+                      const colors = getTagColors(tag);
                       return (
                         <button
                           key={tag}
@@ -1240,8 +1298,8 @@ function App() {
                           }}
                           className={`text-xs px-2.5 py-1 rounded-full border transition-all duration-200 cursor-pointer ${
                             isSelected
-                              ? 'bg-primary border-primary text-primary-foreground font-semibold shadow-sm'
-                              : 'bg-muted/40 border-border hover:bg-muted text-muted-foreground hover:text-foreground'
+                              ? `${colors.bg} ${colors.text} border-2 ${colors.border} font-bold scale-105 shadow-sm`
+                              : 'bg-muted/30 border-border hover:bg-muted/60 text-muted-foreground hover:text-foreground'
                           }`}
                         >
                           #{tag}
@@ -1347,6 +1405,18 @@ function App() {
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
         decks={decks}
+      />
+
+      <AiGeneratorModal
+        isOpen={isAiModalOpen}
+        onClose={() => setIsAiModalOpen(false)}
+        geminiApiKey={geminiApiKey}
+        decks={decks}
+        onImportCards={handleImportGeneratedCards}
+        onNavigateToSettings={() => {
+          setActiveTab('settings');
+          setCurrentView('dashboard');
+        }}
       />
 
       {activeDeckMenuId && (

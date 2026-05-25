@@ -3,6 +3,7 @@ import { Search, Pencil, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
 import type { Card, Deck } from '../types';
+import { getTagColors } from '../utils/tagColors';
 
 interface CardsPageProps {
   cards: Card[] | undefined;
@@ -104,11 +105,14 @@ export const CardsPage: React.FC<CardsPageProps> = ({
                   )}
                   {card.tags && card.tags.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1.5">
-                      {card.tags.map((tag, tIdx) => (
-                        <span key={tIdx} className="text-[8px] font-semibold bg-primary/10 text-primary px-1.5 py-0.5 rounded border border-primary/20">
-                          #{tag}
-                        </span>
-                      ))}
+                      {card.tags.map((tag, tIdx) => {
+                        const colors = getTagColors(tag);
+                        return (
+                          <span key={tIdx} className={`text-[8px] font-bold px-1.5 py-0.5 rounded border ${colors.bg} ${colors.text} ${colors.border}`}>
+                            #{tag}
+                          </span>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

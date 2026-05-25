@@ -4,6 +4,7 @@ import type { Card } from '../types';
 import { getFriendlyInterval } from '../utils/srs';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
+import { getTagColors } from '../utils/tagColors';
 
 const stripHtmlTags = (str: string) => {
   if (!str) return '';
@@ -679,11 +680,14 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
               )}
               {currentCard.tags && currentCard.tags.length > 0 && (
                 <div className="flex flex-wrap justify-center gap-1 mt-1">
-                  {currentCard.tags.map((tag, tIdx) => (
-                    <span key={tIdx} className="text-[9px] font-semibold bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full">
-                      #{tag}
-                    </span>
-                  ))}
+                  {currentCard.tags.map((tag, tIdx) => {
+                    const colors = getTagColors(tag);
+                    return (
+                      <span key={tIdx} className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${colors.bg} ${colors.text} ${colors.border}`}>
+                        #{tag}
+                      </span>
+                    );
+                  })}
                 </div>
               )}
             </div>

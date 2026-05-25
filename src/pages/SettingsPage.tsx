@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { HelpCircle, Download, Upload, Trash2, Volume2 } from 'lucide-react';
+import { HelpCircle, Download, Upload, Trash2, Volume2, Eye, EyeOff, Sparkles, Key } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import type { Card } from '../types';
 
@@ -28,6 +28,9 @@ interface SettingsPageProps {
   // Notifications
   requestNotificationPermission: () => Promise<NotificationPermission>;
   getNotificationPermission: () => NotificationPermission | 'unsupported';
+  // Gemini API Key
+  geminiApiKey: string;
+  setGeminiApiKey: (key: string) => void;
 }
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({
@@ -53,9 +56,14 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   setAutoPlayAudio,
   requestNotificationPermission,
   getNotificationPermission,
+  geminiApiKey,
+  setGeminiApiKey,
 }) => {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [notifPermission, setNotifPermission] = useState<NotificationPermission | 'unsupported'>(() => getNotificationPermission());
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [localApiKey, setLocalApiKey] = useState('');
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   useEffect(() => {
     const loadVoices = () => {
@@ -81,6 +89,23 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       if (matched) { utt.voice = matched; utt.lang = matched.lang; }
     }
     window.speechSynthesis?.speak(utt);
+  };
+
+  const handleSaveApiKey = () => {
+    if (!localApiKey.trim()) return;
+    setGeminiApiKey(localApiKey.trim());
+    setLocalApiKey(''); // Limpa o campo
+    setSaveSuccess(true);
+    setTimeout(() => {
+      setSaveSuccess(false);
+    }, 3000);
+  };
+
+  const handleRemoveApiKey = () => {
+    if (window.confirm("Deseja remover sua Chave de API do Gemini? O recurso de IA ficará inativo.")) {
+      setGeminiApiKey('');
+      setLocalApiKey('');
+    }
   };
 
   return (
@@ -252,6 +277,97 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             checked={autoPlayAudio}
             onChange={e => setAutoPlayAudio(e.target.checked)}
           />
+        </div>
+      </div>
+
+      {/* GEMINI IA INTEGRATION */}
+      <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/60 shadow-sm">
+        <div className="flex items-center justify-between px-4 pt-4 pb-2 bg-muted/20">
+          <div className="flex items-center gap-2">
+            <Sparkles size={12} className="text-violet-500" />
+            <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">
+              Integração com Inteligência Artificial
+            </span>
+          </div>
+          <a
+            href="https://aistudio.google.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[10px] font-bold text-violet-500 hover:underline flex items-center gap-0.5"
+          >
+            Obter chave grátis ↗
+          </a>
+        </div>
+
+        <div className="p-4 bg-card space-y-3">
+          <div className="flex flex-col gap-1.5">
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                <Key size={14} className="text-muted-foreground" /> Chave de API do Gemini
+              </span>
+              <div className="flex items-center gap-3">
+                {geminiApiKey && (
+                  <span className="text-[10px] text-emerald-500 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                    Configurada ✅
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowApiKey(!showApiKey)}
+                  className="text-xs text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1 font-semibold"
+                >
+                  {showApiKey ? (
+                    <>
+                      <EyeOff size={13} /> Ocultar
+                    </>
+                  ) : (
+                    <>
+                      <Eye size={13} /> Revelar
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+            
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  type={showApiKey ? "text" : "password"}
+                  placeholder={geminiApiKey ? "•••••••••••••••• (Chave Salva - Digite para alterar)" : "Cole sua API Key do Gemini aqui..."}
+                  value={localApiKey}
+                  onChange={(e) => setLocalApiKey(e.target.value)}
+                  className="w-full bg-muted border border-border text-foreground px-3 py-2 rounded-xl text-xs outline-none focus:border-violet-500/50 pr-10 font-mono transition-colors"
+                />
+                <div className="absolute right-3 top-2.5 text-muted-foreground pointer-events-none">
+                  🔑
+                </div>
+              </div>
+              <Button
+                onClick={handleSaveApiKey}
+                disabled={!localApiKey.trim()}
+                className="bg-violet-600 hover:bg-violet-700 text-zinc-50 text-xs font-bold px-4 py-2 rounded-xl h-auto cursor-pointer flex-shrink-0"
+              >
+                Salvar
+              </Button>
+              {geminiApiKey && (
+                <Button
+                  onClick={handleRemoveApiKey}
+                  variant="outline"
+                  className="border-destructive/20 hover:bg-destructive/10 text-destructive text-xs font-bold px-3 py-2 rounded-xl h-auto cursor-pointer flex-shrink-0"
+                >
+                  Remover
+                </Button>
+              )}
+            </div>
+            {saveSuccess && (
+              <p className="text-[10px] text-emerald-500 font-bold animate-pulse">
+                ✅ Chave de API salva com sucesso!
+              </p>
+            )}
+            <p className="text-[10px] text-muted-foreground leading-relaxed mt-1">
+              Sua chave é salva <strong>somente no seu navegador (localStorage)</strong> de forma 100% segura e privada. Ela é enviada diretamente para a API oficial da Google para gerar os cartões.
+            </p>
+          </div>
         </div>
       </div>
 

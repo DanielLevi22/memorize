@@ -3,6 +3,7 @@ import type { Card } from '../types';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { Button } from './ui/button';
 import { Volume2, Eye } from 'lucide-react';
+import { getTagColors } from '../utils/tagColors';
 
 const stripHtmlTags = (str: string) => {
   if (!str) return '';
@@ -222,11 +223,14 @@ export const CardPreviewModal: React.FC<CardPreviewModalProps> = ({
                   )}
                   {card.tags && card.tags.length > 0 && (
                     <div className="flex flex-wrap justify-center gap-1 mt-1">
-                      {card.tags.map((tag, tIdx) => (
-                        <span key={tIdx} className="text-[9px] font-semibold bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full">
-                          #{tag}
-                        </span>
-                      ))}
+                      {card.tags.map((tag, tIdx) => {
+                        const colors = getTagColors(tag);
+                        return (
+                          <span key={tIdx} className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${colors.bg} ${colors.text} ${colors.border}`}>
+                            #{tag}
+                          </span>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -268,11 +272,14 @@ export const CardPreviewModal: React.FC<CardPreviewModalProps> = ({
                 )}
                 {card.tags && card.tags.length > 0 && (
                   <div className="flex flex-wrap justify-center gap-1 mt-1">
-                    {card.tags.map((tag, tIdx) => (
-                      <span key={tIdx} className="text-[9px] font-semibold bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full">
-                        #{tag}
-                      </span>
-                    ))}
+                    {card.tags.map((tag, tIdx) => {
+                      const colors = getTagColors(tag);
+                      return (
+                        <span key={tIdx} className={`text-[9px] font-bold px-2 py-0.5 rounded-full border ${colors.bg} ${colors.text} ${colors.border}`}>
+                          #{tag}
+                        </span>
+                      );
+                    })}
                   </div>
                 )}
               </div>

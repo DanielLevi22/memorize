@@ -5,6 +5,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Volume2, Trash2, Mic, Sparkles, Loader2 } from 'lucide-react';
+import { getTagColors } from '../utils/tagColors';
 
 interface CardModalProps {
   isOpen: boolean;
@@ -24,7 +25,8 @@ export const CardModal: React.FC<CardModalProps> = ({
   const [front, setFront] = useState('');
   const [back, setBack] = useState('');
   const [context, setContext] = useState('');
-  const [tags, setTags] = useState('');
+  const [tagList, setTagList] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState('');
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [audioFileName, setAudioFileName] = useState('');
   const [isPlayingPreview, setIsPlayingPreview] = useState(false);
@@ -53,14 +55,16 @@ export const CardModal: React.FC<CardModalProps> = ({
       setContext(cardToEdit.context);
       setAudioBlob(cardToEdit.audio || null);
       setAudioFileName(cardToEdit.audio ? 'Áudio gravado' : '');
-      setTags(cardToEdit.tags ? cardToEdit.tags.join(', ') : '');
+      setTagList(cardToEdit.tags || []);
+      setTagInput('');
     } else {
       setFront('');
       setBack('');
       setContext('');
       setAudioBlob(null);
       setAudioFileName('');
-      setTags('');
+      setTagList([]);
+      setTagInput('');
     }
   }, [cardToEdit, isOpen]);
 
@@ -365,11 +369,11 @@ export const CardModal: React.FC<CardModalProps> = ({
       audioRef.current = null;
     }
     
-    const parsedTags = tags.split(',')
+    const cleanTags = tagList
       .map(t => t.trim().toLowerCase())
       .filter(t => t.length > 0);
 
-    onSave(front.trim(), back.trim(), context.trim(), audioBlob, parsedTags);
+    onSave(front.trim(), back.trim(), context.trim(), audioBlob, cleanTags);
     onClose();
   };
 
@@ -499,17 +503,49 @@ export const CardModal: React.FC<CardModalProps> = ({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-muted-foreground" htmlFor="card-tags">
-              Etiquetas / Tags (separadas por vírgula)
+            <label className="text-xs font-semibold text-muted-foreground">
+              Etiquetas / Tags
             </label>
-            <Input
-              id="card-tags"
-              type="text"
-              className="bg-background border-border text-foreground focus-visible:ring-primary focus-visible:border-primary"
-              placeholder="Ex: verbos, essenciais, viagem"
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
-            />
+            <div className="flex flex-wrap gap-1.5 p-2 bg-background border border-border rounded-xl min-h-[42px] items-center focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20 transition-all">
+              {tagList.map((tag) => {
+                const colors = getTagColors(tag);
+                return (
+                  <span
+                    key={tag}
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border flex items-center gap-1 transition-all ${colors.bg} ${colors.text} ${colors.border}`}
+                  >
+                    #{tag}
+                    <button
+                      type="button"
+                      onClick={() => setTagList(prev => prev.filter(t => t !== tag))}
+                      className="hover:text-foreground cursor-pointer text-[10px] font-black leading-none opacity-60 hover:opacity-100"
+                    >
+                      &times;
+                    </button>
+                  </span>
+                );
+              })}
+              <input
+                type="text"
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ',') {
+                    e.preventDefault();
+                    const clean = tagInput.trim().replace(/,/g, '').toLowerCase();
+                    if (clean && !tagList.includes(clean)) {
+                      setTagList(prev => [...prev, clean]);
+                    }
+                    setTagInput('');
+                  }
+                }}
+                placeholder={tagList.length === 0 ? "Ex: verbos (pressione Enter)" : "Adicionar..."}
+                className="bg-transparent border-none outline-none text-xs text-foreground flex-1 min-w-[100px] py-0.5"
+              />
+            </div>
+            <p className="text-[9px] text-muted-foreground">
+              Pressione <strong>Enter</strong> ou <strong>vírgula</strong> para adicionar uma tag.
+            </p>
           </div>
 
           <div className="flex flex-col gap-1.5">

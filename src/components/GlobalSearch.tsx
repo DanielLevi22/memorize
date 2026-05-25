@@ -3,6 +3,7 @@ import { Command } from 'cmdk';
 import { Search, BookOpen, Layers, Clock, Zap, X } from 'lucide-react';
 import type { Card, Deck } from '../types';
 import './GlobalSearch.css';
+import { getTagColors } from '../utils/tagColors';
 
 interface GlobalSearchProps {
   isOpen: boolean;
@@ -226,9 +227,14 @@ export const GlobalSearch: React.FC<GlobalSearchProps> = ({
                             <Zap size={9} /> {card.lapses}
                           </span>
                         )}
-                        {card.tags?.[0] && (
-                          <span className="gs-badge gs-badge-tag">#{card.tags[0]}</span>
-                        )}
+                        {card.tags?.[0] && (() => {
+                          const colors = getTagColors(card.tags[0]);
+                          return (
+                            <span className={`gs-badge border ${colors.bg} ${colors.text} ${colors.border}`}>
+                              #{card.tags[0]}
+                            </span>
+                          );
+                        })()}
                       </div>
                     </Command.Item>
                   );
