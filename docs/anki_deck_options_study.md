@@ -12,53 +12,58 @@ A seção de **Limites Diários** controla a quantidade de cartões que o usuár
 
 ### 1. Novos cartões/dia (New Cards / Day)
 
-* **O que é**: O limite de cartões novos (`interval = 0`, nunca revisados) que serão inseridos no fluxo de estudos por dia.
+* **O que é**: O número máximo de cartões novos (`interval = 0`, nunca revisados) a serem introduzidos em um único dia, caso estes estejam disponíveis.
+* **Carga de Revisão no Curto Prazo**: Visto que novos materiais aumentarão sua carga de revisão no curto prazo, esta opção, tipicamente, deveria, pelo menos, ser **10x menor** do que seu limite de revisões.
 * **Comportamento Técnico**: 
   - O sistema calcula quantos novos cartões já foram estudados hoje para este baralho específico.
   - Se esse número atingir o limite definido, os cartões novos adicionais contidos no baralho ficam temporariamente ocultos/indisponíveis até a virada de dia (o "próximo dia" no ciclo do SRS).
+* **Comportamento em Sub-baralhos**:
+  - Ao estudar um baralho que contenha sub-baralhos, os limites definidos em cada sub-baralho controlam o número máximo de cartões que serão retirados do respectivo sub-baralho.
+  - Os limites do baralho selecionado controlam o total de cartões que serão mostrados no final.
 * **Escopo das Abas**:
-  * **Preset**: O valor digitado (ex: `9999` ou `20`) é salvo no preset. Todos os baralhos que compartilham este mesmo preset respeitam esse limite comum.
-  * **Esse baralho (This deck)**: Cria uma sobreposição (*override*) persistente no banco de dados para este baralho em particular. Apenas este baralho usará o novo valor, enquanto os outros associados ao mesmo preset continuam com o valor geral del preset.
-  * **Somente hoje (Today only)**: Cria uma sobreposição temporária na memória (ou em um campo volátil do banco) que expira automaticamente no momento da virada diária do SRS. É usado quando o usuário quer limpar um acúmulo de novos cartões de forma excepcional em um único dia.
+  * **Preset**: O limite é compartilhado com todos os baralhos que utilizam este mesmo preset.
+  * **Esse baralho (This deck)**: O limite é específico para este baralho (sobrescreve o preset).
+  * **Somente hoje (Today only)**: Faz uma mudança temporária e excepcional no limite deste baralho, expirando na virada do dia.
 
 ---
 
 ### 2. Revisões máximas/dia (Maximum Reviews / Day)
 
-* **O que é**: O limite superior de cartões a revisar (`repetitions > 0` e `dueDate <= hoje`) apresentados ao usuário no dia.
-* **Comportamento Técnico**:
-  - O sistema filtra todos os cartões agendados para hoje ou datas passadas.
-  - O número de cartões exibidos na fila de revisões é limitado pela diferença entre este limite e a quantidade de revisões que o usuário já concluiu hoje.
+* **O que é**: O número máximo de cartões "A revisar" (`repetitions > 0` e `dueDate <= hoje`) a serem mostrados em um dia, caso os cartões estejam prontos para serem revisados.
+* **Comportamento de Prioridade de Fila (Learning -> Review -> New)**:
+  - O limite de revisão também afeta os cartões de aprendizagem dos dias subsequentes (*interday learning*).
+  - Ao aplicar o limite, os cartões de aprendizagem dos dias anteriores são buscados primeiro, depois as revisões e, finalmente, os novos cartões.
+* **Comportamento em Sub-baralhos**:
+  - Ao estudar um baralho que contenha sub-baralhos, os limites definidos em cada sub-baralho controlam o número máximo de cartões que serão retirados do respectivo sub-baralho.
+  - Os limites do baralho selecionado controlam o total de cartões que serão mostrados no final.
 * **Por que o padrão é `9999`?**: 
-  - O criador do Anki recomenda fortemente manter este valor no máximo (`9999`). 
-  - Limitar revisões diárias quebra a integridade matemática da repetição espaçada (SRS). Se o usuário tem 100 revisões acumuladas e limita para 50, os outros 50 cartões atrasam, gerando uma queda exponencial na taxa de retenção de memória e uma bola de neve de revisões acumuladas.
+  - Limitar revisões diárias quebra a integridade matemática da repetição espaçada (SRS). Se o usuário tem 100 revisões acumuladas e limita para 50, as outras 50 atrasam, gerando uma queda exponencial na taxa de retenção de memória e uma bola de neve de revisões acumuladas.
 * **Escopo das Abas**:
-  * **Preset**: Limite geral aplicado a todos os decks sob o preset.
-  * **Esse baralho**: Sobrescrita definitiva para este deck.
-  * **Somente hoje**: Sobrescrita que dura apenas até a próxima virada de dia, permitindo ao usuário "limpar" filas acumuladas temporariamente.
+  * **Preset**: O limite é compartilhado com todos os baralhos que utilizam este preset.
+  * **Esse baralho (This deck)**: O limite é específico para este baralho.
+  * **Somente hoje (Today only)**: Faz uma mudança temporária no limite deste baralho para o dia de hoje.
 
 ---
 
 ### 3. Novos cartões ignoram o limite de revisão (New cards ignore review limit)
 
-* **O que é**: Um seletor de prioridade entre novos cartões e revisões.
+* **O que é**: Seletor global de prioridade entre novos cartões e revisões.
+* **Escopo**: Afeta toda a coleção.
 * **Comportamento Técnico (Desativado - Padrão do Anki)**:
-  - Se o usuário já atingiu seu limite diário de revisões (ex: revisou 50 de um limite de 50 revisões), o aplicativo **bloqueia a exibição de novos cartões**, mesmo se o limite de novos cartões ainda não tiver sido atingido.
+  - Por padrão, o limite de revisão também se aplica aos novos cartões, e nenhum novo cartão será mostrado quando o limite de revisão for alcançado.
   - **Fórmula Lógica**:
     $$\text{Limite de Novos Efetivo} = \begin{cases} 0 & \text{se } \text{Revisões Concluídas Hoje} \ge \text{Limite de Revisões Diário} \\ \text{Limite Novos} & \text{caso contrário} \end{cases}$$
 * **Comportamento Técnico (Ativado)**:
-  - O limite de novos cartões é independente. Mesmo se o limite de revisões for atingido ou esgotado, os novos cartões continuam aparecendo até atingirem o seu próprio limite.
-* **Por que existe?**: Serve como freio de segurança. Se o usuário já está sobrecarregado com revisões pendentes, introduzir cartões novos só aumentaria a bola de neve de revisões para os dias seguintes.
+  - Se essa opção estiver ativada, novos cartões serão mostrados independentemente de o limite de revisões diário ter sido alcançado ou ultrapassado.
 
 ---
 
 ### 4. Os limites começam do deck superior (Limits start from the parent deck)
 
-* **O que é**: Controla a herança e o compartilhamento de limites diários em estruturas hierárquicas de sub-baralhos (ex: `Idiomas::Inglês`).
+* **O que é**: Controla a origem da herança hierárquica dos limites diários quando há decks aninhados.
+* **Escopo**: Afeta toda a coleção.
 * **Comportamento Técnico (Desativado - Padrão do Anki)**:
-  - Se você clica diretamente em um sub-baralho (`Inglês`), ele usa os limites individuais definidos para ele ou para o seu preset.
-  - Se você clica no baralho pai (`Idiomas`), o limite do baralho pai atua como um teto geral para a soma dos estudos dos sub-baralhos.
+  - Por padrão, os limites começam a partir do baralho que você selecionar. Se você clica em um sub-baralho, as cotas do baralho pai de nível superior não são impostas se você estiver estudando apenas o filho.
 * **Comportamento Técnico (Ativado)**:
-  - Os limites diários do baralho pai (`Idiomas`) são aplicados primeiro e começam a ser decrementados mesmo se o usuário estiver estudando diretamente os sub-baralhos (`Inglês`).
-  - O progresso de estudo em qualquer sub-baralho consome a cota diária do baralho pai em tempo real, impedindo que o usuário ultrapasse a meta agregada ao alternar entre os decks filhos.
-* **Ícone do Globo**: 🌐 Indica que este comportamento afeta globalmente o preset em toda a sua estrutura de herança hierárquica.
+  - Os limites começarão a partir do baralho de nível superior, o que é extremamente útil se você deseja estudar sub-baralhos individuais, enquanto impõe um limite total agregador de cartões por dia.
+  - Qualquer estudo realizado em um sub-baralho consome a cota diária do baralho pai em tempo real.
