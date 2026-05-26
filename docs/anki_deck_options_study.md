@@ -67,3 +67,51 @@ A seção de **Limites Diários** controla a quantidade de cartões que o usuár
 * **Comportamento Técnico (Ativado)**:
   - Os limites começarão a partir do baralho de nível superior, o que é extremamente útil se você deseja estudar sub-baralhos individuais, enquanto impõe um limite total agregador de cartões por dia.
   - Qualquer estudo realizado em um sub-baralho consome a cota diária do baralho pai em tempo real.
+
+---
+
+## Tópico 2: Novos Cartões (New Cards Options)
+
+Esta seção define as etapas pelas quais os novos cartões passam antes de se tornarem cartões de revisão permanentes, bem como a ordem de exibição inicial.
+
+![Novos Cartões](file:///C:/Users/danie/.gemini/antigravity/brain/3a0e2451-4768-4ce6-801d-c8611370b952/media__1779809768894.png)
+
+---
+
+### 1. Etapas de aprendizagem (Learning Steps)
+
+* **O que é**: Um ou mais atrasos temporais (delays), separados por espaços, que representam os estágios de memorização inicial de um novo cartão antes de sua graduação.
+* **Comportamento Técnico**:
+  - **Errei (Again)**: Reseta o cartão para a primeira etapa (atraso de `1m` por padrão). O cartão volta para a fila imediata.
+  - **Bom (Good)**: Avança o cartão para a próxima etapa de aprendizagem (atraso de `10m` por padrão).
+  - **Graduação**: Após passar com sucesso por todas as etapas de aprendizagem consecutivamente (sem errar), o cartão se torna um **cartão de revisão** (se gradua), saindo do modo intradiário e agendando-se para um dia diferente.
+  - **Unidades Suportadas**: Segundos (`s`), minutos (`m`), horas (`h`), dias (`d`). Exemplo: `30s`, `1m`, `1h`, `2d`.
+
+---
+
+### 2. Intervalo de graduação (Graduating Interval)
+
+* **O que é**: O número de dias de espera antes de mostrar o cartão novamente após o usuário pressionar o botão **Bom (Good)** na etapa final de aprendizagem.
+* **Comportamento Técnico**: 
+  - Determina o valor inicial de `interval` (em dias) quando o cartão se converte em revisão.
+  - Por exemplo, se configurado para `1`, quando o cartão se gradua hoje, sua próxima revisão será amanhã (`dueDate = hoje + 1 dia`).
+
+---
+
+### 3. Intervalo fácil (Easy Interval)
+
+* **O que é**: O número de dias de espera antes de mostrar o cartão novamente após o botão **Fácil (Easy)** ser pressionado em um cartão de aprendizagem (novo ou em aprendizado).
+* **Comportamento Técnico**:
+  - Ao clicar em "Fácil", o cartão **pula todas as etapas de aprendizagem restantes** e se gradua instantaneamente.
+  - Ele é removido do modo de aprendizagem e agendado diretamente para o futuro usando este intervalo de dias (padrão: `4` dias).
+
+---
+
+### 4. Ordem de inserção (Insertion Order)
+
+* **O que é**: Controla a atribuição de posições (`revisar#` ou número de índice do cartão) quando novos cartões são adicionados ao baralho.
+* **Opções**:
+  * **Sequencial (cartões mais antigos primeiro)**: Cartões com número de posição menor são mostrados primeiro (ordem cronológica de adição).
+  * **Aleatório**: Atribui posições e ordenações aleatórias aos novos cartões, misturando-os durante as sessões de estudo.
+  * **Comportamento Técnico**: Ao alterar esta opção nas configurações, a posição existente dos cartões novos no banco de dados deve ser reordenada/atualizada automaticamente de acordo com o novo critério selecionado.
+
