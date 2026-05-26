@@ -41,6 +41,7 @@ export interface Revision {
   rating: number; // Nota dada pelo usuário (1 = Errei, 2 = Difícil, 3 = Fácil)
   ease: number; // Fator de facilidade do cartão após essa revisão
   interval: number; // Novo intervalo do cartão após essa revisão
+  wasNew?: boolean; // Se o cartão era novo antes desta revisão
 }
 
 export interface Streak {

@@ -295,11 +295,22 @@ function App() {
     let reviewsStudied = 0;
     
     for (const cardId of revisedCardIdsToday) {
-      const hasPriorRevision = deckRevisions.some(r => r.cardId === cardId && r.timestamp < startOfTodayMs);
-      if (hasPriorRevision) {
-        reviewsStudied++;
+      const cardRevsToday = revisionsToday.filter(r => r.cardId === cardId).sort((a, b) => a.timestamp - b.timestamp);
+      const firstRevToday = cardRevsToday[0];
+      
+      if (firstRevToday && firstRevToday.wasNew !== undefined) {
+        if (firstRevToday.wasNew) {
+          newStudied++;
+        } else {
+          reviewsStudied++;
+        }
       } else {
-        newStudied++;
+        const hasPriorRevision = deckRevisions.some(r => r.cardId === cardId && r.timestamp < startOfTodayMs);
+        if (hasPriorRevision) {
+          reviewsStudied++;
+        } else {
+          newStudied++;
+        }
       }
     }
     
@@ -546,6 +557,7 @@ function App() {
   const handleGradeCard = async (card: Card, rating: number) => {
     if (cramSessionCards) {
       // Sessão Cram não altera agendamento nem registra revisão
+      // (cramSessionCards é uma lista temporária em memória, não salvamos no IndexedDB)
       return;
     }
     const deck = decks?.find(d => d.id === card.deckId);
@@ -562,7 +574,8 @@ function App() {
       timestamp: Date.now(),
       rating,
       ease: nextFields.ease,
-      interval: nextFields.interval
+      interval: nextFields.interval,
+      wasNew: card.interval === 0
     });
   };
 
