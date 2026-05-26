@@ -5,6 +5,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Sparkles, CheckCircle2, ChevronRight, ArrowLeft, Loader2, Key } from 'lucide-react';
+import { Toast } from './ui/toast';
 
 interface AiGeneratorModalProps {
   isOpen: boolean;
@@ -45,6 +46,7 @@ export const AiGeneratorModal: React.FC<AiGeneratorModalProps> = ({
   const [newDeckDescription, setNewDeckDescription] = useState('');
   const [generatedCards, setGeneratedCards] = useState<GeneratedCard[]>([]);
   const [errorMsg, setErrorMsg] = useState('');
+  const [toastMsg, setToastMsg] = useState('');
   const [loadingStep, setLoadingStep] = useState(0);
 
   // Loading text animations
@@ -77,6 +79,7 @@ export const AiGeneratorModal: React.FC<AiGeneratorModalProps> = ({
       setNewDeckDescription('');
       setGeneratedCards([]);
       setErrorMsg('');
+      setToastMsg('');
       if (decks && decks.length > 0) {
         setSelectedDeckId(decks[0].id);
       } else {
@@ -154,10 +157,15 @@ Gere resultados realistas, focados em conversação cotidiana e gramática prát
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         const message = errorData.error?.message || `Erro da API (código ${response.status})`;
-        if (response.status === 400 || response.status === 403) {
+        const isQuotaExceeded = response.status === 429 || (message && /quota|limit|exhausted/i.test(message));
+        const isHighDemand = response.status === 503 || (message && /high demand|try again later/i.test(message));
+        
+        if (isQuotaExceeded) {
+          throw new Error('Seu limite diário foi atingido');
+        } else if (isHighDemand) {
+          throw new Error('Este modelo está enfrentando alta demanda no momento. Picos de demanda geralmente são temporários. Por favor, tente novamente mais tarde.');
+        } else if (response.status === 400 || response.status === 403) {
           throw new Error('Chave de API inválida ou sem permissão. Verifique sua chave nas configurações.');
-        } else if (response.status === 429) {
-          throw new Error('Limite de requisições excedido. Aguarde um instante e tente novamente.');
         }
         throw new Error(message);
       }
@@ -184,7 +192,11 @@ Gere resultados realistas, focados em conversação cotidiana e gramática prát
       setGeneratedCards(formatted);
       setStep('preview');
     } catch (err: any) {
-      setErrorMsg(err.message || 'Erro inesperado ao gerar os cartões.');
+      if (err.message === 'Seu limite diário foi atingido' || err.message.includes('alta demanda')) {
+        setToastMsg(err.message);
+      } else {
+        setErrorMsg(err.message || 'Erro inesperado ao gerar os cartões.');
+      }
       setStep('input');
     }
   };
@@ -539,6 +551,9 @@ Gere resultados realistas, focados em conversação cotidiana e gramática prát
           )}
         </DialogFooter>
       </DialogContent>
+      {toastMsg && (
+        <Toast message={toastMsg} onClose={() => setToastMsg('')} type="error" />
+      )}
     </Dialog>
   );
 };

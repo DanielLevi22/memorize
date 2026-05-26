@@ -7,7 +7,6 @@ import type { Deck, Card } from '../types';
 interface DashboardPageProps {
   decks: Deck[] | undefined;
   cards: Card[] | undefined;
-  todayStr: string;
   totalNew: number;
   totalDue: number;
   totalLearned: number;
@@ -27,12 +26,23 @@ interface DashboardPageProps {
   };
   handleOpenAiModal: () => void;
   dailyGoal: number;
+  getDeckStudyableCounts: (deck: Deck, deckCards: Card[]) => {
+    newCount: number;
+    learningCount: number;
+    reviewCount: number;
+    totalCount: number;
+  };
+  readingStats: {
+    minutes: number;
+    wordsRead: number;
+    sentencesMastered: number;
+  };
+  handleGoToReading: () => void;
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
   decks,
   cards,
-  todayStr,
   totalNew,
   totalDue,
   totalLearned,
@@ -48,6 +58,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   stats,
   handleOpenAiModal,
   dailyGoal,
+  getDeckStudyableCounts,
+  readingStats,
+  handleGoToReading,
 }) => {
   return (
     <div className="space-y-6 w-full max-w-none px-2 md:px-6">
@@ -109,6 +122,58 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         )}
       </section>
 
+      {/* Progresso de Leitura de Hoje */}
+      <section className="bg-card border border-border p-4.5 rounded-2xl shadow-sm relative overflow-hidden">
+        <div className="flex items-center justify-between gap-2 mb-3.5">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">📚</span>
+            <div className="flex flex-col">
+              <span className="text-sm font-bold text-foreground">Leitura de Hoje</span>
+              <span className="text-[11px] text-muted-foreground font-semibold">
+                Seu progresso nos textos e áudios hoje
+              </span>
+            </div>
+          </div>
+          {(readingStats.minutes === 0 && readingStats.wordsRead === 0 && readingStats.sentencesMastered === 0) && (
+            <Button
+              onClick={handleGoToReading}
+              variant="outline"
+              size="sm"
+              className="text-[10px] h-7 font-bold border-border bg-card hover:bg-muted text-foreground cursor-pointer rounded-lg px-2.5"
+            >
+              Começar Leitura
+            </Button>
+          )}
+        </div>
+        
+        {readingStats.minutes > 0 || readingStats.wordsRead > 0 || readingStats.sentencesMastered > 0 ? (
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="bg-muted/30 border border-border/40 p-3 rounded-xl">
+              <div className="font-extrabold text-lg text-primary tracking-tight">
+                {readingStats.minutes.toString().replace('.', ',')} <span className="text-xs font-semibold text-muted-foreground">min</span>
+              </div>
+              <div className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider mt-0.5">Tempo</div>
+            </div>
+            <div className="bg-muted/30 border border-border/40 p-3 rounded-xl">
+              <div className="font-extrabold text-lg text-primary tracking-tight">
+                {readingStats.wordsRead}
+              </div>
+              <div className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider mt-0.5">Palavras</div>
+            </div>
+            <div className="bg-muted/30 border border-border/40 p-3 rounded-xl">
+              <div className="font-extrabold text-lg text-primary tracking-tight">
+                +{readingStats.sentencesMastered}
+              </div>
+              <div className="text-[9px] text-muted-foreground font-bold uppercase tracking-wider mt-0.5">Dominadas</div>
+            </div>
+          </div>
+        ) : (
+          <div className="text-xs text-muted-foreground/80 font-medium py-1 px-1">
+            Você ainda não praticou leitura hoje. Que tal ler um texto na Biblioteca de Leitura? 📖
+          </div>
+        )}
+      </section>
+
       {/* Decks Section */}
       <section className="space-y-4">
         <div className="flex items-center justify-between">
@@ -161,10 +226,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             {/* Decks Cards List */}
             {decks.map(deck => {
               const deckCards = cards ? cards.filter(c => c.deckId === deck.id) : [];
-              const newCount = deckCards.filter(c => c.interval === 0).length;
-              const learningCount = deckCards.filter(c => c.interval > 0 && c.repetitions <= 1 && c.dueDate <= todayStr).length;
-              const reviewCount = deckCards.filter(c => c.interval > 0 && c.repetitions > 1 && c.dueDate <= todayStr).length;
-              const totalStudyable = newCount + learningCount + reviewCount;
+              const { newCount, learningCount, reviewCount, totalCount: totalStudyable } = getDeckStudyableCounts(deck, deckCards);
 
               return (
                 <div 

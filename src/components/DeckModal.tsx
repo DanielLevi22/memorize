@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import type { Deck } from '../types';
+import type { Deck, DeckPreset } from '../types';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -8,33 +8,38 @@ import { Textarea } from './ui/textarea';
 interface DeckModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (name: string, description: string) => void;
+  onSave: (name: string, description: string, presetId: string) => void;
   deckToEdit?: Deck | null;
+  presets?: DeckPreset[];
 }
 
 export const DeckModal: React.FC<DeckModalProps> = ({
   isOpen,
   onClose,
   onSave,
-  deckToEdit
+  deckToEdit,
+  presets
 }) => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [presetId, setPresetId] = useState('default-study-preset');
 
   useEffect(() => {
     if (deckToEdit) {
       setName(deckToEdit.name);
       setDescription(deckToEdit.description);
+      setPresetId(deckToEdit.presetId || 'default-study-preset');
     } else {
       setName('');
       setDescription('');
+      setPresetId('default-study-preset');
     }
   }, [deckToEdit, isOpen]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    onSave(name.trim(), description.trim());
+    onSave(name.trim(), description.trim(), presetId);
     onClose();
   };
 
@@ -71,6 +76,24 @@ export const DeckModal: React.FC<DeckModalProps> = ({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-semibold text-muted-foreground" htmlFor="deck-preset">
+              Preset de Estudo (Opções do Anki)
+            </label>
+            <select
+              id="deck-preset"
+              className="w-full bg-background border border-border text-foreground px-3 py-2 rounded-xl text-xs font-bold outline-none cursor-pointer focus:border-primary/50"
+              value={presetId}
+              onChange={(e) => setPresetId(e.target.value)}
+            >
+              {presets && presets.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.name} {p.id === 'default-study-preset' ? '(Padrão)' : ''}
+                </option>
+              ))}
+            </select>
           </div>
 
           <DialogFooter className="flex flex-row gap-2 mt-4 sm:justify-end">

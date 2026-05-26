@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Eye, AlertCircle, Volume2, Mic } from 'lucide-react';
-import type { Card } from '../types';
+import type { Card, DeckPreset } from '../types';
 import { getFriendlyInterval } from '../utils/srs';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
 import { getTagColors } from '../utils/tagColors';
+import { KeyboardShortcutCheatsheet } from './KeyboardShortcutCheatsheet';
 
 const stripHtmlTags = (str: string) => {
   if (!str) return '';
@@ -39,6 +40,7 @@ interface StudyArenaProps {
   ttsRate?: number;
   ttsVoice?: string;
   autoPlayAudio?: boolean;
+  preset?: DeckPreset;
 }
 
 export const StudyArena: React.FC<StudyArenaProps> = ({
@@ -50,7 +52,8 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
   studyMode = 'classic',
   ttsRate = 1.0,
   ttsVoice = '',
-  autoPlayAudio = true
+  autoPlayAudio = true,
+  preset
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
@@ -59,6 +62,9 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Timer State
+  const [seconds, setSeconds] = useState(0);
 
   // Interactive Modes States
   const [typedAnswer, setTypedAnswer] = useState('');
@@ -121,6 +127,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
     }
 
     let url: string | null = null;
+    const shouldAutoplay = preset ? !preset.disableAutoplay : autoPlayAudio;
 
     if (currentCard) {
       // Parar áudio anterior se estiver tocando
@@ -139,7 +146,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
           url = URL.createObjectURL(currentCard.audio);
           setAudioUrl(url);
 
-          if (autoPlayAudio) {
+          if (shouldAutoplay) {
             const audio = new Audio(url);
             activeAudioRef.current = audio;
             setIsPlaying(true);
@@ -160,7 +167,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
         setAudioUrl(null);
         setIsPlaying(false);
         // Auto-play do TTS em inglês (only when enabled)
-        if (autoPlayAudio) {
+        if (shouldAutoplay) {
           speakText(currentCard.front, 'en');
         }
       }
@@ -204,7 +211,9 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
   const handlePlayAudio = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     
-    if (currentCard.audio) {
+    const shouldSkipQuestion = isFlipped && preset?.skipQuestionOnReplay;
+
+    if (currentCard.audio && !shouldSkipQuestion) {
       if (!audioUrl) return;
       try {
         // Se já estiver tocando, pausa o áudio atual
@@ -234,7 +243,9 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
       }
     } else {
       // Usar TTS nativo
-      speakText(currentCard.front, 'en');
+      const textToPlay = shouldSkipQuestion ? currentCard.back : currentCard.front;
+      const langToPlay = shouldSkipQuestion ? 'pt' : 'en';
+      speakText(textToPlay, langToPlay);
     }
   };
 
@@ -337,6 +348,63 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
     }
   };
 
+  // 1. Cronômetro de estudo para o cartão atual
+  useEffect(() => {
+    if (!currentCard) return;
+    
+    setSeconds(0);
+    
+    // Se stopTimerOnAnswer for verdadeiro e a carta estiver virada, pausa o tempo
+    const shouldTick = !(isFlipped && preset?.stopTimerOnAnswer);
+    
+    if (!shouldTick) return;
+    
+    const interval = setInterval(() => {
+      setSeconds(prev => {
+        const maxSec = preset?.maxAnswerSeconds || 60;
+        if (prev >= maxSec) {
+          clearInterval(interval);
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [currentIndex, isFlipped, currentCard, preset?.stopTimerOnAnswer, preset?.maxAnswerSeconds]);
+
+  // 2. Avanço Automático
+  useEffect(() => {
+    if (!currentCard) return;
+    
+    // Se estiver esperando pelo áudio terminar, não dispara o cronômetro de avanço
+    if (preset?.waitForAudio && isPlaying) return;
+
+    if (!isFlipped) {
+      // Frente (Questão)
+      const showAnswerDelay = preset?.autoShowAnswerSeconds || 0;
+      if (showAnswerDelay > 0) {
+        const timer = setTimeout(() => {
+          if (preset?.questionAction === 'bury') {
+            handleGrade(1);
+          } else {
+            handleReveal();
+          }
+        }, showAnswerDelay * 1000);
+        return () => clearTimeout(timer);
+      }
+    } else {
+      // Verso (Resposta)
+      const showQuestionDelay = preset?.autoShowQuestionSeconds || 0;
+      if (showQuestionDelay > 0) {
+        const timer = setTimeout(() => {
+          handleGrade(3);
+        }, showQuestionDelay * 1000);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [currentIndex, isFlipped, isPlaying, preset?.autoShowAnswerSeconds, preset?.autoShowQuestionSeconds, preset?.waitForAudio, preset?.questionAction]);
+
   // ⌨️ Keyboard shortcuts (defined after handlers are ready)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -354,25 +422,34 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
         e.preventDefault(); handleGrade(2);
       } else if (e.key === '3' && isFlipped) {
         e.preventDefault(); handleGrade(3);
+      } else if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault();
+        handlePlayAudio();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isFlipped, onCancel]);
+  }, [isFlipped, onCancel, currentIndex, audioUrl, isPlaying]);
 
   return (
     <div className="flex flex-col h-full gap-5">
       {/* Navbar de Estudo */}
-      <div className="flex items-center justify-between pb-2 border-b border-border">
+      <div className="flex items-center justify-between pb-2 border-b border-border gap-2">
         <Button 
           variant="ghost" 
           size="icon" 
-          className="text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer h-9 w-9" 
+          className="text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer h-9 w-9 shrink-0" 
           onClick={onCancel} 
           title="Voltar"
         >
           <ArrowLeft size={18} />
         </Button>
+
+        {preset?.showTimer && (
+          <div className="flex items-center gap-1 bg-muted/40 border border-border text-[10px] font-bold text-muted-foreground px-2 py-1 rounded-lg shrink-0">
+            ⏱️ {seconds}s
+          </div>
+        )}
         
         <div className="flex-1 mx-4 space-y-1.5">
           <Progress value={progressPercent} className="h-1.5 bg-muted" />
@@ -715,7 +792,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
               >
                 <span>Errei</span>
                 <span className="text-[10px] font-medium opacity-70">
-                  {getFriendlyInterval(currentCard, 1)}
+                  {getFriendlyInterval(currentCard, 1, preset)}
                 </span>
               </Button>
               <Button 
@@ -724,7 +801,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
               >
                 <span>Difícil</span>
                 <span className="text-[10px] font-medium opacity-70">
-                  {getFriendlyInterval(currentCard, 2)}
+                  {getFriendlyInterval(currentCard, 2, preset)}
                 </span>
               </Button>
               <Button 
@@ -733,7 +810,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
               >
                 <span>Fácil</span>
                 <span className="text-[10px] font-medium opacity-70">
-                  {getFriendlyInterval(currentCard, 3)}
+                  {getFriendlyInterval(currentCard, 3, preset)}
                 </span>
               </Button>
             </div>
@@ -759,6 +836,18 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
           </div>
         )}
       </div>
+
+      <KeyboardShortcutCheatsheet
+        positionClassName="fixed bottom-6 right-6"
+        shortcuts={[
+          { keys: ['Espaço', 'Enter'], description: 'Revelar resposta' },
+          { keys: ['1'], description: 'Avaliar como "Errei"' },
+          { keys: ['2'], description: 'Avaliar como "Difícil"' },
+          { keys: ['3'], description: 'Avaliar como "Fácil"' },
+          { keys: ['R'], description: 'Repetir Áudio / TTS' },
+          { keys: ['Esc'], description: 'Sair dos estudos' },
+        ]}
+      />
     </div>
   );
 };

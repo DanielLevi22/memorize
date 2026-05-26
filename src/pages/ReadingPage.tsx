@@ -1,0 +1,2875 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { useLiveQuery } from 'dexie-react-hooks';
+import {
+  ArrowLeft, BookOpen, Plus, Trash2, Play, Pause, Square,
+  Copy, Check, ChevronRight, FileText, Volume2, HelpCircle,
+  Maximize2, EyeOff, Folder, FolderOpen, FolderPlus, Edit, Upload, Sparkles, Loader2, ExternalLink
+} from 'lucide-react';
+import { Button } from '../components/ui/button';
+import { db } from '../db/db';
+import type { ReadingText, ReadingCollection } from '../types';
+import { ReadingImportModal } from '../components/ReadingImportModal';
+import { KeyboardShortcutCheatsheet } from '../components/KeyboardShortcutCheatsheet';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '../components/ui/dialog';
+import { extractTextFromPdf, processTextWithAI, segmentTextManually } from '../utils/readingProcessor';
+import { motion } from 'framer-motion';
+
+interface ReadingPageProps {
+  geminiApiKey: string;
+  ttsRate: number;
+  ttsVoice: string;
+  isZenMode: boolean;
+  setIsZenMode: (zen: boolean) => void;
+}
+
+export const ReadingPage: React.FC<ReadingPageProps> = ({
+  geminiApiKey,
+  ttsRate,
+  ttsVoice,
+  isZenMode,
+  setIsZenMode,
+}) => {
+  const readings = useLiveQuery(() => db.readings.orderBy('createdAt').reverse().toArray());
+  const collections = useLiveQuery(() => db.readingCollections?.orderBy('createdAt').reverse().toArray()) || [];
+  const decks = useLiveQuery(() => db.decks.orderBy('name').toArray()) || [];
+  
+  
+  const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
+  const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
+  const [activeReaderTab, setActiveReaderTab] = useState<'lineByLine' | 'textAudio' | 'vitrine'>('lineByLine');
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [copiedLineIdx, setCopiedLineIdx] = useState<number | null>(null);
+
+  // Collection creation states
+  const [isCreatingCollection, setIsCreatingCollection] = useState(false);
+  const [newCollectionTitle, setNewCollectionTitle] = useState('');
+  const [newCollectionDescription, setNewCollectionDescription] = useState('');
+
+  // Collection editing states
+  const [editingCollection, setEditingCollection] = useState<ReadingCollection | null>(null);
+  const [editCollectionTitle, setEditCollectionTitle] = useState('');
+  const [editCollectionDescription, setEditCollectionDescription] = useState('');
+
+  // Collection deletion states
+  const [deletingCollection, setDeletingCollection] = useState<ReadingCollection | null>(null);
+  const [associatedReadingsCount, setAssociatedReadingsCount] = useState<number>(0);
+
+  // Inside-text editor/importer states for empty lessons
+  // Append sentence states
+  const [appendOriginal, setAppendOriginal] = useState('');
+  const [appendTranslated, setAppendTranslated] = useState('');
+  const [isAppending, setIsAppending] = useState(false);
+
+  // Append Block (PDF / Text / IA) states
+  const [isAppendBlockModalOpen, setIsAppendBlockModalOpen] = useState(false);
+  const [appendBlockOriginalText, setAppendBlockOriginalText] = useState('');
+  const [appendBlockTranslatedText, setAppendBlockTranslatedText] = useState('');
+  const [appendBlockUseAI, setAppendBlockUseAI] = useState(false);
+  const [appendBlockIsProcessing, setAppendBlockIsProcessing] = useState(false);
+  const [appendBlockProcessingStep, setAppendBlockProcessingStep] = useState('');
+  const [appendBlockErrorMsg, setAppendBlockErrorMsg] = useState('');
+  const [appendBlockPdfBlob, setAppendBlockPdfBlob] = useState<Blob | null>(null);
+  const [appendBlockIsPdfLoading, setAppendBlockIsPdfLoading] = useState(false);
+
+  // Search global
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Edit line
+  const [editingLineIdx, setEditingLineIdx] = useState<number | null>(null);
+  const [editLineOriginal, setEditLineOriginal] = useState('');
+  const [editLineTranslated, setEditLineTranslated] = useState('');
+
+  // Drag and drop reorder
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const dragSrcIdx = useRef<number | null>(null);
+
+  // Add to deck
+  const [isAddToDeckOpen, setIsAddToDeckOpen] = useState(false);
+  const [addToDeckId, setAddToDeckId] = useState('');
+  const [selectedLineIdxs, setSelectedLineIdxs] = useState<Set<number>>(new Set());
+  const [isAddingToDeck, setIsAddingToDeck] = useState(false);
+  const [addToDeckSuccess, setAddToDeckSuccess] = useState('');
+
+  // Delete line confirmation
+  const [deletingLineIdx, setDeletingLineIdx] = useState<number | null>(null);
+
+  // Fullscreen PDF Viewer state
+  const [isFullscreenPdfOpen, setIsFullscreenPdfOpen] = useState(false);
+
+  // Karaoke state
+  const [activeCharIndex, setActiveCharIndex] = useState<number>(-1);
+  const [activeLineIdx, setActiveLineIdx] = useState<number>(-1);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
+  const [showTranslation, setShowTranslation] = useState(false);
+  
+  const activeWordRef = useRef<HTMLSpanElement>(null);
+  const activeLineRef = useRef<HTMLDivElement>(null);
+  const timerRef = useRef<any>(null);
+  const currentWordIdxRef = useRef<number>(-1);
+  const isPlayingRef = useRef(false);
+  const receivedBoundaryRef = useRef(false);
+  const sessionStartTime = useRef<number>(0);
+  const readWordsSet = useRef<Set<string>>(new Set());
+  const sessionMasteredCount = useRef<number>(0);
+  const lastActiveLineIdxRef = useRef<number>(-1);
+  const restoredRef = useRef<string | null>(null);
+
+  const [zenTheme, setZenTheme] = useState<'default' | 'sepia' | 'dark-matte'>(() => {
+    return (localStorage.getItem('memorize_zen_theme') as any) || 'default';
+  });
+
+  const handleSetZenTheme = (theme: 'default' | 'sepia' | 'dark-matte') => {
+    setZenTheme(theme);
+    localStorage.setItem('memorize_zen_theme', theme);
+  };
+
+  const selectedText = readings?.find((r) => r.id === selectedTextId) || null;
+
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+
+  // Manage PDF Object URL for the Vitrine view
+  useEffect(() => {
+    if (selectedText?.pdfFile && activeReaderTab === 'vitrine') {
+      const url = URL.createObjectURL(selectedText.pdfFile);
+      setPdfUrl(url);
+      return () => {
+        URL.revokeObjectURL(url);
+        setPdfUrl(null);
+      };
+    } else {
+      setPdfUrl(null);
+    }
+  }, [selectedText, activeReaderTab]);
+
+  // Keyboard shortcuts for reading and karaoke
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 1. Ignore if typing in input/textarea/editable
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+        if (e.key === 'Escape' && editingLineIdx !== null) {
+          setEditingLineIdx(null);
+        }
+        return;
+      }
+
+      if (!selectedText) return;
+
+      // 2. Ignore reading shortcuts if currently editing
+      if (editingLineIdx !== null) {
+        if (e.key === 'Escape') {
+          setEditingLineIdx(null);
+        }
+        return;
+      }
+
+      // 3. Handle specific shortcuts
+      switch (e.code) {
+        case 'Space': {
+          e.preventDefault();
+          togglePlayPause();
+          break;
+        }
+        case 'ArrowDown': {
+          e.preventDefault();
+          if (e.altKey) {
+            if (activeLineIdx >= 0 && activeLineIdx < selectedText.lines.length) {
+              handleMoveLine(activeLineIdx, 'down');
+            }
+          } else {
+            setActiveLineIdx(prev => {
+              const nextIdx = prev + 1;
+              if (nextIdx < selectedText.lines.length) {
+                const el = document.getElementById(`line-card-${nextIdx}`);
+                if (el) {
+                  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+                return nextIdx;
+              }
+              return prev;
+            });
+          }
+          break;
+        }
+        case 'ArrowUp': {
+          e.preventDefault();
+          if (e.altKey) {
+            if (activeLineIdx >= 0 && activeLineIdx < selectedText.lines.length) {
+              handleMoveLine(activeLineIdx, 'up');
+            }
+          } else {
+            setActiveLineIdx(prev => {
+              const nextIdx = prev - 1;
+              if (nextIdx >= 0) {
+                const el = document.getElementById(`line-card-${nextIdx}`);
+                if (el) {
+                  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+                return nextIdx;
+              }
+              return prev;
+            });
+          }
+          break;
+        }
+        case 'KeyD':
+        case 'KeyM': {
+          e.preventDefault();
+          if (activeLineIdx >= 0 && activeLineIdx < selectedText.lines.length) {
+            handleToggleMastered(activeLineIdx);
+          }
+          break;
+        }
+        case 'KeyE': {
+          e.preventDefault();
+          if (activeLineIdx >= 0 && activeLineIdx < selectedText.lines.length) {
+            handleStartEditLine(activeLineIdx);
+          }
+          break;
+        }
+        case 'KeyR': {
+          e.preventDefault();
+          if (activeLineIdx >= 0) {
+            const currentIdx = activeLineIdx;
+            stopPlayback();
+            setTimeout(() => {
+              startFromSentence(currentIdx);
+            }, 50);
+          }
+          break;
+        }
+        default:
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [selectedText, activeLineIdx, editingLineIdx]);
+
+
+  // Compute character ranges for each line in the clean text
+  const linesWithRanges = React.useMemo(() => {
+    if (!selectedText) return [];
+    let currentOffset = 0;
+    return selectedText.lines.map((line, index) => {
+      const start = currentOffset;
+      const end = start + line.original.length;
+      // Account for the space between sentences
+      currentOffset = end + 1;
+      return {
+        index,
+        line,
+        start,
+        end
+      };
+    });
+  }, [selectedText]);
+
+  // Telemetry session tracking & bookmarking
+  useEffect(() => {
+    if (selectedTextId) {
+      sessionStartTime.current = Date.now();
+      readWordsSet.current.clear();
+      sessionMasteredCount.current = 0;
+    }
+    return () => {
+      if (selectedTextId) {
+        const duration = (Date.now() - sessionStartTime.current) / 1000;
+        
+        // Save session telemetry if duration >= 5s
+        if (duration >= 5) {
+          const readingId = selectedTextId;
+          const wordsCount = readWordsSet.current.size;
+          const masteredCount = sessionMasteredCount.current;
+          
+          db.readingSessions.add({
+            id: crypto.randomUUID(),
+            readingId,
+            timestamp: Date.now(),
+            duration: Math.round(duration),
+            wordsRead: wordsCount,
+            sentencesMastered: masteredCount
+          }).catch(err => console.error('Erro ao salvar sessão de leitura:', err));
+        }
+
+        // Save page bookmark position (always save index if valid)
+        if (lastActiveLineIdxRef.current >= 0) {
+          db.readings.update(selectedTextId, { lastLineIndex: lastActiveLineIdxRef.current })
+            .catch(err => console.error('Erro ao salvar marcador de página:', err));
+        }
+      }
+    };
+  }, [selectedTextId]);
+
+  // Track last active line for bookmarking
+  useEffect(() => {
+    lastActiveLineIdxRef.current = activeLineIdx;
+  }, [activeLineIdx]);
+
+  // Backfill unique IDs for reading lines if they don't have them
+  useEffect(() => {
+    if (selectedTextId && selectedText) {
+      const hasMissingId = selectedText.lines.some(l => !l.id);
+      if (hasMissingId) {
+        const updatedLines = selectedText.lines.map(l => ({
+          ...l,
+          id: l.id || crypto.randomUUID()
+        }));
+        db.readings.update(selectedTextId, { lines: updatedLines })
+          .catch(err => console.error('Erro ao migrar IDs de linha:', err));
+      }
+    }
+  }, [selectedTextId, selectedText]);
+
+  // Restore position from bookmark
+  useEffect(() => {
+    if (selectedTextId && selectedText) {
+      if (restoredRef.current === selectedTextId) return;
+      restoredRef.current = selectedTextId;
+
+      const idx = selectedText.lastLineIndex;
+      const targetIdx = (idx !== undefined && idx >= 0 && idx < selectedText.lines.length) ? idx : 0;
+      setActiveLineIdx(targetIdx);
+      if (linesWithRanges[targetIdx]) {
+        setActiveCharIndex(linesWithRanges[targetIdx].start);
+      }
+      setTimeout(() => {
+        const lineEl = document.querySelector(`[data-line-index="${targetIdx}"]`);
+        lineEl?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 200);
+    } else if (!selectedTextId) {
+      restoredRef.current = null;
+      setActiveLineIdx(-1);
+      setActiveCharIndex(-1);
+    }
+  }, [selectedTextId, selectedText, linesWithRanges]);
+
+  // Migrate standalone texts to the first available collection (or create one)
+  useEffect(() => {
+    const migrateStandaloneTexts = async () => {
+      try {
+        const standalone = await db.readings.filter(r => !r.collectionId).toArray();
+        if (standalone.length === 0) return;
+
+        let targetCollectionId = '';
+        const existingCollections = await db.readingCollections.toArray();
+        
+        if (existingCollections.length > 0) {
+          // Use the oldest/first collection
+          const sorted = existingCollections.sort((a, b) => a.createdAt - b.createdAt);
+          targetCollectionId = sorted[0].id;
+        } else {
+          // Create a default collection
+          const id = typeof crypto !== 'undefined' && crypto.randomUUID
+            ? crypto.randomUUID()
+            : Math.random().toString(36).substring(2, 15);
+          
+          await db.readingCollections.add({
+            id,
+            title: 'Biblioteca Geral',
+            description: 'Coleção criada para agrupar seus textos existentes.',
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+          });
+          targetCollectionId = id;
+        }
+
+        // Update all standalone texts
+        for (const reading of standalone) {
+          await db.readings.update(reading.id, { collectionId: targetCollectionId });
+        }
+        console.log(`Migrados ${standalone.length} textos para a coleção ${targetCollectionId}`);
+      } catch (error) {
+        console.error('Erro na migração de textos avulsos:', error);
+      }
+    };
+
+    if (readings) {
+      migrateStandaloneTexts();
+    }
+  }, [readings]);
+
+  // Track words read based on activeLineIdx
+  useEffect(() => {
+    if (selectedText && activeLineIdx >= 0 && linesWithRanges[activeLineIdx]) {
+      const words = linesWithRanges[activeLineIdx].line.original.split(/\s+/).filter(Boolean);
+      words.forEach((_, i) => {
+        readWordsSet.current.add(`${activeLineIdx}-${i}`);
+      });
+    }
+  }, [activeLineIdx, linesWithRanges, selectedText]);
+
+  // Find active line index based on character index
+  useEffect(() => {
+    if (isPlaying && selectedText && linesWithRanges.length > 0 && activeCharIndex >= 0) {
+      const activeIdx = linesWithRanges.findIndex(
+        ({ start, end }) => activeCharIndex >= start && activeCharIndex < end
+      );
+      if (activeIdx >= 0) {
+        setActiveLineIdx(activeIdx);
+      }
+    }
+  }, [activeCharIndex, linesWithRanges, selectedText, isPlaying]);
+
+  // Auto-scroll active line smoothly
+  useEffect(() => {
+    if (activeLineRef.current) {
+      activeLineRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [activeLineIdx]);
+
+  // Stop TTS and clear timer on unmount or view/lesson change
+  useEffect(() => {
+    return () => {
+      isPlayingRef.current = false;
+      window.speechSynthesis?.cancel();
+      clearTimeout(timerRef.current);
+    };
+  }, [selectedTextId, activeReaderTab]);
+
+  const speakText = (text: string) => {
+    window.speechSynthesis?.cancel();
+    const utt = new SpeechSynthesisUtterance(text);
+    utt.lang = 'en-US';
+    utt.rate = ttsRate;
+    if (ttsVoice) {
+      const voices = window.speechSynthesis?.getVoices() ?? [];
+      const matched = voices.find((v) => v.name === ttsVoice);
+      if (matched) { utt.voice = matched; utt.lang = matched.lang; }
+    }
+    window.speechSynthesis?.speak(utt);
+  };
+
+  const startSentenceTimer = (index: number, wordOffset = 0) => {
+    clearTimeout(timerRef.current);
+    if (!selectedText || linesWithRanges.length === 0 || index >= linesWithRanges.length) return;
+
+    const lr = linesWithRanges[index];
+    const startCharOffset = lr.start;
+
+    const words: { word: string; start: number; end: number }[] = [];
+    const regex = /\S+/g;
+    let match;
+    while ((match = regex.exec(lr.line.original)) !== null) {
+      words.push({
+        word: match[0],
+        start: startCharOffset + match.index,
+        end: startCharOffset + match.index + match[0].length
+      });
+    }
+
+    const playNext = (wIdx: number) => {
+      if (!isPlayingRef.current) return;
+      if (wIdx >= words.length) {
+        return;
+      }
+
+      currentWordIdxRef.current = wIdx;
+      const word = words[wIdx];
+      setActiveCharIndex(word.start);
+
+      // Speed calibrated for standard TTS rate
+      const charDuration = 24;
+      const baseDuration = 150;
+      const duration = ((word.word.length * charDuration) + baseDuration) / (playbackSpeed * ttsRate);
+
+      timerRef.current = setTimeout(() => {
+        playNext(wIdx + 1);
+      }, duration);
+    };
+
+    playNext(wordOffset);
+  };
+
+  const startFromSentence = (index: number) => {
+    window.speechSynthesis?.cancel();
+    clearTimeout(timerRef.current);
+    if (!selectedText || linesWithRanges.length === 0 || index >= linesWithRanges.length) return;
+
+    currentWordIdxRef.current = 0;
+    receivedBoundaryRef.current = false;
+
+    const lr = linesWithRanges[index];
+    const sentenceText = lr.line.original;
+    const startCharOffset = lr.start;
+
+    // Tokenize words for this sentence
+    const words: { word: string; start: number; end: number }[] = [];
+    const regex = /\S+/g;
+    let match;
+    while ((match = regex.exec(sentenceText)) !== null) {
+      words.push({
+        word: match[0],
+        start: startCharOffset + match.index,
+        end: startCharOffset + match.index + match[0].length
+      });
+    }
+
+    const utt = new SpeechSynthesisUtterance(sentenceText);
+    utt.lang = 'en-US';
+    utt.rate = playbackSpeed * ttsRate;
+    
+    if (ttsVoice) {
+      const voices = window.speechSynthesis?.getVoices() ?? [];
+      const matched = voices.find((v) => v.name === ttsVoice);
+      if (matched) { utt.voice = matched; utt.lang = matched.lang; }
+    }
+
+    utt.onboundary = (event) => {
+      if (event.name === 'word') {
+        receivedBoundaryRef.current = true;
+        clearTimeout(timerRef.current);
+
+        // Find the tokenized word matching event.charIndex
+        const word = words.find(w => {
+          const localStart = w.start - startCharOffset;
+          const localEnd = w.end - startCharOffset;
+          return event.charIndex >= localStart && event.charIndex < localEnd;
+        }) || words.find(w => {
+          const localStart = w.start - startCharOffset;
+          return event.charIndex <= localStart;
+        });
+
+        if (word) {
+          setActiveCharIndex(word.start);
+          currentWordIdxRef.current = words.indexOf(word);
+        }
+      }
+    };
+
+    utt.onstart = () => {
+      if (!isPlayingRef.current) {
+        window.speechSynthesis?.pause();
+        return;
+      }
+      setIsPlaying(true);
+      setActiveLineIdx(index);
+
+      // Start fallback timer after 350ms if no boundaries were received
+      timerRef.current = setTimeout(() => {
+        if (!receivedBoundaryRef.current) {
+          startSentenceTimer(index, 0);
+        }
+      }, 350);
+    };
+
+    utt.onend = () => {
+      if (isPlayingRef.current) {
+        if (activeReaderTab === 'lineByLine') {
+          stopPlayback();
+        } else {
+          const nextIndex = index + 1;
+          if (nextIndex < linesWithRanges.length) {
+            startFromSentence(nextIndex);
+          } else {
+            stopPlayback();
+          }
+        }
+      }
+    };
+
+    utt.onerror = () => {
+      stopPlayback();
+    };
+
+    setIsPlaying(true);
+    isPlayingRef.current = true;
+    window.speechSynthesis?.speak(utt);
+  };
+
+  // Restart playback if speed changes during playback
+  useEffect(() => {
+    if (isPlaying) {
+      const startIdx = activeLineIdx >= 0 ? activeLineIdx : 0;
+      startFromSentence(startIdx);
+    }
+  }, [playbackSpeed]);
+
+  const togglePlayPause = () => {
+    if (isPlaying) {
+      window.speechSynthesis?.pause();
+      clearTimeout(timerRef.current);
+      isPlayingRef.current = false;
+      setIsPlaying(false);
+    } else if (window.speechSynthesis?.paused) {
+      isPlayingRef.current = true;
+      setIsPlaying(true);
+      window.speechSynthesis?.resume();
+      if (!receivedBoundaryRef.current && activeLineIdx >= 0) {
+        startSentenceTimer(activeLineIdx, currentWordIdxRef.current);
+      }
+    } else if (selectedText) {
+      const startIdx = activeLineIdx >= 0 ? activeLineIdx : 0;
+      startFromSentence(startIdx);
+    }
+  };
+
+  const stopPlayback = () => {
+    isPlayingRef.current = false;
+    window.speechSynthesis?.cancel();
+    clearTimeout(timerRef.current);
+    setActiveCharIndex(-1);
+    setIsPlaying(false);
+    currentWordIdxRef.current = -1;
+  };
+
+  const handleSaveReading = async (reading: ReadingText) => {
+    await db.readings.put(reading);
+  };
+
+  const handleDeleteReading = async (id: string) => {
+    if (window.confirm('Deseja excluir este texto? Esta ação não pode ser desfeita.')) {
+      await db.readings.delete(id);
+      if (selectedTextId === id) setSelectedTextId(null);
+    }
+  };
+
+  const handleCreateCollection = async () => {
+    if (!newCollectionTitle.trim()) return;
+    const id = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : Math.random().toString(36).substring(2, 15);
+    await db.readingCollections.add({
+      id,
+      title: newCollectionTitle.trim(),
+      description: newCollectionDescription.trim() || undefined,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    });
+    setNewCollectionTitle('');
+    setNewCollectionDescription('');
+    setIsCreatingCollection(false);
+  };
+
+  const handleOpenEditCollection = (e: React.MouseEvent, collection: ReadingCollection) => {
+    e.stopPropagation();
+    setEditingCollection(collection);
+    setEditCollectionTitle(collection.title);
+    setEditCollectionDescription(collection.description || '');
+  };
+
+  const handleSaveEditCollection = async () => {
+    if (!editingCollection || !editCollectionTitle.trim()) return;
+    await db.readingCollections.update(editingCollection.id, {
+      title: editCollectionTitle.trim(),
+      description: editCollectionDescription.trim() || undefined,
+      updatedAt: Date.now()
+    });
+    setEditingCollection(null);
+  };
+
+  const handleOpenDeleteCollection = async (e: React.MouseEvent, collection: ReadingCollection) => {
+    e.stopPropagation();
+    const count = readings ? readings.filter(r => r.collectionId === collection.id).length : 0;
+    setAssociatedReadingsCount(count);
+    setDeletingCollection(collection);
+  };
+
+  const handleDeleteCollection = async (cascade: boolean) => {
+    if (!deletingCollection) return;
+    const id = deletingCollection.id;
+    if (cascade) {
+      const associated = readings ? readings.filter(r => r.collectionId === id) : [];
+      for (const r of associated) {
+        await db.readings.delete(r.id);
+      }
+    } else {
+      const associated = readings ? readings.filter(r => r.collectionId === id) : [];
+      for (const r of associated) {
+        await db.readings.update(r.id, { collectionId: undefined });
+      }
+    }
+    await db.readingCollections.delete(id);
+    setDeletingCollection(null);
+    if (selectedCollectionId === id) {
+      setSelectedCollectionId(null);
+    }
+  };
+  const handleAppendSentence = async () => {
+    if (!selectedText || !appendOriginal.trim()) return;
+    const newSentence = {
+      id: crypto.randomUUID(),
+      original: appendOriginal.trim(),
+      translated: appendTranslated.trim(),
+      highlights: [],
+      mastered: false
+    };
+    const updatedLines = [...selectedText.lines, newSentence];
+    const fullOriginal = updatedLines.map(s => s.original).join(' ');
+    const fullTranslated = updatedLines.map(s => s.translated).join(' ');
+
+    await db.readings.update(selectedText.id, {
+      lines: updatedLines,
+      fullTextOriginal: fullOriginal,
+      fullTextTranslated: fullTranslated,
+      updatedAt: Date.now()
+    });
+    
+    setAppendOriginal('');
+    setAppendTranslated('');
+    setIsAppending(false);
+  };
+
+  const handleAppendBlockPdfUpload = async (file: File) => {
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      setAppendBlockErrorMsg('Por favor, selecione um arquivo PDF.');
+      return;
+    }
+    setAppendBlockIsPdfLoading(true);
+    setAppendBlockErrorMsg('');
+    try {
+      const text = await extractTextFromPdf(file);
+      if (!text.trim()) {
+        setAppendBlockErrorMsg('Não foi possível extrair texto do PDF.');
+        return;
+      }
+      setAppendBlockOriginalText(text);
+      setAppendBlockPdfBlob(file);
+    } catch (err: any) {
+      setAppendBlockErrorMsg(`Erro ao processar PDF: ${err.message || 'Erro desconhecido'}`);
+    } finally {
+      setAppendBlockIsPdfLoading(false);
+    }
+  };
+
+  const handleAppendBlockProcess = async () => {
+    if (!selectedText || !appendBlockOriginalText.trim()) return;
+    setAppendBlockErrorMsg('');
+    setAppendBlockIsProcessing(true);
+    
+    try {
+      let newLines;
+      
+      if (appendBlockUseAI && geminiApiKey.trim()) {
+        setAppendBlockProcessingStep('🤖 Gemini está segmentando e traduzindo o texto...');
+        const aiResult = await processTextWithAI(appendBlockOriginalText, geminiApiKey);
+        newLines = aiResult.lines;
+      } else {
+        setAppendBlockProcessingStep('📝 Segmentando texto por linhas...');
+        newLines = segmentTextManually(appendBlockOriginalText, appendBlockTranslatedText);
+      }
+      
+      const updatedLines = [...selectedText.lines, ...newLines];
+      const fullOriginal = updatedLines.map(s => s.original).join(' ');
+      const fullTranslated = updatedLines.map(s => s.translated).join(' ');
+      
+      const currentRaw = selectedText.rawPdfText || '';
+      const updatedRaw = currentRaw ? `${currentRaw}\n\n${appendBlockOriginalText.trim()}` : appendBlockOriginalText.trim();
+      const pdfFileToSave = appendBlockPdfBlob || selectedText.pdfFile;
+      
+      await db.readings.update(selectedText.id, {
+        lines: updatedLines,
+        fullTextOriginal: fullOriginal,
+        fullTextTranslated: fullTranslated,
+        rawPdfText: updatedRaw || undefined,
+        pdfFile: pdfFileToSave || undefined,
+        updatedAt: Date.now()
+      });
+      
+      closeAppendBlockModal();
+    } catch (err: any) {
+      setAppendBlockErrorMsg(err.message || 'Erro ao processar e anexar o texto.');
+    } finally {
+      setAppendBlockIsProcessing(false);
+      setAppendBlockProcessingStep('');
+    }
+  };
+
+  const closeAppendBlockModal = () => {
+    setIsAppendBlockModalOpen(false);
+    setAppendBlockOriginalText('');
+    setAppendBlockTranslatedText('');
+    setAppendBlockPdfBlob(null);
+    setAppendBlockErrorMsg('');
+    setAppendBlockIsProcessing(false);
+    setAppendBlockProcessingStep('');
+  };
+
+  // ── Edit line handlers ──────────────────────────────────────
+  const handleStartEditLine = (idx: number) => {
+    if (!selectedText) return;
+    setEditingLineIdx(idx);
+    setEditLineOriginal(selectedText.lines[idx].original);
+    setEditLineTranslated(selectedText.lines[idx].translated);
+  };
+
+  const handleSaveEditLine = async () => {
+    if (!selectedText || editingLineIdx === null) return;
+    const updatedLines = [...selectedText.lines];
+    updatedLines[editingLineIdx] = {
+      ...updatedLines[editingLineIdx],
+      original: editLineOriginal.trim(),
+      translated: editLineTranslated.trim(),
+    };
+    await db.readings.update(selectedText.id, { lines: updatedLines, updatedAt: Date.now() });
+    setEditingLineIdx(null);
+    setEditLineOriginal('');
+    setEditLineTranslated('');
+  };
+
+  const handleDeleteLine = async (idx: number) => {
+    if (!selectedText) return;
+    const updatedLines = selectedText.lines.filter((_, i) => i !== idx);
+    await db.readings.update(selectedText.id, { lines: updatedLines, updatedAt: Date.now() });
+    if (editingLineIdx === idx) setEditingLineIdx(null);
+  };
+
+  // ── Drag-and-drop handlers ──────────────────────────────────
+  const handleDragStart = (idx: number) => {
+    dragSrcIdx.current = idx;
+  };
+
+  const handleDragOver = (e: React.DragEvent, idx: number) => {
+    e.preventDefault();
+    setDragOverIdx(idx);
+  };
+
+  const handleDrop = async (e: React.DragEvent, dropIdx: number) => {
+    e.preventDefault();
+    setDragOverIdx(null);
+    if (!selectedText || dragSrcIdx.current === null || dragSrcIdx.current === dropIdx) return;
+    const updatedLines = [...selectedText.lines];
+    const [moved] = updatedLines.splice(dragSrcIdx.current, 1);
+    updatedLines.splice(dropIdx, 0, moved);
+    dragSrcIdx.current = null;
+    await db.readings.update(selectedText.id, { lines: updatedLines, updatedAt: Date.now() });
+  };
+
+  const handleDragEnd = () => {
+    setDragOverIdx(null);
+    dragSrcIdx.current = null;
+  };
+
+  const handleMoveLineTo = async (fromIdx: number, toIdx: number) => {
+    if (!selectedText) return;
+    if (toIdx < 0 || toIdx >= selectedText.lines.length || fromIdx === toIdx) return;
+
+    const updatedLines = [...selectedText.lines];
+    const [moved] = updatedLines.splice(fromIdx, 1);
+    updatedLines.splice(toIdx, 0, moved);
+
+    setActiveLineIdx(toIdx);
+    await db.readings.update(selectedText.id, { lines: updatedLines, updatedAt: Date.now() });
+
+    setTimeout(() => {
+      const el = document.getElementById(`line-card-${toIdx}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }, 50);
+  };
+
+  const handleMoveLine = async (fromIdx: number, direction: 'up' | 'down') => {
+    const toIdx = direction === 'up' ? fromIdx - 1 : fromIdx + 1;
+    await handleMoveLineTo(fromIdx, toIdx);
+  };
+
+  // ── Add to deck handlers ────────────────────────────────────
+  const handleOpenAddToDeck = () => {
+    if (!selectedText) return;
+    const allIdxs = new Set(selectedText.lines.map((_, i) => i));
+    setSelectedLineIdxs(allIdxs);
+    setAddToDeckId(decks[0]?.id || '');
+    setAddToDeckSuccess('');
+    setIsAddToDeckOpen(true);
+  };
+
+  const handleToggleLineIdx = (idx: number) => {
+    setSelectedLineIdxs(prev => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
+  const handleAddToDeck = async () => {
+    if (!selectedText || !addToDeckId || selectedLineIdxs.size === 0) return;
+    setIsAddingToDeck(true);
+    try {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const newCards = [...selectedLineIdxs].map(idx => {
+        const line = selectedText.lines[idx];
+        return {
+          id: crypto.randomUUID(),
+          deckId: addToDeckId,
+          front: line.original,
+          back: line.translated,
+          context: selectedText.title,
+          interval: 0,
+          ease: 2.5,
+          repetitions: 0,
+          lapses: 0,
+          dueDate: todayStr,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+      });
+      await db.cards.bulkAdd(newCards);
+      setAddToDeckSuccess(`${newCards.length} card${newCards.length !== 1 ? 's' : ''} adicionado${newCards.length !== 1 ? 's' : ''} ao baralho!`);
+      setTimeout(() => {
+        setIsAddToDeckOpen(false);
+        setAddToDeckSuccess('');
+      }, 1800);
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setIsAddingToDeck(false);
+    }
+  };
+
+  const handleToggleMastered = async (lineIndex: number) => {
+    if (!selectedText) return;
+    const updatedLines = [...selectedText.lines];
+    const newMasteredState = !updatedLines[lineIndex].mastered;
+    updatedLines[lineIndex] = { ...updatedLines[lineIndex], mastered: newMasteredState };
+    
+    // Update session mastered count balance (+1 if mastered, -1 if unmastered)
+    sessionMasteredCount.current += newMasteredState ? 1 : -1;
+
+    await db.readings.update(selectedText.id, {
+      lines: updatedLines,
+      updatedAt: Date.now(),
+    });
+  };
+
+  const handleCopyLine = (text: string, idx: number) => {
+    navigator.clipboard?.writeText(text);
+    setCopiedLineIdx(idx);
+    setTimeout(() => setCopiedLineIdx(null), 2000);
+  };
+
+  const renderHighlightedText = (text: string, highlights: string[]) => {
+    if (!highlights || highlights.length === 0) {
+      return <span>{text}</span>;
+    }
+    const escapedHighlights = highlights.map((h) => h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const regex = new RegExp(`(${escapedHighlights.join('|')})`, 'gi');
+    const parts = text.split(regex);
+
+    return parts.map((part, i) => {
+      const isHighlight = highlights.some((h) => h.toLowerCase() === part.toLowerCase());
+      return isHighlight ? (
+        <span key={i} className="text-primary font-bold">{part}</span>
+      ) : (
+        <span key={i}>{part}</span>
+      );
+    });
+  };
+
+  const renderSentenceWithWordHighlights = (lineText: string, lineStartOffset: number, isActiveLine: boolean) => {
+    const words: { word: string; start: number; end: number }[] = [];
+    const regex = /\S+/g;
+    let match;
+    while ((match = regex.exec(lineText)) !== null) {
+      const wordStart = lineStartOffset + match.index;
+      words.push({
+        word: match[0],
+        start: wordStart,
+        end: wordStart + match[0].length
+      });
+    }
+
+    return words.map(({ word, start, end }, i) => {
+      const isActiveWord = activeCharIndex >= start && activeCharIndex < end;
+      const isPastWord = activeCharIndex >= end;
+
+      let wordClass = '';
+
+      if (isZenMode && zenTheme === 'sepia') {
+        if (isPlaying) {
+          if (isActiveLine) {
+            if (isActiveWord) {
+              wordClass = 'bg-[#8b5a2b] text-[#f4ecd8] border-[#8b5a2b] font-bold shadow-sm px-1 py-0.5 rounded border';
+            } else if (isPastWord) {
+              wordClass = 'text-[#8b5a2b]/85 font-bold border-transparent px-1 py-0.5 rounded border';
+            } else {
+              wordClass = 'text-[#5c4033] font-bold border-transparent px-1 py-0.5 rounded border';
+            }
+          } else {
+            wordClass = 'text-[#5c4033]/50 border-transparent px-1 py-0.5 rounded border';
+          }
+        } else {
+          if (isActiveLine) {
+            if (isActiveWord) {
+              wordClass = 'bg-[#8b5a2b] text-[#f4ecd8] border-[#8b5a2b] font-bold shadow-sm px-1 py-0.5 rounded border';
+            } else {
+              wordClass = 'text-[#5c4033] font-bold border-transparent px-1 py-0.5 rounded border';
+            }
+          } else {
+            wordClass = 'text-[#5c4033] font-semibold border-transparent px-1 py-0.5 rounded border';
+          }
+        }
+      } else if (isZenMode && zenTheme === 'dark-matte') {
+        if (isPlaying) {
+          if (isActiveLine) {
+            if (isActiveWord) {
+              wordClass = 'bg-[#51afef] text-[#1a1c23] border-[#51afef] font-bold shadow-sm px-1 py-0.5 rounded border';
+            } else if (isPastWord) {
+              wordClass = 'text-[#51afef]/85 font-bold border-transparent px-1 py-0.5 rounded border';
+            } else {
+              wordClass = 'text-[#cbd5e1] font-bold border-transparent px-1 py-0.5 rounded border';
+            }
+          } else {
+            wordClass = 'text-[#cbd5e1]/45 border-transparent px-1 py-0.5 rounded border';
+          }
+        } else {
+          if (isActiveLine) {
+            if (isActiveWord) {
+              wordClass = 'bg-[#51afef] text-[#1a1c23] border-[#51afef] font-bold shadow-sm px-1 py-0.5 rounded border';
+            } else {
+              wordClass = 'text-[#cbd5e1] font-bold border-transparent px-1 py-0.5 rounded border';
+            }
+          } else {
+            wordClass = 'text-[#cbd5e1] font-semibold border-transparent px-1 py-0.5 rounded border';
+          }
+        }
+      } else {
+        // Default theme
+        if (isPlaying) {
+          if (isActiveLine) {
+            if (isActiveWord) {
+              wordClass = 'bg-primary text-primary-foreground border-primary font-bold shadow-sm px-1 py-0.5 rounded border';
+            } else if (isPastWord) {
+              wordClass = 'text-primary/80 font-bold border-transparent px-1 py-0.5 rounded border';
+            } else {
+              wordClass = 'text-foreground font-bold border-transparent px-1 py-0.5 rounded border';
+            }
+          } else {
+            wordClass = 'text-muted-foreground/60 border-transparent px-1 py-0.5 rounded border';
+          }
+        } else {
+          if (isActiveLine) {
+            if (isActiveWord) {
+              wordClass = 'bg-primary text-primary-foreground border-primary font-bold shadow-sm px-1 py-0.5 rounded border';
+            } else {
+              wordClass = 'text-foreground font-bold border-transparent px-1 py-0.5 rounded border';
+            }
+          } else {
+            wordClass = 'text-foreground font-semibold border-transparent px-1 py-0.5 rounded border';
+          }
+        }
+      }
+
+      return (
+        <span
+          key={i}
+          ref={isActiveWord ? activeWordRef : undefined}
+          className={`inline-block transition-colors duration-150 ${wordClass}`}
+        >
+          {word}
+        </span>
+      );
+    });
+  };
+
+  const renderVitrineText = (rawText: string | undefined) => {
+    if (!rawText) {
+      return (
+        <div className="bg-card border border-border rounded-2xl p-8 text-center space-y-2 shadow-sm">
+          <HelpCircle size={32} className="mx-auto text-muted-foreground/40 animate-pulse" />
+          <p className="text-sm font-semibold text-foreground">Sem conteúdo brutas do PDF</p>
+          <p className="text-xs text-muted-foreground">
+            Esta lição não possui texto bruto do PDF disponível.
+          </p>
+        </div>
+      );
+    }
+
+    // Split by page marker "--- PAGE \d+ ---"
+    const pages = rawText.split(/--- PAGE \d+ ---/gi);
+    const matches = [...rawText.matchAll(/--- PAGE (\d+) ---/gi)];
+    const pageNumbers = matches.map((m) => m[1]);
+
+    if (pages.length <= 1) {
+      return (
+        <div className="bg-card border border-border rounded-2xl p-6 md:p-8 shadow-sm leading-relaxed whitespace-pre-wrap text-sm text-foreground font-sans font-medium tracking-wide">
+          {rawText}
+        </div>
+      );
+    }
+
+    // If first chunk is empty (which happens if file starts with page marker), remove it
+    const hasEmptyFirst = !pages[0].trim();
+    const cleanPages = hasEmptyFirst ? pages.slice(1) : pages;
+    const cleanPageNumbers = hasEmptyFirst ? pageNumbers : ['', ...pageNumbers];
+
+    return (
+      <div className="space-y-6">
+        {cleanPages.map((pageContent, idx) => {
+          const pageNum = cleanPageNumbers[idx] || (idx + 1).toString();
+          if (!pageContent.trim()) return null;
+          return (
+            <div
+              key={idx}
+              className="bg-card border border-border rounded-2xl p-6 md:p-8 shadow-sm space-y-4 relative overflow-hidden"
+            >
+              <div className="flex items-center justify-between border-b border-border pb-3 mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-primary" />
+                  <span className="text-xs font-black text-foreground uppercase tracking-widest">
+                    PÁGINA {pageNum}
+                  </span>
+                </div>
+                <span className="text-[10px] text-muted-foreground font-bold tracking-wider uppercase bg-muted px-2 py-0.5 rounded border border-border">
+                  Layout Original do PDF
+                </span>
+              </div>
+              <div className="text-sm leading-[1.8] text-foreground whitespace-pre-line font-sans font-medium tracking-wide">
+                {pageContent.trim()}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // ═══════════════════════════════════════════
+  // READER VIEW
+  // ═══════════════════════════════════════════
+
+  if (selectedText) {
+    const masteredCount = selectedText.lines.filter((l) => l.mastered).length;
+
+    return (
+      <div className="space-y-0 w-full max-w-none">
+        {/* Header */}
+        {!isZenMode && (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-2 md:px-6 py-4 border-b border-border">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => { setSelectedTextId(null); stopPlayback(); }}
+                className="p-2 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer border border-border bg-card shadow-sm"
+              >
+                <ArrowLeft size={16} />
+              </button>
+              <div className="flex flex-col">
+                <h2 className="font-extrabold text-md text-foreground tracking-tight">{selectedText.title}</h2>
+                <span className="text-[10px] text-muted-foreground font-semibold">
+                  Frases {masteredCount}/{selectedText.lines.length}
+                </span>
+              </div>
+            </div>
+
+            {/* Tabs & Focus button */}
+            <div className="flex items-center gap-2">
+              <div className="flex items-center bg-muted/50 border border-border rounded-xl p-1 gap-1">
+                <button
+                  onClick={() => { setActiveReaderTab('lineByLine'); stopPlayback(); }}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    activeReaderTab === 'lineByLine'
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                  }`}
+                >
+                  Linha a Linha
+                </button>
+                <button
+                  onClick={() => { setActiveReaderTab('textAudio'); stopPlayback(); }}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    activeReaderTab === 'textAudio'
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                  }`}
+                >
+                  Texto + Áudio
+                </button>
+                <button
+                  onClick={() => { setActiveReaderTab('vitrine'); stopPlayback(); }}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    activeReaderTab === 'vitrine'
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                  }`}
+                >
+                  Vitrine de Leitura
+                </button>
+              </div>
+              
+              {activeReaderTab === 'textAudio' && (
+                <button
+                  onClick={() => setIsZenMode(true)}
+                  className="p-2 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer border border-border bg-card shadow-sm h-[38px] w-[38px] flex items-center justify-center"
+                  title="Modo Foco (Zen Mode)"
+                >
+                  <EyeOff size={15} />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Floating header when in Zen Mode */}
+        {isZenMode && (
+          <div className={`flex justify-between items-center px-4 py-3 border-b sticky top-0 z-30 animate-fadeIn transition-all duration-300 ${
+            zenTheme === 'sepia'
+              ? 'bg-[#f4ecd8] border-[#8b5a2b]/20 text-[#5c4033]'
+              : zenTheme === 'dark-matte'
+              ? 'bg-[#1a1c23] border-white/10 text-[#cbd5e1]'
+              : 'bg-card/65 backdrop-blur-md border-border text-foreground'
+          }`}>
+            <div className="flex items-center gap-2">
+              <span className={`w-2.5 h-2.5 rounded-full animate-pulse ${
+                zenTheme === 'sepia'
+                  ? 'bg-[#8b5a2b]'
+                  : zenTheme === 'dark-matte'
+                  ? 'bg-[#51afef]'
+                  : 'bg-primary'
+              }`} />
+              <span className="text-xs font-black uppercase tracking-widest truncate max-w-[150px] sm:max-w-xs">{selectedText.title}</span>
+            </div>
+            
+            {/* Theme Selector & Exit Button */}
+            <div className="flex items-center gap-3">
+              <div className={`flex items-center rounded-lg p-0.5 gap-1 border ${
+                zenTheme === 'sepia'
+                  ? 'bg-[#8b5a2b]/5 border-[#8b5a2b]/20'
+                  : zenTheme === 'dark-matte'
+                  ? 'bg-white/5 border-white/10'
+                  : 'bg-muted border-border'
+              }`}>
+                {(['default', 'sepia', 'dark-matte'] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => handleSetZenTheme(t)}
+                    className={`px-2 py-1 rounded text-[9px] font-black uppercase tracking-wider cursor-pointer transition-all ${
+                      zenTheme === t
+                        ? (
+                            t === 'sepia'
+                              ? 'bg-[#8b5a2b] text-[#f4ecd8]'
+                              : t === 'dark-matte'
+                              ? 'bg-[#51afef] text-[#1a1c23]'
+                              : 'bg-primary text-primary-foreground'
+                          )
+                        : (
+                            t === 'sepia'
+                              ? 'text-[#5c4033]/70 hover:text-[#5c4033]'
+                              : t === 'dark-matte'
+                              ? 'text-[#cbd5e1]/70 hover:text-[#cbd5e1]'
+                              : 'text-muted-foreground hover:text-foreground'
+                          )
+                    }`}
+                  >
+                    {t === 'default' ? 'Padrão' : t === 'sepia' ? 'Sépia' : 'Matte'}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                onClick={() => setIsZenMode(false)}
+                className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer border shadow-sm flex items-center gap-1 uppercase tracking-wider ${
+                  zenTheme === 'sepia'
+                    ? 'bg-[#8b5a2b] text-[#f4ecd8] border-[#8b5a2b] hover:bg-[#8b5a2b]/90'
+                    : zenTheme === 'dark-matte'
+                    ? 'bg-[#51afef] text-[#1a1c23] border-[#51afef] hover:bg-[#51afef]/90'
+                    : 'bg-primary text-primary-foreground border-border hover:bg-primary/95'
+                }`}
+              >
+                <Maximize2 size={10} /> Sair do Foco
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* TAB: Linha a Linha */}
+        {activeReaderTab === 'lineByLine' && (
+          <div className="px-2 md:px-6 py-4 space-y-3">
+            {/* Header actions */}
+            {selectedText.lines.length > 0 && (
+              <div className="flex items-center justify-between pb-1">
+                <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">
+                  {selectedText.lines.length} frase{selectedText.lines.length !== 1 ? 's' : ''} · arraste para reordenar
+                </span>
+                <Button
+                  onClick={handleOpenAddToDeck}
+                  disabled={decks.length === 0}
+                  title={decks.length === 0 ? 'Crie um baralho primeiro em Baralhos' : undefined}
+                  className="bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-bold rounded-xl cursor-pointer gap-1.5 h-8"
+                >
+                  <BookOpen size={12} /> Adicionar ao Baralho
+                </Button>
+              </div>
+            )}
+
+            {selectedText.lines.length === 0 ? (
+              <div className="bg-card border border-border border-dashed rounded-2xl p-10 text-center space-y-3 shadow-inner">
+                <BookOpen size={36} className="mx-auto text-muted-foreground/30 animate-pulse" />
+                <h3 className="text-sm font-bold text-foreground">Este texto está vazio</h3>
+                <p className="text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">
+                  Adicione frases manualmente ou importe o conteúdo de um PDF/texto (com tradução via IA) para começar a estudar.
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                  <Button
+                    onClick={() => setIsAppending(true)}
+                    variant="outline"
+                    className="text-xs font-bold rounded-xl cursor-pointer gap-1.5 h-9"
+                  >
+                    <Plus size={14} /> Adicionar Frase Manual
+                  </Button>
+                  <Button
+                    onClick={() => setIsAppendBlockModalOpen(true)}
+                    className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold rounded-xl cursor-pointer gap-1.5 h-9"
+                  >
+                    <Upload size={14} /> Importar do PDF / Texto em Lote
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {selectedText.lines.map((line, idx) => (
+                  editingLineIdx === idx ? (
+                    /* ── EDIT MODE ── */
+                    <div
+                      key={idx}
+                      className="bg-primary/5 border border-primary/30 rounded-2xl p-4 space-y-3 animate-fadeIn"
+                    >
+                      <span className="text-[10px] font-black uppercase text-primary tracking-wider">Editar frase #{idx + 1}</span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-black uppercase text-muted-foreground tracking-wider">Original</label>
+                          <textarea
+                            className="w-full bg-muted border border-border text-foreground px-3 py-2 rounded-xl text-xs outline-none focus:border-primary/50 font-semibold resize-none min-h-[60px]"
+                            value={editLineOriginal}
+                            onChange={e => setEditLineOriginal(e.target.value)}
+                            autoFocus
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-black uppercase text-muted-foreground tracking-wider">Tradução</label>
+                          <textarea
+                            className="w-full bg-muted border border-border text-foreground px-3 py-2 rounded-xl text-xs outline-none focus:border-primary/50 font-semibold resize-none min-h-[60px]"
+                            value={editLineTranslated}
+                            onChange={e => setEditLineTranslated(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          onClick={() => setEditingLineIdx(null)}
+                          className="text-[10px] font-bold rounded-lg cursor-pointer h-8"
+                        >
+                          Cancelar
+                        </Button>
+                        <Button
+                          onClick={handleSaveEditLine}
+                          disabled={!editLineOriginal.trim()}
+                          className="bg-primary hover:bg-primary/90 text-primary-foreground text-[10px] font-bold rounded-lg cursor-pointer h-8"
+                        >
+                          <Check size={12} /> Salvar
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <motion.div
+                      layout
+                      key={line.id || `line-${idx}`}
+                      id={`line-card-${idx}`}
+                      onClick={(e) => {
+                        if (e.altKey && activeLineIdx >= 0 && activeLineIdx !== idx) {
+                          handleMoveLineTo(activeLineIdx, idx);
+                        } else {
+                          setActiveLineIdx(idx);
+                        }
+                      }}
+                      draggable
+                      onDragStart={() => handleDragStart(idx)}
+                      onDragOver={e => handleDragOver(e, idx)}
+                      onDrop={e => handleDrop(e, idx)}
+                      onDragEnd={handleDragEnd}
+                      className={`flex items-start gap-3 p-4 rounded-2xl border transition-all duration-200 group cursor-pointer ${
+                        dragOverIdx === idx
+                          ? 'border-primary/60 bg-primary/5 scale-[1.01]'
+                          : activeLineIdx === idx
+                          ? 'border-violet-500 bg-violet-500/[0.03] shadow-sm ring-1 ring-violet-500/30'
+                          : line.mastered
+                          ? 'bg-emerald-500/5 border-emerald-500/20'
+                          : 'bg-card border-border hover:border-border/80'
+                      }`}
+                      transition={{ type: 'spring', stiffness: 350, damping: 30 }}
+                    >
+                      {/* Drag handle */}
+                      <div className="flex-shrink-0 pt-1 cursor-grab opacity-30 group-hover:opacity-70 transition-opacity select-none">
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" className="text-muted-foreground">
+                          <circle cx="4" cy="3" r="1.2"/><circle cx="10" cy="3" r="1.2"/>
+                          <circle cx="4" cy="7" r="1.2"/><circle cx="10" cy="7" r="1.2"/>
+                          <circle cx="4" cy="11" r="1.2"/><circle cx="10" cy="11" r="1.2"/>
+                        </svg>
+                      </div>
+
+                      {/* Content */}
+                      <div className="flex-1 space-y-1.5 min-w-0">
+                        <p className="text-sm font-semibold text-foreground leading-relaxed">
+                          {renderHighlightedText(line.original, line.highlights)}
+                        </p>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          {line.translated}
+                        </p>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-1 flex-shrink-0 pt-0.5">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); speakText(line.original); }}
+                          className="p-2 rounded-xl hover:bg-primary/10 text-primary transition-colors cursor-pointer border border-border bg-card shadow-sm"
+                          title="Ouvir frase"
+                        >
+                          <Play size={13} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleCopyLine(line.original, idx); }}
+                          className="p-2 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer border border-border bg-card shadow-sm"
+                          title="Copiar frase"
+                        >
+                          {copiedLineIdx === idx ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleStartEditLine(idx); }}
+                          className="p-2 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer border border-border bg-card shadow-sm"
+                          title="Editar frase"
+                        >
+                          <Edit size={13} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setDeletingLineIdx(idx); }}
+                          className="p-2 rounded-xl hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors cursor-pointer border border-border bg-card shadow-sm"
+                          title="Deletar frase"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleToggleMastered(idx); }}
+                          className={`p-2 rounded-xl transition-colors cursor-pointer border shadow-sm ${
+                            line.mastered
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/20'
+                              : 'bg-card border-border text-muted-foreground hover:text-foreground hover:bg-muted'
+                          }`}
+                          title={line.mastered ? 'Desmarcar dominada' : 'Marcar como dominada'}
+                        >
+                          <Check size={13} />
+                        </button>
+                      </div>
+                    </motion.div>
+                  )
+                ))}
+              </div>
+            )}
+
+            {isAppending && (
+              <div className="bg-card border border-border border-dashed rounded-2xl p-4 space-y-3 animate-fadeIn mt-3">
+                <span className="text-[10px] font-black uppercase text-primary tracking-wider">Adicionar Nova Frase</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <input
+                    type="text"
+                    placeholder="Frase original..."
+                    className="w-full bg-muted border border-border text-foreground px-3 py-2 rounded-xl text-xs outline-none focus:border-primary/50 font-semibold"
+                    value={appendOriginal}
+                    onChange={(e) => setAppendOriginal(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        (e.currentTarget.parentElement?.querySelector('input[placeholder="Tradução..."]') as HTMLInputElement | null)?.focus();
+                      }
+                    }}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Tradução..."
+                    className="w-full bg-muted border border-border text-foreground px-3 py-2 rounded-xl text-xs outline-none focus:border-primary/50 font-semibold"
+                    value={appendTranslated}
+                    onChange={(e) => setAppendTranslated(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAppendSentence();
+                      }
+                    }}
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setIsAppending(false);
+                      setAppendOriginal('');
+                      setAppendTranslated('');
+                    }}
+                    className="text-[10px] font-bold rounded-lg cursor-pointer h-8"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    onClick={handleAppendSentence}
+                    disabled={!appendOriginal.trim()}
+                    className="bg-primary hover:bg-primary/90 text-primary-foreground text-[10px] font-bold rounded-lg cursor-pointer h-8"
+                  >
+                    Adicionar
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {!isAppending && selectedText.lines.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+                <button
+                  onClick={() => setIsAppending(true)}
+                  className="py-3 bg-muted/30 border border-dashed border-border rounded-2xl text-xs font-bold text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Plus size={14} /> Adicionar Frase Manual
+                </button>
+                <button
+                  onClick={() => setIsAppendBlockModalOpen(true)}
+                  className="py-3 bg-muted/30 border border-dashed border-border rounded-2xl text-xs font-bold text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Upload size={14} /> Importar do PDF / Texto em Lote
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+
+        {/* TAB: Texto + Áudio (Karaokê) */}
+        {activeReaderTab === 'textAudio' && (
+          selectedText.lines.length === 0 ? (
+            <div className="px-2 md:px-6 py-10">
+              <div className="bg-card border border-border border-dashed rounded-2xl p-10 text-center space-y-3 shadow-inner">
+                <BookOpen size={36} className="mx-auto text-muted-foreground/30 animate-pulse" />
+                <h3 className="text-sm font-bold text-foreground">Sem áudio para reproduzir</h3>
+                <p className="text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">
+                  Adicione frases na aba "Linha a Linha" para poder praticar a escuta com áudio/karaokê.
+                </p>
+                <div className="pt-2">
+                  <Button
+                    onClick={() => setActiveReaderTab('lineByLine')}
+                    className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold rounded-xl cursor-pointer gap-1.5 h-9"
+                  >
+                    Ir para Linha a Linha
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className={
+              isZenMode
+                ? `fixed inset-0 z-50 overflow-y-auto pb-28 flex flex-col transition-all duration-300 ${
+                    zenTheme === 'sepia'
+                      ? 'bg-[#f4ecd8] text-[#5c4033]'
+                      : zenTheme === 'dark-matte'
+                      ? 'bg-[#1a1c23] text-[#cbd5e1]'
+                      : 'bg-background text-foreground'
+                  }`
+                : `py-4 space-y-4 pb-28 animate-fadeIn ${isZenMode ? 'px-4' : 'px-2 md:px-6'}`
+            }>
+            {/* Toggle Tradução */}
+            {!isZenMode && (
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-primary animate-ping" />
+                  Destaque Interativo (Clique para ouvir de onde quiser)
+                </span>
+                <button
+                  onClick={() => setShowTranslation(!showTranslation)}
+                  className="text-[10px] font-bold text-primary hover:underline cursor-pointer flex items-center gap-1"
+                >
+                  {showTranslation ? 'Ocultar Tradução Geral' : 'Mostrar Tradução Geral'}
+                </button>
+              </div>
+            )}
+
+            {/* Texto com Karaokê */}
+            <div className={`mx-auto w-full transition-all duration-300 ${isZenMode ? 'max-w-2xl py-6 md:py-12' : ''}`}>
+              <div className={`transition-all duration-300 ${isZenMode ? 'bg-transparent border-none shadow-none p-0' : 'bg-card border border-border rounded-2xl p-6 shadow-sm'}`}>
+                <div className={isZenMode ? 'space-y-6 md:space-y-8' : 'space-y-4'}>
+                  {linesWithRanges.map(({ index, line, start }) => {
+                    const isActiveLine = activeLineIdx === index;
+                    
+                    let containerClass = '';
+                    if (isActiveLine) {
+                      if (isZenMode && zenTheme === 'sepia') {
+                        containerClass = 'bg-[#8b5a2b]/10 border-[#8b5a2b]/25 shadow-sm opacity-100';
+                      } else if (isZenMode && zenTheme === 'dark-matte') {
+                        containerClass = 'bg-[#51afef]/10 border-[#51afef]/25 shadow-sm opacity-100';
+                      } else {
+                        containerClass = 'bg-primary/5 border-primary/20 shadow-sm opacity-100 dark:bg-primary/10 dark:border-primary/30';
+                      }
+                    } else {
+                      if (isPlaying) {
+                        containerClass = 'bg-transparent border-transparent opacity-40 hover:opacity-75 transition-opacity duration-300';
+                      } else {
+                        if (isZenMode && zenTheme === 'sepia') {
+                          containerClass = 'bg-transparent border-transparent opacity-100 hover:bg-[#8b5a2b]/5';
+                        } else if (isZenMode && zenTheme === 'dark-matte') {
+                          containerClass = 'bg-transparent border-transparent opacity-100 hover:bg-[#51afef]/5';
+                        } else {
+                          containerClass = 'bg-transparent border-transparent opacity-100 hover:bg-muted/30';
+                        }
+                      }
+                    }
+
+                    return (
+                      <div
+                        key={index}
+                        ref={isActiveLine ? activeLineRef : undefined}
+                        onClick={() => startFromSentence(index)}
+                        data-line-index={index}
+                        className={`p-3 rounded-xl transition-all duration-200 cursor-pointer border ${containerClass}`}
+                      >
+                        <p className={`font-semibold text-foreground flex flex-wrap gap-x-1 items-center transition-all ${
+                          isZenMode
+                            ? 'text-lg md:text-2xl leading-[2] md:leading-[2.2]'
+                            : 'text-sm md:text-base leading-relaxed'
+                        }`}>
+                          {renderSentenceWithWordHighlights(line.original, start, isActiveLine)}
+                        </p>
+                        {(isActiveLine || showTranslation) && (
+                          <p className={`text-muted-foreground mt-1.5 font-medium leading-relaxed animate-fadeIn pl-2 border-l border-primary/30 ${
+                            isZenMode ? 'text-sm md:text-base pl-3' : 'text-xs'
+                          }`}>
+                            {line.translated}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Player fixo na base */}
+            <div className={`fixed bottom-0 left-0 right-0 border-t px-4 py-3 z-50 shadow-lg transition-all duration-300 ${
+              isZenMode && zenTheme === 'sepia'
+                ? 'bg-[#f4ecd8]/95 backdrop-blur-lg border-[#8b5a2b]/20 text-[#5c4033]'
+                : isZenMode && zenTheme === 'dark-matte'
+                ? 'bg-[#1a1c23]/95 backdrop-blur-lg border-white/10 text-[#cbd5e1]'
+                : 'bg-card/95 backdrop-blur-lg border-border'
+            }`}>
+              <div className="max-w-4xl mx-auto flex items-center justify-between gap-4">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={togglePlayPause}
+                    className={`p-3 rounded-full transition-colors cursor-pointer shadow-lg ${
+                      isZenMode && zenTheme === 'sepia'
+                        ? 'bg-[#8b5a2b] text-[#f4ecd8] hover:bg-[#8b5a2b]/90'
+                        : isZenMode && zenTheme === 'dark-matte'
+                        ? 'bg-[#51afef] text-[#1a1c23] hover:bg-[#51afef]/90'
+                        : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                    }`}
+                    title={isPlaying ? 'Pausar' : 'Play'}
+                  >
+                    {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+                  </button>
+                  <button
+                    onClick={stopPlayback}
+                    className={`p-2 rounded-xl transition-colors cursor-pointer ${
+                      isZenMode && zenTheme === 'sepia'
+                        ? 'hover:bg-[#8b5a2b]/15 text-[#5c4033]/70 hover:text-[#5c4033]'
+                        : isZenMode && zenTheme === 'dark-matte'
+                        ? 'hover:bg-white/10 text-[#cbd5e1]/70 hover:text-[#cbd5e1]'
+                        : 'hover:bg-muted text-muted-foreground hover:text-foreground'
+                    }`}
+                    title="Parar"
+                  >
+                    <Square size={16} />
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground">
+                  <Volume2 size={14} className={
+                    isZenMode && zenTheme === 'sepia'
+                      ? 'text-[#5c4033]/70'
+                      : isZenMode && zenTheme === 'dark-matte'
+                      ? 'text-[#cbd5e1]/70'
+                      : 'text-muted-foreground'
+                  } />
+                  <span className={
+                    isZenMode && zenTheme === 'sepia'
+                      ? 'text-[#5c4033]/70'
+                      : isZenMode && zenTheme === 'dark-matte'
+                      ? 'text-[#cbd5e1]/70'
+                      : 'text-muted-foreground'
+                  }>Velocidade:</span>
+                  <div className="flex items-center gap-1">
+                    {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((speed) => (
+                      <button
+                        key={speed}
+                        onClick={() => setPlaybackSpeed(speed)}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer transition-all ${
+                          playbackSpeed === speed
+                            ? (
+                                isZenMode && zenTheme === 'sepia'
+                                  ? 'bg-[#8b5a2b] text-[#f4ecd8]'
+                                  : isZenMode && zenTheme === 'dark-matte'
+                                  ? 'bg-[#51afef] text-[#1a1c23]'
+                                  : 'bg-primary text-primary-foreground'
+                              )
+                            : (
+                                isZenMode && zenTheme === 'sepia'
+                                  ? 'hover:bg-[#8b5a2b]/10 text-[#5c4033]/70'
+                                  : isZenMode && zenTheme === 'dark-matte'
+                                  ? 'hover:bg-white/10 text-[#cbd5e1]/70'
+                                  : 'hover:bg-muted text-muted-foreground'
+                              )
+                        }`}
+                      >
+                        {speed}x
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+            </div>
+          )
+        )}
+
+        {/* TAB: Vitrine de Leitura */}
+        {activeReaderTab === 'vitrine' && (
+          <div className="px-2 md:px-6 py-4 space-y-4 animate-fadeIn">
+            {selectedText.pdfFile ? (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-muted/20 border border-border p-3 rounded-2xl">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-violet-500 animate-pulse" />
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                      Layout Original (PDF)
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      onClick={() => setIsFullscreenPdfOpen(true)}
+                      variant="outline"
+                      className="text-xs font-bold rounded-xl cursor-pointer gap-1.5 h-8 border-border bg-card hover:bg-muted"
+                    >
+                      <Maximize2 size={12} /> Tela Cheia
+                    </Button>
+                    <Button
+                      onClick={() => window.open(pdfUrl || '', '_blank')}
+                      variant="outline"
+                      className="text-xs font-bold rounded-xl cursor-pointer gap-1.5 h-8 border-border bg-card hover:bg-muted"
+                    >
+                      <ExternalLink size={12} /> Abrir em Nova Guia
+                    </Button>
+                  </div>
+                </div>
+                <div className="w-full rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+                  <iframe
+                    src={pdfUrl || ''}
+                    className="w-full h-[78vh] border-0"
+                    title={selectedText.title}
+                  />
+                </div>
+              </div>
+            ) : (
+              renderVitrineText(selectedText.rawPdfText)
+            )}
+          </div>
+        )}
+
+        {/* Delete Line Confirmation Dialog */}
+        <Dialog open={deletingLineIdx !== null} onOpenChange={(open) => !open && setDeletingLineIdx(null)}>
+          <DialogContent className="bg-card border-border max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-foreground font-black">
+                <Trash2 className="text-destructive" size={16} />
+                Excluir frase?
+              </DialogTitle>
+            </DialogHeader>
+            {deletingLineIdx !== null && selectedText?.lines[deletingLineIdx] && (
+              <div className="space-y-3 pt-1">
+                <p className="text-xs text-muted-foreground font-semibold leading-relaxed">
+                  A seguinte frase será removida permanentemente:
+                </p>
+                <div className="bg-muted/50 border border-border rounded-xl p-3 space-y-1">
+                  <p className="text-sm font-semibold text-foreground leading-relaxed line-clamp-3">
+                    {selectedText.lines[deletingLineIdx].original}
+                  </p>
+                  {selectedText.lines[deletingLineIdx].translated && (
+                    <p className="text-xs text-muted-foreground line-clamp-2">
+                      {selectedText.lines[deletingLineIdx].translated}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+            <DialogFooter className="flex justify-end gap-3 pt-3 border-t border-border/40 mt-2">
+              <Button
+                variant="outline"
+                onClick={() => setDeletingLineIdx(null)}
+                className="rounded-xl font-bold text-xs"
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={() => {
+                  if (deletingLineIdx !== null) {
+                    handleDeleteLine(deletingLineIdx);
+                    setDeletingLineIdx(null);
+                  }
+                }}
+                className="bg-destructive hover:bg-destructive/90 text-destructive-foreground rounded-xl font-bold text-xs gap-1.5"
+              >
+                <Trash2 size={12} /> Excluir
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add to Deck Dialog */}
+        <Dialog open={isAddToDeckOpen} onOpenChange={(open) => !open && setIsAddToDeckOpen(false)}>
+
+          <DialogContent className="bg-card border-border max-w-2xl flex flex-col max-h-[90vh] overflow-hidden p-0">
+            <DialogHeader className="p-6 pb-4 border-b border-border/40">
+              <DialogTitle className="flex items-center gap-2 text-foreground font-black">
+                <BookOpen className="text-violet-500" size={18} />
+                Adicionar Frases ao Baralho
+              </DialogTitle>
+            </DialogHeader>
+
+            {addToDeckSuccess ? (
+              <div className="py-12 flex flex-col items-center gap-3 text-center animate-fadeIn p-6">
+                <div className="w-14 h-14 rounded-full bg-emerald-500/10 flex items-center justify-center">
+                  <Check size={28} className="text-emerald-500" />
+                </div>
+                <p className="text-sm font-bold text-foreground">{addToDeckSuccess}</p>
+              </div>
+            ) : (
+              <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                {/* Scrollable body content */}
+                <div className="flex-1 overflow-y-auto p-6 space-y-4 max-h-[60vh]">
+                  {/* Deck selector */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                      Baralho de destino
+                    </label>
+                    <select
+                      className="w-full bg-muted border border-border text-foreground px-4 py-2.5 rounded-xl text-sm outline-none focus:border-primary/50 font-semibold cursor-pointer"
+                      value={addToDeckId}
+                      onChange={e => setAddToDeckId(e.target.value)}
+                    >
+                      {decks.map(d => (
+                        <option key={d.id} value={d.id}>{d.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Select all / Deselect all */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-muted-foreground">
+                      {selectedLineIdxs.size} de {selectedText?.lines.length} frases selecionadas
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setSelectedLineIdxs(new Set(selectedText?.lines.map((_, i) => i) || []))}
+                        className="text-[10px] font-bold text-primary hover:underline cursor-pointer"
+                      >
+                        Selecionar todas
+                      </button>
+                      <span className="text-muted-foreground/40">·</span>
+                      <button
+                        onClick={() => setSelectedLineIdxs(new Set())}
+                        className="text-[10px] font-bold text-muted-foreground hover:text-foreground hover:underline cursor-pointer"
+                      >
+                        Limpar
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Lines list */}
+                  <div className="space-y-2">
+                    {selectedText?.lines.map((line, idx) => (
+                      <label
+                        key={idx}
+                        className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                          selectedLineIdxs.has(idx)
+                            ? 'border-violet-500/40 bg-violet-500/5'
+                            : 'border-border hover:border-border/80 hover:bg-muted/30'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 w-4 h-4 accent-violet-500 cursor-pointer flex-shrink-0"
+                          checked={selectedLineIdxs.has(idx)}
+                          onChange={() => handleToggleLineIdx(idx)}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-semibold text-foreground leading-relaxed break-words">{line.original}</p>
+                          {line.translated && (
+                            <p className="text-[10px] text-muted-foreground break-words mt-1 border-t border-border/20 pt-1">{line.translated}</p>
+                          )}
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <DialogFooter className="mx-0 mb-0 px-6 py-4 border-t border-border/40 bg-muted/30 flex justify-end gap-3 mt-auto">
+                  <Button
+                    variant="outline"
+                    onClick={() => setIsAddToDeckOpen(false)}
+                    disabled={isAddingToDeck}
+                    className="rounded-xl font-bold text-xs"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    onClick={handleAddToDeck}
+                    disabled={isAddingToDeck || selectedLineIdxs.size === 0 || !addToDeckId}
+                    className="bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-bold text-xs gap-1.5"
+                  >
+                    {isAddingToDeck ? (
+                      <><Loader2 size={14} className="animate-spin" /> Adicionando...</>
+                    ) : (
+                      `Adicionar ${selectedLineIdxs.size} card${selectedLineIdxs.size !== 1 ? 's' : ''}`
+                    )}
+                  </Button>
+                </DialogFooter>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Fullscreen PDF Dialog */}
+        <Dialog open={isFullscreenPdfOpen} onOpenChange={(open) => !open && setIsFullscreenPdfOpen(false)}>
+          <DialogContent className="bg-card border-none ring-0 gap-0 max-w-none sm:max-w-none w-screen h-screen flex flex-col p-0 m-0 rounded-none top-0 left-0 translate-x-0 translate-y-0">
+            <DialogHeader className="p-4 border-b border-border/40 pr-12 flex-shrink-0">
+              <DialogTitle className="flex items-center gap-2 text-foreground font-black text-sm md:text-base">
+                <BookOpen className="text-violet-500" size={18} />
+                Visualizador de PDF · {selectedText?.title}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="flex-1 w-full bg-[#525659] overflow-hidden">
+              <iframe
+                src={pdfUrl || ''}
+                className="w-full h-full border-0"
+                title={selectedText?.title}
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Append Block Dialog */}
+        <Dialog open={isAppendBlockModalOpen} onOpenChange={(open) => !open && closeAppendBlockModal()}>
+
+          <DialogContent className="bg-card border-border max-w-lg overflow-y-auto max-h-[90vh]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-foreground font-black">
+                <Upload className="text-primary" size={18} />
+                Importar e Anexar Frases (PDF / Texto)
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="space-y-4 pt-2">
+              <span className="text-[11px] font-semibold text-muted-foreground block leading-relaxed">
+                As frases extraídas abaixo serão anexadas ao final do texto atual: <strong className="text-foreground">{selectedText.title}</strong>.
+              </span>
+
+              {/* Texto Original */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                  Texto Original (Idioma de estudo)
+                </label>
+                <textarea
+                  placeholder="Cole aqui o texto em inglês, espanhol, etc..."
+                  className="w-full bg-muted border border-border text-foreground p-3.5 rounded-xl text-xs outline-none focus:border-primary/50 min-h-[120px] resize-y font-mono leading-relaxed transition-colors"
+                  value={appendBlockOriginalText}
+                  onChange={(e) => setAppendBlockOriginalText(e.target.value)}
+                  disabled={appendBlockIsProcessing}
+                />
+              </div>
+
+              {/* Tradução */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                    Tradução (Seu idioma nativo)
+                  </label>
+                  {appendBlockUseAI && (
+                    <span className="text-[10px] font-bold text-violet-500 bg-violet-500/10 px-2 py-0.5 rounded-full border border-violet-500/20">
+                      Será preenchida pela IA ✨
+                    </span>
+                  )}
+                </div>
+                <textarea
+                  placeholder="Cole aqui a tradução (ou deixe vazio e use a IA)..."
+                  className="w-full bg-muted border border-border text-foreground p-3.5 rounded-xl text-xs outline-none focus:border-primary/50 min-h-[120px] resize-y font-mono leading-relaxed transition-colors disabled:opacity-50"
+                  value={appendBlockTranslatedText}
+                  onChange={(e) => setAppendBlockTranslatedText(e.target.value)}
+                  disabled={appendBlockIsProcessing || appendBlockUseAI}
+                />
+              </div>
+
+              {/* PDF Divisor */}
+              <div className="relative flex items-center justify-center py-1">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-border/60" />
+                </div>
+                <span className="relative bg-card px-4 text-[9px] font-bold text-muted-foreground uppercase tracking-widest">
+                  ou extraia de um PDF
+                </span>
+              </div>
+
+              {/* PDF Dropzone */}
+              <div
+                className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all duration-200 ${
+                  appendBlockIsPdfLoading
+                    ? 'border-primary/50 bg-primary/5'
+                    : 'border-border/60 hover:border-primary/40 hover:bg-muted/30'
+                }`}
+                onClick={() => !appendBlockIsPdfLoading && !appendBlockIsProcessing && document.getElementById('append-pdf-file-input')?.click()}
+              >
+                {appendBlockIsPdfLoading ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <Loader2 size={24} className="text-primary animate-spin" />
+                    <span className="text-xs font-bold text-primary">Extraindo texto do PDF...</span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-1.5">
+                    <Upload size={24} className="text-muted-foreground" />
+                    <span className="text-xs font-semibold text-muted-foreground">
+                      {appendBlockPdfBlob ? `PDF Selecionado: ${(appendBlockPdfBlob as File).name}` : 'Arraste um PDF aqui ou clique para selecionar'}
+                    </span>
+                    <span className="text-[9px] text-muted-foreground/60">
+                      O texto extraído preencherá o campo "Texto Original"
+                    </span>
+                  </div>
+                )}
+                <input
+                  id="append-pdf-file-input"
+                  type="file"
+                  accept=".pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleAppendBlockPdfUpload(file);
+                    e.target.value = '';
+                  }}
+                />
+              </div>
+
+              {/* AI checkbox */}
+              <div className="flex items-center gap-3 p-3 bg-muted/30 border border-border/60 rounded-xl">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-violet-500 cursor-pointer"
+                  checked={appendBlockUseAI}
+                  onChange={(e) => setAppendBlockUseAI(e.target.checked)}
+                  disabled={appendBlockIsProcessing || !geminiApiKey.trim()}
+                />
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                    <Sparkles size={12} className="text-violet-500" />
+                    Usar IA para segmentar, traduzir e destacar vocabulário
+                  </span>
+                  {!geminiApiKey.trim() ? (
+                    <span className="text-[9px] text-destructive font-semibold">
+                      Configure sua chave Gemini API em Configurações primeiro
+                    </span>
+                  ) : (
+                    <span className="text-[9px] text-muted-foreground">
+                      A IA vai separar as frases, traduzir cada uma e identificar palavras-chave
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Error */}
+              {appendBlockErrorMsg && (
+                <div className="bg-destructive/10 border border-destructive/20 text-destructive text-xs font-semibold p-3 rounded-xl">
+                  ❌ {appendBlockErrorMsg}
+                </div>
+              )}
+
+              {/* Processing step */}
+              {appendBlockIsProcessing && appendBlockProcessingStep && (
+                <div className="bg-primary/10 border border-primary/20 text-primary text-xs font-bold p-3 rounded-xl flex items-center gap-2 animate-pulse">
+                  <Loader2 size={14} className="animate-spin" />
+                  {appendBlockProcessingStep}
+                </div>
+              )}
+            </div>
+
+            <DialogFooter className="flex justify-end gap-3 pt-4 border-t border-border/40 mt-4">
+              <Button
+                variant="outline"
+                onClick={closeAppendBlockModal}
+                disabled={appendBlockIsProcessing}
+                className="rounded-xl font-bold text-xs"
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleAppendBlockProcess}
+                disabled={appendBlockIsProcessing || !appendBlockOriginalText.trim()}
+                className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl font-bold text-xs gap-1.5"
+              >
+                {appendBlockIsProcessing ? (
+                  <><Loader2 size={14} className="animate-spin" /> Processando...</>
+                ) : (
+                  'Processar e Anexar'
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {activeReaderTab !== 'vitrine' && (
+          <KeyboardShortcutCheatsheet
+            positionClassName="fixed bottom-20 right-4"
+            shortcuts={[
+              { keys: ['Espaço'], description: 'Iniciar / Pausar áudio' },
+              { keys: ['R'], description: 'Reiniciar áudio da frase' },
+              { keys: ['Seta ↓'], description: 'Próxima frase' },
+              { keys: ['Seta ↑'], description: 'Frase anterior' },
+              { keys: ['Alt + ↓ / ↑', 'Alt + Clique'], description: 'Mover frase ativa' },
+              { keys: ['D', 'M'], description: 'Marcar como Dominada' },
+              { keys: ['E'], description: 'Editar frase ativa' },
+              { keys: ['Esc'], description: 'Cancelar edição' },
+            ]}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // ═══════════════════════════════════════════
+  // COLLECTION DETAIL VIEW
+  // ═══════════════════════════════════════════
+  if (selectedCollectionId !== null) {
+    const activeCollection = collections.find(c => c.id === selectedCollectionId);
+    const collectionReadings = readings?.filter(r => r.collectionId === selectedCollectionId) || [];
+    const totalTexts = collectionReadings.length;
+    const totalLines = collectionReadings.reduce((sum, r) => sum + r.lines.length, 0);
+    const masteredLines = collectionReadings.reduce((sum, r) => sum + r.lines.filter(l => l.mastered).length, 0);
+    const progress = totalLines > 0 ? Math.round((masteredLines / totalLines) * 100) : 0;
+
+    return (
+      <div className="space-y-5 w-full max-w-none px-2 md:px-6">
+        {/* Detail view Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/85 pb-4">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSelectedCollectionId(null)}
+              className="p-2 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer border border-border bg-card shadow-sm"
+              title="Voltar para Biblioteca"
+            >
+              <ArrowLeft size={16} />
+            </button>
+            <div className="flex flex-col min-w-0">
+              <div className="flex items-center gap-2">
+                <Folder className="w-5 h-5 text-amber-500 fill-amber-500/20 flex-shrink-0" />
+                <h2 className="font-extrabold text-md text-foreground tracking-tight truncate">
+                  {activeCollection?.title || 'Coleção'}
+                </h2>
+              </div>
+              {activeCollection?.description && (
+                <span className="text-xs text-muted-foreground font-semibold mt-0.5 line-clamp-1">
+                  {activeCollection.description}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {activeCollection && (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={(e) => handleOpenEditCollection(e, activeCollection)}
+                  className="text-xs font-bold rounded-xl cursor-pointer gap-1.5 h-9"
+                >
+                  <Edit size={14} /> Editar Pasta
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={(e) => handleOpenDeleteCollection(e, activeCollection)}
+                  className="hover:bg-destructive/10 text-muted-foreground hover:text-destructive text-xs font-bold rounded-xl cursor-pointer gap-1.5 h-9 border border-border"
+                >
+                  <Trash2 size={14} /> Excluir Pasta
+                </Button>
+              </>
+            )}
+            <Button
+              onClick={() => setIsImportModalOpen(true)}
+              className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold rounded-xl cursor-pointer gap-1.5 h-9"
+            >
+              <Plus size={14} /> Adicionar Texto
+            </Button>
+          </div>
+        </div>
+
+        {/* Consolidated stats card */}
+        {totalTexts > 0 && (
+          <div className="bg-muted/30 border border-border/80 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-inner animate-fadeIn">
+            <div className="flex-1 space-y-1">
+              <span className="text-[10px] font-black text-muted-foreground/80 uppercase tracking-widest">Progresso Consolidado</span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-xl font-extrabold text-foreground">{progress}%</span>
+                <span className="text-xs text-muted-foreground font-semibold">
+                  ({masteredLines} de {totalLines} frases dominadas)
+                </span>
+              </div>
+              <div className="w-full h-2 bg-muted rounded-full overflow-hidden mt-2">
+                <div
+                  className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-4 text-xs font-bold text-muted-foreground border-t md:border-t-0 md:border-l border-border/60 pt-3 md:pt-0 md:pl-6 flex-shrink-0">
+              <div className="space-y-0.5">
+                <span className="text-[9px] font-black text-muted-foreground/60 uppercase tracking-widest">Textos</span>
+                <p className="text-sm font-extrabold text-foreground">{totalTexts}</p>
+              </div>
+              <div className="space-y-0.5">
+                <span className="text-[9px] font-black text-muted-foreground/60 uppercase tracking-widest">Criada em</span>
+                <p className="text-sm font-extrabold text-foreground">
+                  {activeCollection ? new Date(activeCollection.createdAt).toLocaleDateString('pt-BR') : ''}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Texts in collection */}
+        <div className="space-y-3">
+          {collectionReadings.length > 0 ? (
+            collectionReadings.map((reading) => {
+              const masteredCount = reading.lines.filter((l) => l.mastered).length;
+              const totalLines = reading.lines.length;
+              const progress = totalLines > 0 ? Math.round((masteredCount / totalLines) * 100) : 0;
+              const preview = reading.lines[0]?.original || reading.fullTextOriginal.slice(0, 80);
+
+              return (
+                <div
+                  key={reading.id}
+                  className="bg-card border border-border rounded-2xl p-4 hover:border-primary/30 transition-all duration-200 cursor-pointer group shadow-sm"
+                  onClick={() => setSelectedTextId(reading.id)}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <FileText size={14} className="text-primary flex-shrink-0" />
+                        <h3 className="text-sm font-bold text-foreground truncate group-hover:text-primary transition-colors">
+                          {reading.title}
+                        </h3>
+                      </div>
+                      <p className="text-xs text-muted-foreground line-clamp-1 leading-relaxed">
+                        {preview}...
+                      </p>
+                      <div className="flex items-center gap-3">
+                        <span className="text-[10px] font-bold text-muted-foreground">
+                          {new Date(reading.createdAt).toLocaleDateString('pt-BR')}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+                              style={{ width: `${progress}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] font-black text-muted-foreground">
+                            {masteredCount}/{totalLines}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDeleteReading(reading.id); }}
+                        className="p-2 rounded-xl hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors cursor-pointer border border-border bg-card shadow-sm opacity-0 group-hover:opacity-100"
+                        title="Excluir texto"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                      <div className="p-2 rounded-xl text-muted-foreground group-hover:text-primary transition-colors">
+                        <ChevronRight size={16} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="bg-card border border-border rounded-2xl p-12 text-center space-y-3 shadow-sm">
+              <FolderOpen size={40} className="mx-auto text-muted-foreground/30" />
+              <h3 className="text-sm font-bold text-foreground">Esta coleção está vazia</h3>
+              <p className="text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">
+                Adicione textos nesta pasta para começar a estudá-los.
+              </p>
+              <Button
+                onClick={() => setIsImportModalOpen(true)}
+                variant="outline"
+                className="mt-2 text-xs font-bold rounded-xl cursor-pointer gap-1.5 animate-pulse"
+              >
+                <Plus size={14} /> Importar Texto
+              </Button>
+            </div>
+          )}
+        </div>
+
+        <ReadingImportModal
+          isOpen={isImportModalOpen}
+          onClose={() => setIsImportModalOpen(false)}
+          onSave={handleSaveReading}
+          preselectedCollectionId={selectedCollectionId || undefined}
+        />
+
+        {/* Criar Coleção Dialog */}
+        <Dialog open={isCreatingCollection} onOpenChange={setIsCreatingCollection}>
+          <DialogContent className="bg-card border-border max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-foreground font-black">
+                <FolderPlus className="text-primary" size={18} />
+                Criar Nova Coleção
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 pt-2">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                  Nome da Coleção
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: Livro Jack Hannaford, Curso de Inglês..."
+                  className="w-full bg-muted border border-border text-foreground px-4 py-2.5 rounded-xl text-sm outline-none focus:border-primary/50 font-semibold transition-colors"
+                  value={newCollectionTitle}
+                  onChange={(e) => setNewCollectionTitle(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                  Descrição (Opcional)
+                </label>
+                <textarea
+                  placeholder="Ex: Textos para estudar durante esta semana..."
+                  className="w-full bg-muted border border-border text-foreground p-3 rounded-xl text-sm outline-none focus:border-primary/50 min-h-[80px] resize-none leading-relaxed transition-colors"
+                  value={newCollectionDescription}
+                  onChange={(e) => setNewCollectionDescription(e.target.value)}
+                />
+              </div>
+            </div>
+            <DialogFooter className="flex justify-end gap-3 pt-4 border-t border-border/40 mt-4">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsCreatingCollection(false);
+                  setNewCollectionTitle('');
+                  setNewCollectionDescription('');
+                }}
+                className="rounded-xl font-bold text-xs"
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleCreateCollection}
+                disabled={!newCollectionTitle.trim()}
+                className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl font-bold text-xs"
+              >
+                Criar Coleção
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Editar Coleção Dialog */}
+        <Dialog open={!!editingCollection} onOpenChange={(open) => !open && setEditingCollection(null)}>
+          <DialogContent className="bg-card border-border max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-foreground font-black">
+                <Edit className="text-primary" size={18} />
+                Editar Coleção
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 pt-2">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                  Nome da Coleção
+                </label>
+                <input
+                  type="text"
+                  className="w-full bg-muted border border-border text-foreground px-4 py-2.5 rounded-xl text-sm outline-none focus:border-primary/50 font-semibold transition-colors"
+                  value={editCollectionTitle}
+                  onChange={(e) => setEditCollectionTitle(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                  Descrição (Opcional)
+                </label>
+                <textarea
+                  className="w-full bg-muted border border-border text-foreground p-3 rounded-xl text-sm outline-none focus:border-primary/50 min-h-[80px] resize-none leading-relaxed transition-colors"
+                  value={editCollectionDescription}
+                  onChange={(e) => setEditCollectionDescription(e.target.value)}
+                />
+              </div>
+            </div>
+            <DialogFooter className="flex justify-end gap-3 pt-4 border-t border-border/40 mt-4">
+              <Button
+                variant="outline"
+                onClick={() => setEditingCollection(null)}
+                className="rounded-xl font-bold text-xs"
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleSaveEditCollection}
+                disabled={!editCollectionTitle.trim()}
+                className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl font-bold text-xs"
+              >
+                Salvar Alterações
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Excluir Coleção Dialog */}
+        <Dialog open={!!deletingCollection} onOpenChange={(open) => !open && setDeletingCollection(null)}>
+          <DialogContent className="bg-card border-border max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-foreground font-black">
+                <Trash2 className="text-destructive" size={18} />
+                Excluir Coleção
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 pt-2 text-foreground">
+              <p className="text-sm font-semibold">
+                Tem certeza de que deseja excluir a coleção <strong className="text-primary">{deletingCollection?.title}</strong>?
+              </p>
+              {associatedReadingsCount > 0 ? (
+                <div className="bg-destructive/10 border border-destructive/20 text-destructive text-xs font-semibold p-3.5 rounded-xl space-y-2">
+                  <p className="font-bold flex items-center gap-1.5">
+                    ⚠️ Atenção: Esta coleção contém {associatedReadingsCount} texto{associatedReadingsCount > 1 ? 's' : ''}.
+                  </p>
+                  <p className="font-medium text-muted-foreground leading-relaxed">
+                    Você pode excluir tudo (incluindo todos os textos dentro dela) ou excluir apenas a pasta e manter os textos na biblioteca principal.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground font-semibold">
+                  Esta coleção está vazia. Nenhuma lição será afetada.
+                </p>
+              )}
+            </div>
+            <DialogFooter className="flex flex-col sm:flex-row justify-end gap-2.5 pt-4 border-t border-border/40 mt-4">
+              <Button
+                variant="outline"
+                onClick={() => setDeletingCollection(null)}
+                className="rounded-xl font-bold text-xs w-full sm:w-auto order-3 sm:order-1"
+              >
+                Cancelar
+              </Button>
+              
+              {associatedReadingsCount > 0 && (
+                <Button
+                  onClick={() => handleDeleteCollection(false)}
+                  className="bg-muted hover:bg-muted/80 text-foreground border border-border rounded-xl font-bold text-xs w-full sm:w-auto order-2"
+                >
+                  Excluir apenas a pasta
+                </Button>
+              )}
+              
+              <Button
+                onClick={() => handleDeleteCollection(true)}
+                className="bg-destructive hover:bg-destructive/90 text-destructive-foreground rounded-xl font-bold text-xs w-full sm:w-auto order-1 sm:order-3"
+              >
+                {associatedReadingsCount > 0 ? 'Excluir tudo' : 'Excluir pasta'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+  }
+
+  // ROOT VIEW
+  const searchResults = searchQuery.trim().length >= 2
+    ? (readings || []).flatMap(reading =>
+        reading.lines
+          .map((line, lineIdx) => ({ reading, line, lineIdx }))
+          .filter(({ reading, line }) =>
+            reading.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            line.original.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            line.translated.toLowerCase().includes(searchQuery.toLowerCase())
+          )
+      ).slice(0, 40)
+    : [];
+
+  const highlightMatch = (text: string, query: string) => {
+    if (!query.trim()) return <span>{text}</span>;
+    const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    const parts = text.split(regex);
+    return (
+      <>
+        {parts.map((part, i) =>
+          regex.test(part)
+            ? <mark key={i} className="bg-primary/20 text-primary font-bold rounded px-0.5">{part}</mark>
+            : <span key={i}>{part}</span>
+        )}
+      </>
+    );
+  };
+
+  return (
+    <div className="space-y-4 w-full max-w-none px-2 md:px-6">
+      <div className="flex items-center justify-between">
+        <h2 className="font-extrabold text-md text-foreground tracking-tight flex items-center gap-2">
+          <BookOpen size={18} className="text-primary" />
+          Biblioteca de Leitura
+        </h2>
+        
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setIsCreatingCollection(true)}
+            className="text-xs font-bold rounded-xl cursor-pointer gap-1.5 h-9"
+          >
+            <FolderPlus size={14} /> Nova Coleção
+          </Button>
+        </div>
+      </div>
+
+      {/* Search bar */}
+      <div className="relative">
+        <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-muted-foreground">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+          </svg>
+        </div>
+        <input
+          type="text"
+          placeholder="Pesquisar em todos os textos e frases..."
+          className="w-full bg-muted border border-border text-foreground pl-9 pr-4 py-2.5 rounded-xl text-sm outline-none focus:border-primary/50 font-semibold transition-colors"
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+        />
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery('')}
+            className="absolute inset-y-0 right-3 flex items-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          </button>
+        )}
+      </div>
+
+      {/* Search results */}
+      {searchQuery.trim().length >= 2 && (
+        <div className="space-y-2 animate-fadeIn">
+          <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">
+            {searchResults.length} resultado{searchResults.length !== 1 ? 's' : ''} para "{searchQuery}"
+          </span>
+          {searchResults.length === 0 ? (
+            <div className="bg-card border border-border rounded-2xl p-8 text-center space-y-2 shadow-sm">
+              <p className="text-sm font-bold text-foreground">Nenhum resultado encontrado</p>
+              <p className="text-xs text-muted-foreground">Tente buscar por palavras diferentes</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {searchResults.map(({ reading, line, lineIdx }) => (
+                <div
+                  key={`${reading.id}-${lineIdx}`}
+                  className="bg-card border border-border rounded-2xl p-4 hover:border-primary/30 transition-all cursor-pointer group shadow-sm"
+                  onClick={() => setSelectedTextId(reading.id)}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex items-center gap-1.5">
+                        <FileText size={12} className="text-primary flex-shrink-0" />
+                        <span className="text-[10px] font-black text-primary uppercase tracking-wider truncate">
+                          {reading.title}
+                        </span>
+                      </div>
+                      <p className="text-sm font-semibold text-foreground leading-relaxed">
+                        {highlightMatch(line.original, searchQuery)}
+                      </p>
+                      {line.translated && (
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          {highlightMatch(line.translated, searchQuery)}
+                        </p>
+                      )}
+                    </div>
+                    <ChevronRight size={16} className="flex-shrink-0 text-muted-foreground group-hover:text-primary transition-colors mt-1" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {collections.length > 0 ? (
+        <div className="space-y-6">
+          {/* Folders Section */}
+          <div className="space-y-3">
+            <h3 className="text-xs uppercase font-black tracking-wider text-muted-foreground/80 pl-1">
+              Coleções ({collections.length})
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 animate-fadeIn">
+              {collections.map((col) => {
+                const colReadings = readings?.filter(r => r.collectionId === col.id) || [];
+                const totalTexts = colReadings.length;
+                const totalLines = colReadings.reduce((sum, r) => sum + r.lines.length, 0);
+                const masteredLines = colReadings.reduce((sum, r) => sum + r.lines.filter(l => l.mastered).length, 0);
+                const progress = totalLines > 0 ? Math.round((masteredLines / totalLines) * 100) : 0;
+                
+                return (
+                  <div
+                    key={col.id}
+                    onClick={() => setSelectedCollectionId(col.id)}
+                    className="bg-card border border-border rounded-2xl p-4 hover:border-primary/30 transition-all duration-200 cursor-pointer group shadow-sm flex flex-col justify-between min-h-[140px] relative animate-fadeIn"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className="p-3 bg-amber-500/10 dark:bg-amber-500/20 text-amber-500 rounded-xl group-hover:scale-105 transition-transform duration-200 flex-shrink-0">
+                          <Folder className="w-5 h-5 fill-amber-500/20" />
+                        </div>
+                        <div className="min-w-0">
+                          <h4 className="text-sm font-bold text-foreground truncate group-hover:text-primary transition-colors leading-tight">
+                            {col.title}
+                          </h4>
+                          {col.description && (
+                            <p className="text-[11px] text-muted-foreground line-clamp-1 mt-1 font-medium leading-normal">
+                              {col.description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={(e) => handleOpenEditCollection(e, col)}
+                          className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer border border-border bg-card shadow-sm"
+                          title="Editar Coleção"
+                        >
+                          <Edit size={12} />
+                        </button>
+                        <button
+                          onClick={(e) => handleOpenDeleteCollection(e, col)}
+                          className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors cursor-pointer border border-border bg-card shadow-sm"
+                          title="Excluir Coleção"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 space-y-2">
+                      <div className="flex items-center justify-between text-[10px] font-black text-muted-foreground">
+                        <span>{totalTexts} texto{totalTexts !== 1 ? 's' : ''}</span>
+                        {totalTexts > 0 && <span>{progress}% concluído</span>}
+                      </div>
+                      {totalTexts > 0 ? (
+                        <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+                            style={{ width: `${progress}%` }}
+                          />
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground/60 italic font-semibold pl-0.5 block">Coleção vazia</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-card border border-border rounded-2xl p-12 text-center space-y-3 shadow-sm">
+          <BookOpen size={40} className="mx-auto text-muted-foreground/30" />
+          <h3 className="text-sm font-bold text-foreground">Nenhuma coleção adicionada</h3>
+          <p className="text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">
+            Crie uma coleção para organizar seus textos de estudos.
+          </p>
+          <div className="flex justify-center gap-3 mt-4">
+            <Button
+              onClick={() => setIsCreatingCollection(true)}
+              className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold rounded-xl cursor-pointer gap-1.5"
+            >
+              <FolderPlus size={14} /> Criar Coleção
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Criar Coleção Dialog */}
+      <Dialog open={isCreatingCollection} onOpenChange={setIsCreatingCollection}>
+        <DialogContent className="bg-card border-border max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-foreground font-black">
+              <FolderPlus className="text-primary" size={18} />
+              Criar Nova Coleção
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                Nome da Coleção
+              </label>
+              <input
+                type="text"
+                placeholder="Ex: Livro Jack Hannaford, Curso de Inglês..."
+                className="w-full bg-muted border border-border text-foreground px-4 py-2.5 rounded-xl text-sm outline-none focus:border-primary/50 font-semibold transition-colors"
+                value={newCollectionTitle}
+                onChange={(e) => setNewCollectionTitle(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                Descrição (Opcional)
+              </label>
+              <textarea
+                placeholder="Ex: Textos para estudar durante esta semana..."
+                className="w-full bg-muted border border-border text-foreground p-3 rounded-xl text-sm outline-none focus:border-primary/50 min-h-[80px] resize-none leading-relaxed transition-colors"
+                value={newCollectionDescription}
+                onChange={(e) => setNewCollectionDescription(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter className="flex justify-end gap-3 pt-4 border-t border-border/40 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsCreatingCollection(false);
+                setNewCollectionTitle('');
+                setNewCollectionDescription('');
+              }}
+              className="rounded-xl font-bold text-xs"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleCreateCollection}
+              disabled={!newCollectionTitle.trim()}
+              className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl font-bold text-xs"
+            >
+              Criar Coleção
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Editar Coleção Dialog */}
+      <Dialog open={!!editingCollection} onOpenChange={(open) => !open && setEditingCollection(null)}>
+        <DialogContent className="bg-card border-border max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-foreground font-black">
+              <Edit className="text-primary" size={18} />
+              Editar Coleção
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                Nome da Coleção
+              </label>
+              <input
+                type="text"
+                className="w-full bg-muted border border-border text-foreground px-4 py-2.5 rounded-xl text-sm outline-none focus:border-primary/50 font-semibold transition-colors"
+                value={editCollectionTitle}
+                onChange={(e) => setEditCollectionTitle(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                Descrição (Opcional)
+              </label>
+              <textarea
+                className="w-full bg-muted border border-border text-foreground p-3 rounded-xl text-sm outline-none focus:border-primary/50 min-h-[80px] resize-none leading-relaxed transition-colors"
+                value={editCollectionDescription}
+                onChange={(e) => setEditCollectionDescription(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter className="flex justify-end gap-3 pt-4 border-t border-border/40 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => setEditingCollection(null)}
+              className="rounded-xl font-bold text-xs"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSaveEditCollection}
+              disabled={!editCollectionTitle.trim()}
+              className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl font-bold text-xs"
+            >
+              Salvar Alterações
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Excluir Coleção Dialog */}
+      <Dialog open={!!deletingCollection} onOpenChange={(open) => !open && setDeletingCollection(null)}>
+        <DialogContent className="bg-card border-border max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-foreground font-black">
+              <Trash2 className="text-destructive" size={18} />
+              Excluir Coleção
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 pt-2 text-foreground">
+            <p className="text-sm font-semibold">
+              Tem certeza de que deseja excluir a coleção <strong className="text-primary">{deletingCollection?.title}</strong>?
+            </p>
+            {associatedReadingsCount > 0 ? (
+              <div className="bg-destructive/10 border border-destructive/20 text-destructive text-xs font-semibold p-3.5 rounded-xl space-y-2">
+                <p className="font-bold flex items-center gap-1.5">
+                  ⚠️ Atenção: Esta coleção contém {associatedReadingsCount} texto{associatedReadingsCount > 1 ? 's' : ''}.
+                </p>
+                <p className="font-medium text-muted-foreground leading-relaxed">
+                  Você pode excluir tudo (incluindo todos os textos dentro dela) ou excluir apenas a pasta e manter os textos na biblioteca principal.
+                </p>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground font-semibold">
+                Esta coleção está vazia. Nenhuma lição será afetada.
+              </p>
+            )}
+          </div>
+          <DialogFooter className="flex flex-col sm:flex-row justify-end gap-2.5 pt-4 border-t border-border/40 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => setDeletingCollection(null)}
+              className="rounded-xl font-bold text-xs w-full sm:w-auto order-3 sm:order-1"
+            >
+              Cancelar
+            </Button>
+            
+            {associatedReadingsCount > 0 && (
+              <Button
+                onClick={() => handleDeleteCollection(false)}
+                className="bg-muted hover:bg-muted/80 text-foreground border border-border rounded-xl font-bold text-xs w-full sm:w-auto order-2"
+              >
+                Excluir apenas a pasta
+              </Button>
+            )}
+            
+            <Button
+              onClick={() => handleDeleteCollection(true)}
+              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground rounded-xl font-bold text-xs w-full sm:w-auto order-1 sm:order-3"
+            >
+              {associatedReadingsCount > 0 ? 'Excluir tudo' : 'Excluir pasta'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};

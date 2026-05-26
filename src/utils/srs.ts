@@ -1,4 +1,4 @@
-import type { Card } from '../types';
+import type { Card, DeckPreset } from '../types';
 
 // FSRS v4 default parameters
 const FSRS_W = [
@@ -12,7 +12,7 @@ const FSRS_W = [
 /**
  * Calcula o agendamento de revisão baseado no algoritmo FSRS v4.
  */
-export function calculateFSRSReview(card: Card, rating: number): {
+export function calculateFSRSReview(card: Card, rating: number, preset?: DeckPreset): {
   interval: number;
   ease: number;
   repetitions: number;
@@ -53,7 +53,7 @@ export function calculateFSRSReview(card: Card, rating: number): {
     const elapsedMs = Math.max(0, nowMs - lastReview);
     const t = elapsedMs / (24 * 60 * 60 * 1000); // tempo decorrido em dias
 
-    // Calcular probabilidade de recall atual R
+    // Calcular probabilidade de recall R
     const R = Math.pow(0.9, t / stability);
 
     // Atualizar Dificuldade
@@ -80,8 +80,18 @@ export function calculateFSRSReview(card: Card, rating: number): {
     }
   }
 
+  // Modificador de intervalo geral
+  if (preset) {
+    nextStability = nextStability * preset.intervalModifier;
+  }
+
   nextStability = Math.max(0.1, Math.min(36500, nextStability));
-  const nextInterval = Math.max(1, Math.round(nextStability));
+  let nextInterval = Math.max(1, Math.round(nextStability));
+
+  // Limitar ao intervalo máximo
+  if (preset) {
+    nextInterval = Math.min(preset.maxInterval, nextInterval);
+  }
 
   const nextDueDate = new Date();
   nextDueDate.setDate(nextDueDate.getDate() + nextInterval);
@@ -101,9 +111,9 @@ export function calculateFSRSReview(card: Card, rating: number): {
 
 /**
  * Calcula o próximo agendamento do cartão usando uma adaptação simplificada do algoritmo SM-2 ou FSRS v4.
- * Dependendo de qual está ativo no localStorage.
+ * Dependendo de qual está ativo no localStorage ou no preset.
  */
-export function calculateNextReview(card: Card, rating: number): {
+export function calculateNextReview(card: Card, rating: number, preset?: DeckPreset): {
   interval: number;
   ease: number;
   repetitions: number;
@@ -113,23 +123,35 @@ export function calculateNextReview(card: Card, rating: number): {
   stability?: number;
   lastReview?: number;
 } {
-  const selectedAlgo = typeof window !== 'undefined' ? (localStorage.getItem('memorize_algo') || 'SM-2') : 'SM-2';
+  const selectedAlgo = preset 
+    ? (preset.fsrsEnabled ? 'FSRS' : 'SM-2')
+    : (typeof window !== 'undefined' ? (localStorage.getItem('memorize_algo') || 'SM-2') : 'SM-2');
+    
   if (selectedAlgo === 'FSRS') {
-    return calculateFSRSReview(card, rating);
+    return calculateFSRSReview(card, rating, preset);
   }
 
   // --- ALGORITMO SM-2 CLÁSSICO ---
   let { interval, ease, repetitions, lapses } = card;
   const minEase = 1.3;
-  const defaultEase = 2.5;
+  const startingEase = preset ? preset.startingEase : 2.5;
 
-  if (ease < minEase) ease = defaultEase;
+  if (!ease || ease < minEase) {
+    ease = startingEase;
+  }
 
   if (rating === 1) {
     repetitions = 0;
     lapses += 1;
     ease = Math.max(minEase, ease - 0.2);
-    interval = 1;
+    
+    // Aplica lapseMultiplier e mínimo de relearning/intervalo mínimo
+    const lapseMult = preset ? preset.lapseMultiplier : 0.5;
+    const minInt = preset ? preset.minimumInterval : 1;
+    interval = Math.max(minInt, Math.round(interval * lapseMult));
+    if (isNaN(interval) || interval < minInt) {
+      interval = minInt;
+    }
   } else if (rating === 2) {
     repetitions = repetitions === 0 ? 1 : repetitions;
     ease = Math.max(minEase, ease - 0.15);
@@ -138,19 +160,34 @@ export function calculateNextReview(card: Card, rating: number): {
     } else if (repetitions === 2) {
       interval = 3;
     } else {
-      interval = Math.max(2, Math.round(interval * ease * 0.75));
+      const hardMultiplier = preset ? preset.hardInterval : 1.2;
+      interval = Math.max(2, Math.round(interval * hardMultiplier));
     }
   } else {
+    // rating === 3 (Fácil)
     repetitions += 1;
     ease = ease + 0.15;
     if (repetitions === 1) {
-      interval = 1;
+      interval = preset ? preset.graduatingInterval : 1;
     } else if (repetitions === 2) {
-      interval = 6;
+      interval = preset ? preset.easyInterval : 4;
     } else {
-      interval = Math.max(6, Math.round(interval * ease));
+      const easyBonus = preset ? preset.easyBonus : 1.3;
+      interval = Math.max(6, Math.round(interval * ease * easyBonus));
     }
   }
+
+  // Modificador de intervalo geral
+  if (preset) {
+    interval = Math.round(interval * preset.intervalModifier);
+  }
+
+  // Limitar ao intervalo máximo
+  if (preset) {
+    interval = Math.min(preset.maxInterval, interval);
+  }
+
+  interval = Math.max(1, interval);
 
   const nextDueDate = new Date();
   nextDueDate.setDate(nextDueDate.getDate() + interval);
@@ -168,8 +205,8 @@ export function calculateNextReview(card: Card, rating: number): {
 /**
  * Retorna o rótulo de tempo estimado do próximo intervalo formatado para a UI do botão.
  */
-export function getFriendlyInterval(card: Card, rating: number): string {
-  const next = calculateNextReview(card, rating);
+export function getFriendlyInterval(card: Card, rating: number, preset?: DeckPreset): string {
+  const next = calculateNextReview(card, rating, preset);
   const days = next.interval;
   
   if (days <= 1) return 'Amanhã';

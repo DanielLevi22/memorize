@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { HelpCircle, Download, Upload, Trash2, Volume2, Eye, EyeOff, Sparkles, Key } from 'lucide-react';
+import { HelpCircle, Download, Upload, Trash2, Volume2, Eye, EyeOff, Sparkles, Key, ArrowLeft, Plus, Settings, Edit, Save } from 'lucide-react';
 import { Button } from '../components/ui/button';
-import type { Card } from '../types';
+import type { Card, DeckPreset } from '../types';
+import { downloadPresetFile, openPresetFile, deserializePreset } from '../utils/presets';
 
 interface SettingsPageProps {
   theme: 'light' | 'dark';
@@ -14,7 +15,7 @@ interface SettingsPageProps {
   handleExportFullBackup: () => void;
   setIsImportModalOpen: (open: boolean) => void;
   handleResetAllData: () => void;
-  setActiveTab: (tab: "cards" | "stats" | "algorithms" | "dashboard" | "profile" | "settings") => void;
+  setActiveTab: (tab: "cards" | "stats" | "guide" | "dashboard" | "profile" | "settings", subTab?: "overview" | "shortcuts" | "reading" | "srs_presets" | "srs_math") => void;
   setCurrentView: (view: "dashboard" | "study" | "congrats") => void;
   deferredPrompt: any;
   handleInstallApp: () => void;
@@ -34,6 +35,10 @@ interface SettingsPageProps {
   // Daily Goal
   dailyGoal: number;
   setDailyGoal: (goal: number) => void;
+  // Presets
+  presets: DeckPreset[] | undefined;
+  onSavePreset: (preset: DeckPreset) => Promise<void>;
+  onDeletePreset: (presetId: string) => Promise<void>;
 }
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({
@@ -63,12 +68,78 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   setGeminiApiKey,
   dailyGoal,
   setDailyGoal,
+  presets,
+  onSavePreset,
+  onDeletePreset,
 }) => {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [notifPermission, setNotifPermission] = useState<NotificationPermission | 'unsupported'>(() => getNotificationPermission());
   const [showApiKey, setShowApiKey] = useState(false);
   const [localApiKey, setLocalApiKey] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
+  
+  const [activePresetToEdit, setActivePresetToEdit] = useState<DeckPreset | null>(null);
+
+  const handleCreateNewPreset = () => {
+    const template: DeckPreset = {
+      id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15),
+      name: 'Nova Configuração',
+      newCardsPerDay: 20,
+      maxReviewsPerDay: 200,
+      newCardsIgnoreReviewLimit: false,
+      limitsStartFromParent: false,
+      learningSteps: '1m 10m',
+      graduatingInterval: 1,
+      easyInterval: 4,
+      insertionOrder: 'sequential',
+      relearningSteps: '10m',
+      minimumInterval: 1,
+      leechThreshold: 8,
+      leechAction: 'tag',
+      newCardGrouping: 'deck',
+      newCardSorting: 'template',
+      newVsReviewOrder: 'mix',
+      interdayLearningVsReviewOrder: 'mix',
+      reviewSorting: 'dateThenRandom',
+      buryNewSiblings: false,
+      buryReviewSiblings: false,
+      buryLearningSiblings: false,
+      disableAutoplay: false,
+      skipQuestionOnReplay: false,
+      maxAnswerSeconds: 60,
+      showTimer: false,
+      stopTimerOnAnswer: false,
+      autoShowAnswerSeconds: 0,
+      autoShowQuestionSeconds: 0,
+      waitForAudio: true,
+      questionAction: 'showAnswer',
+      answerAction: 'skip',
+      daysOffMultiplier: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+      fsrsEnabled: false,
+      maxInterval: 36500,
+      startingEase: 2.50,
+      easyBonus: 1.30,
+      intervalModifier: 1.00,
+      hardInterval: 1.20,
+      lapseMultiplier: 0.50,
+      customScheduling: ''
+    };
+    setActivePresetToEdit(template);
+  };
+
+  const handleImportPreset = async () => {
+    const jsonContent = await openPresetFile();
+    if (!jsonContent) return; // Usuário cancelou
+
+    const result = deserializePreset(jsonContent);
+    if (!result.success) {
+      alert(`❌ Erro ao importar preset:\n${result.error}`);
+      return;
+    }
+
+    await onSavePreset(result.preset);
+    alert(`✅ Preset "${result.preset.name}" importado com sucesso!`);
+  };
 
   useEffect(() => {
     const loadVoices = () => {
@@ -112,6 +183,613 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       setLocalApiKey('');
     }
   };
+
+  if (activePresetToEdit) {
+    return (
+      <div className="space-y-6 w-full max-w-none px-2 md:px-6 py-4 animate-in fade-in zoom-in-95 duration-200">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setActivePresetToEdit(null)}
+              className="p-2 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer border border-border bg-card shadow-sm"
+              title="Voltar para configurações"
+            >
+              <ArrowLeft size={16} />
+            </button>
+            <div className="flex flex-col">
+              <h2 className="font-extrabold text-lg text-foreground tracking-tight flex items-center gap-1.5">
+                <Settings size={18} className="text-primary" /> Preset de Estudos
+              </h2>
+              <span className="text-xs text-muted-foreground">Configure as opções para o baralho</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setActivePresetToEdit(null)}
+              className="text-xs font-bold rounded-xl cursor-pointer"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!activePresetToEdit.name.trim()) {
+                  alert('Por favor, defina um nome para o preset.');
+                  return;
+                }
+                await onSavePreset(activePresetToEdit);
+                setActivePresetToEdit(null);
+              }}
+              className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold rounded-xl cursor-pointer gap-1.5"
+            >
+              <Save size={14} /> Salvar Preset
+            </Button>
+          </div>
+        </div>
+
+        {/* Preset Name Input */}
+        <div className="bg-card border border-border p-4 rounded-2xl shadow-sm space-y-2">
+          <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+            Nome do Preset
+          </label>
+          <input
+            type="text"
+            className="w-full bg-muted border border-border text-foreground px-4 py-2.5 rounded-xl text-sm outline-none focus:border-primary/50 font-bold transition-colors"
+            placeholder="Ex: Inglês Avançado, Termos Médicos..."
+            value={activePresetToEdit.name}
+            onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, name: e.target.value })}
+            disabled={activePresetToEdit.id === 'default-study-preset'}
+          />
+        </div>
+
+        {/* Grid for settings groups */}
+        <div className="flex flex-col gap-6">
+
+          {/* 1. LIMITES DIÁRIOS */}
+          <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/60 shadow-sm h-fit">
+            <div className="text-[10px] text-primary font-bold uppercase tracking-wider px-4 pt-4 pb-2 bg-muted/20">
+              📅 Limites Diários
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[70%]">
+                <span className="text-xs font-bold text-foreground">Novos cartões/dia</span>
+                <span className="text-[10px] text-muted-foreground">Quantidade máxima de novos cartões por dia.</span>
+              </div>
+              <input
+                type="number"
+                min="0"
+                max="9999"
+                className="bg-muted border border-border text-foreground px-2 py-1 rounded-lg text-xs font-bold outline-none w-20 text-center h-8"
+                value={activePresetToEdit.newCardsPerDay}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, newCardsPerDay: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+              />
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[70%]">
+                <span className="text-xs font-bold text-foreground">Revisões máximas/dia</span>
+                <span className="text-[10px] text-muted-foreground">Quantidade máxima de revisões diárias.</span>
+              </div>
+              <input
+                type="number"
+                min="0"
+                max="9999"
+                className="bg-muted border border-border text-foreground px-2 py-1 rounded-lg text-xs font-bold outline-none w-20 text-center h-8"
+                value={activePresetToEdit.maxReviewsPerDay}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, maxReviewsPerDay: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+              />
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[80%]">
+                <span className="text-xs font-bold text-foreground">Novos ignoram limite de revisão</span>
+                <span className="text-[10px] text-muted-foreground">Sempre introduz novos cards, mesmo atingindo o limite de revisão.</span>
+              </div>
+              <input
+                type="checkbox"
+                className="w-4 h-4 accent-primary cursor-pointer"
+                checked={activePresetToEdit.newCardsIgnoreReviewLimit}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, newCardsIgnoreReviewLimit: e.target.checked })}
+              />
+            </div>
+          </div>
+
+          {/* 2. NOVOS CARTÕES */}
+          <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/60 shadow-sm h-fit">
+            <div className="text-[10px] text-primary font-bold uppercase tracking-wider px-4 pt-4 pb-2 bg-muted/20">
+              🌱 Novos Cartões
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[70%]">
+                <span className="text-xs font-bold text-foreground">Etapas de aprendizagem</span>
+                <span className="text-[10px] text-muted-foreground">Ex: 1m 10m (intervalo em minutos).</span>
+              </div>
+              <input
+                type="text"
+                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none w-28 text-center h-8"
+                value={activePresetToEdit.learningSteps}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, learningSteps: e.target.value })}
+              />
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[70%]">
+                <span className="text-xs font-bold text-foreground">Intervalo de graduação</span>
+                <span className="text-[10px] text-muted-foreground">Dias para revisão após etapas iniciais.</span>
+              </div>
+              <input
+                type="number"
+                min="1"
+                className="bg-muted border border-border text-foreground px-2 py-1 rounded-lg text-xs font-bold outline-none w-20 text-center h-8"
+                value={activePresetToEdit.graduatingInterval}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, graduatingInterval: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+              />
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[70%]">
+                <span className="text-xs font-bold text-foreground">Intervalo fácil</span>
+                <span className="text-[10px] text-muted-foreground">Dias para revisão ao acertar como Fácil de primeira.</span>
+              </div>
+              <input
+                type="number"
+                min="1"
+                className="bg-muted border border-border text-foreground px-2 py-1 rounded-lg text-xs font-bold outline-none w-20 text-center h-8"
+                value={activePresetToEdit.easyInterval}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, easyInterval: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+              />
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs font-bold text-foreground">Ordem de inserção</span>
+                <span className="text-[10px] text-muted-foreground">Sequencial ou aleatória.</span>
+              </div>
+              <select
+                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer"
+                value={activePresetToEdit.insertionOrder}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, insertionOrder: e.target.value as any })}
+              >
+                <option value="sequential">Sequencial (Antigos primeiro)</option>
+                <option value="random">Aleatório</option>
+              </select>
+            </div>
+          </div>
+
+          {/* 3. FALHAS */}
+          <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/60 shadow-sm h-fit">
+            <div className="text-[10px] text-primary font-bold uppercase tracking-wider px-4 pt-4 pb-2 bg-muted/20">
+              ⚠️ Falhas & Esquecimentos
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[70%]">
+                <span className="text-xs font-bold text-foreground">Etapas de reaprendizagem</span>
+                <span className="text-[10px] text-muted-foreground">Intervalo para rever cartões errados.</span>
+              </div>
+              <input
+                type="text"
+                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none w-28 text-center h-8"
+                value={activePresetToEdit.relearningSteps}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, relearningSteps: e.target.value })}
+              />
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[70%]">
+                <span className="text-xs font-bold text-foreground">Intervalo mínimo (dias)</span>
+                <span className="text-[10px] text-muted-foreground">Menor intervalo após errar/re-graduar.</span>
+              </div>
+              <input
+                type="number"
+                min="1"
+                className="bg-muted border border-border text-foreground px-2 py-1 rounded-lg text-xs font-bold outline-none w-20 text-center h-8"
+                value={activePresetToEdit.minimumInterval}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, minimumInterval: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+              />
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[70%]">
+                <span className="text-xs font-bold text-foreground">Limite de sanguessuga</span>
+                <span className="text-[10px] text-muted-foreground">Erros permitidos antes de marcar como sanguessuga.</span>
+              </div>
+              <input
+                type="number"
+                min="1"
+                className="bg-muted border border-border text-foreground px-2 py-1 rounded-lg text-xs font-bold outline-none w-20 text-center h-8"
+                value={activePresetToEdit.leechThreshold}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, leechThreshold: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+              />
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs font-bold text-foreground">Ação de sanguessuga</span>
+                <span className="text-[10px] text-muted-foreground">O que fazer com o card problemático.</span>
+              </div>
+              <select
+                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer"
+                value={activePresetToEdit.leechAction}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, leechAction: e.target.value as any })}
+              >
+                <option value="tag">Somente Etiqueta (tag leech)</option>
+                <option value="suspend">Suspender Cartão</option>
+              </select>
+            </div>
+          </div>
+
+          {/* 4. ORDEM DE EXIBIÇÃO */}
+          <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/60 shadow-sm h-fit">
+            <div className="text-[10px] text-primary font-bold uppercase tracking-wider px-4 pt-4 pb-2 bg-muted/20">
+              🔀 Ordem de Exibição
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs font-bold text-foreground">Ordem de novos vs revisão</span>
+              </div>
+              <select
+                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer"
+                value={activePresetToEdit.newVsReviewOrder}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, newVsReviewOrder: e.target.value as any })}
+              >
+                <option value="mix">Misturar com revisões</option>
+                <option value="newFirst">Mostrar novos primeiro</option>
+                <option value="reviewFirst">Mostrar revisões primeiro</option>
+              </select>
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs font-bold text-foreground">Ordem de aprendizado vs revisões</span>
+              </div>
+              <select
+                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer"
+                value={activePresetToEdit.interdayLearningVsReviewOrder}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, interdayLearningVsReviewOrder: e.target.value as any })}
+              >
+                <option value="mix">Misturar com revisões</option>
+                <option value="learningFirst">Mostrar aprendizado primeiro</option>
+                <option value="reviewFirst">Mostrar revisões primeiro</option>
+              </select>
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs font-bold text-foreground">Ordem de classificação de revisões</span>
+              </div>
+              <select
+                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer"
+                value={activePresetToEdit.reviewSorting}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, reviewSorting: e.target.value as any })}
+              >
+                <option value="dateThenRandom">Data de revisão, depois aleatório</option>
+                <option value="random">Totalmente aleatório</option>
+              </select>
+            </div>
+          </div>
+
+          {/* 5. OCULTAR */}
+          <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/60 shadow-sm h-fit">
+            <div className="text-[10px] text-primary font-bold uppercase tracking-wider px-4 pt-4 pb-2 bg-muted/20">
+              🙈 Ocultar (Bury Siblings)
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[80%]">
+                <span className="text-xs font-bold text-foreground">Ocultar novos irmãos até o dia seguinte</span>
+                <span className="text-[10px] text-muted-foreground">Enterrar cartões irmãos na fase de novos.</span>
+              </div>
+              <input
+                type="checkbox"
+                className="w-4 h-4 accent-primary cursor-pointer"
+                checked={activePresetToEdit.buryNewSiblings}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, buryNewSiblings: e.target.checked })}
+              />
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[80%]">
+                <span className="text-xs font-bold text-foreground">Ocultar irmãos de revisão até o dia seguinte</span>
+                <span className="text-[10px] text-muted-foreground">Evita ver o verso do mesmo conteúdo no mesmo dia.</span>
+              </div>
+              <input
+                type="checkbox"
+                className="w-4 h-4 accent-primary cursor-pointer"
+                checked={activePresetToEdit.buryReviewSiblings}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, buryReviewSiblings: e.target.checked })}
+              />
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[80%]">
+                <span className="text-xs font-bold text-foreground">Ocultar irmãos em aprendizado até o dia seguinte</span>
+              </div>
+              <input
+                type="checkbox"
+                className="w-4 h-4 accent-primary cursor-pointer"
+                checked={activePresetToEdit.buryLearningSiblings}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, buryLearningSiblings: e.target.checked })}
+              />
+            </div>
+          </div>
+
+          {/* 6. ÁUDIO */}
+          <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/60 shadow-sm h-fit">
+            <div className="text-[10px] text-primary font-bold uppercase tracking-wider px-4 pt-4 pb-2 bg-muted/20">
+              🔊 Áudio
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[80%]">
+                <span className="text-xs font-bold text-foreground">Não reproduzir áudio automaticamente</span>
+                <span className="text-[10px] text-muted-foreground">Silencia a pronúncia inicial ao virar a carta.</span>
+              </div>
+              <input
+                type="checkbox"
+                className="w-4 h-4 accent-primary cursor-pointer"
+                checked={activePresetToEdit.disableAutoplay}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, disableAutoplay: e.target.checked })}
+              />
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[80%]">
+                <span className="text-xs font-bold text-foreground">Pular pergunta ao repetir a resposta</span>
+              </div>
+              <input
+                type="checkbox"
+                className="w-4 h-4 accent-primary cursor-pointer"
+                checked={activePresetToEdit.skipQuestionOnReplay}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, skipQuestionOnReplay: e.target.checked })}
+              />
+            </div>
+          </div>
+
+          {/* 7. CRONÔMETRO */}
+          <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/60 shadow-sm h-fit">
+            <div className="text-[10px] text-primary font-bold uppercase tracking-wider px-4 pt-4 pb-2 bg-muted/20">
+              ⏱️ Cronômetro
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[70%]">
+                <span className="text-xs font-bold text-foreground">Máximo de segundos para resposta</span>
+                <span className="text-[10px] text-muted-foreground">Tempo limite a registrar na revisão.</span>
+              </div>
+              <input
+                type="number"
+                min="5"
+                className="bg-muted border border-border text-foreground px-2 py-1 rounded-lg text-xs font-bold outline-none w-20 text-center h-8"
+                value={activePresetToEdit.maxAnswerSeconds}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, maxAnswerSeconds: Math.max(5, parseInt(e.target.value, 10) || 5) })}
+              />
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[80%]">
+                <span className="text-xs font-bold text-foreground">Mostrar cronômetro de resposta</span>
+                <span className="text-[10px] text-muted-foreground">Exibe um cronômetro ativo na arena de estudos.</span>
+              </div>
+              <input
+                type="checkbox"
+                className="w-4 h-4 accent-primary cursor-pointer"
+                checked={activePresetToEdit.showTimer}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, showTimer: e.target.checked })}
+              />
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[80%]">
+                <span className="text-xs font-bold text-foreground">Parar o temporizador ao responder</span>
+                <span className="text-[10px] text-muted-foreground">Congela o relógio ao revelar a resposta.</span>
+              </div>
+              <input
+                type="checkbox"
+                className="w-4 h-4 accent-primary cursor-pointer"
+                checked={activePresetToEdit.stopTimerOnAnswer}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, stopTimerOnAnswer: e.target.checked })}
+              />
+            </div>
+          </div>
+
+          {/* 8. AVANÇO AUTOMÁTICO */}
+          <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/60 shadow-sm h-fit">
+            <div className="text-[10px] text-primary font-bold uppercase tracking-wider px-4 pt-4 pb-2 bg-muted/20">
+              🚀 Avanço Automático
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[70%]">
+                <span className="text-xs font-bold text-foreground">Segundos para mostrar a pergunta</span>
+                <span className="text-[10px] text-muted-foreground">Tempo antes de revelar a resposta automaticamente (0 = desativado).</span>
+              </div>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                className="bg-muted border border-border text-foreground px-2 py-1 rounded-lg text-xs font-bold outline-none w-20 text-center h-8"
+                value={activePresetToEdit.autoShowAnswerSeconds}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, autoShowAnswerSeconds: Math.max(0, parseFloat(e.target.value) || 0) })}
+              />
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[70%]">
+                <span className="text-xs font-bold text-foreground">Segundos para mostrar a resposta</span>
+                <span className="text-[10px] text-muted-foreground">Tempo antes de passar para o próximo card (0 = desativado).</span>
+              </div>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                className="bg-muted border border-border text-foreground px-2 py-1 rounded-lg text-xs font-bold outline-none w-20 text-center h-8"
+                value={activePresetToEdit.autoShowQuestionSeconds}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, autoShowQuestionSeconds: Math.max(0, parseFloat(e.target.value) || 0) })}
+              />
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[80%]">
+                <span className="text-xs font-bold text-foreground">Esperando pelo Áudio</span>
+                <span className="text-[10px] text-muted-foreground">Aguardar a voz terminar de falar antes de passar adiante.</span>
+              </div>
+              <input
+                type="checkbox"
+                className="w-4 h-4 accent-primary cursor-pointer"
+                checked={activePresetToEdit.waitForAudio}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, waitForAudio: e.target.checked })}
+              />
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs font-bold text-foreground">Ação da Questão</span>
+              </div>
+              <select
+                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer"
+                value={activePresetToEdit.questionAction}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, questionAction: e.target.value as any })}
+              >
+                <option value="showAnswer">Mostrar Resposta</option>
+                <option value="bury">Ocultar Cartão</option>
+              </select>
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs font-bold text-foreground">Ação de Resposta</span>
+              </div>
+              <select
+                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer"
+                value={activePresetToEdit.answerAction}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, answerAction: e.target.value as any })}
+              >
+                <option value="skip">Próximo Cartão (Pular)</option>
+                <option value="bury">Ocultar Cartão</option>
+              </select>
+            </div>
+          </div>
+
+          {/* 9. DIAS DE DESCANSO */}
+          <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/60 shadow-sm h-fit col-span-1 md:col-span-2">
+            <div className="text-[10px] text-primary font-bold uppercase tracking-wider px-4 pt-4 pb-2 bg-muted/20">
+              🌴 Dias de Descanso (Workload Balancer)
+            </div>
+            <div className="p-4 bg-card space-y-4">
+              <div className="text-[11px] text-muted-foreground leading-relaxed">
+                Ajuste a carga de trabalho de cada dia da semana de 0% (dia livre) a 100% (normal). O algoritmo distribuirá revisões de forma balanceada.
+              </div>
+              <div className="grid grid-cols-7 gap-2 text-center">
+                {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'].map((day, idx) => (
+                  <div key={day} className="flex flex-col items-center gap-1.5 p-2 bg-muted/40 border border-border/60 rounded-xl">
+                    <span className="text-[10px] font-bold text-foreground">{day}</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.1"
+                      className="w-12 h-1.5 accent-primary cursor-pointer"
+                      value={activePresetToEdit.daysOffMultiplier[idx]}
+                      onChange={(e) => {
+                        const newMultipliers = [...activePresetToEdit.daysOffMultiplier];
+                        newMultipliers[idx] = parseFloat(e.target.value);
+                        setActivePresetToEdit({ ...activePresetToEdit, daysOffMultiplier: newMultipliers });
+                      }}
+                    />
+                    <span className="text-[9px] font-black text-primary">
+                      {Math.round(activePresetToEdit.daysOffMultiplier[idx] * 100)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* 10. ALGORITMO FSRS */}
+          <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/60 shadow-sm h-fit col-span-1 md:col-span-2">
+            <div className="text-[10px] text-primary font-bold uppercase tracking-wider px-4 pt-4 pb-2 bg-muted/20">
+              🧠 Algoritmo FSRS
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[80%]">
+                <span className="text-xs font-bold text-foreground">Habilitar FSRS para este baralho</span>
+                <span className="text-[10px] text-muted-foreground">Usa o agendador inteligente avançado em vez do SM-2 clássico.</span>
+              </div>
+              <input
+                type="checkbox"
+                className="w-4 h-4 accent-primary cursor-pointer"
+                checked={activePresetToEdit.fsrsEnabled}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, fsrsEnabled: e.target.checked })}
+              />
+            </div>
+          </div>
+
+          {/* 11. AVANÇADO */}
+          <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/60 shadow-sm h-fit col-span-1 md:col-span-2">
+            <div className="text-[10px] text-primary font-bold uppercase tracking-wider px-4 pt-4 pb-2 bg-muted/20">
+              ⚙️ Opções Avançadas (Algoritmo & Parâmetros)
+            </div>
+            <div className="p-4 bg-card grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-bold text-foreground">Intervalo máximo (dias)</span>
+                <input
+                  type="number"
+                  min="1"
+                  className="bg-muted border border-border text-foreground px-3 py-1.5 rounded-lg text-xs font-bold outline-none text-center h-8"
+                  value={activePresetToEdit.maxInterval}
+                  onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, maxInterval: Math.max(1, parseInt(e.target.value, 10) || 1) })}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-bold text-foreground">Facilidade inicial (SM-2)</span>
+                <input
+                  type="number"
+                  min="1.3"
+                  step="0.1"
+                  className="bg-muted border border-border text-foreground px-3 py-1.5 rounded-lg text-xs font-bold outline-none text-center h-8"
+                  value={activePresetToEdit.startingEase}
+                  onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, startingEase: Math.max(1.3, parseFloat(e.target.value) || 1.3) })}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-bold text-foreground">Bônus fácil</span>
+                <input
+                  type="number"
+                  min="1.0"
+                  step="0.05"
+                  className="bg-muted border border-border text-foreground px-3 py-1.5 rounded-lg text-xs font-bold outline-none text-center h-8"
+                  value={activePresetToEdit.easyBonus}
+                  onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, easyBonus: Math.max(1.0, parseFloat(e.target.value) || 1.0) })}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-bold text-foreground">Modificador de intervalo</span>
+                <input
+                  type="number"
+                  min="0.1"
+                  step="0.05"
+                  className="bg-muted border border-border text-foreground px-3 py-1.5 rounded-lg text-xs font-bold outline-none text-center h-8"
+                  value={activePresetToEdit.intervalModifier}
+                  onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, intervalModifier: Math.max(0.1, parseFloat(e.target.value) || 0.1) })}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-bold text-foreground">Intervalo árduo</span>
+                <input
+                  type="number"
+                  min="1.0"
+                  step="0.05"
+                  className="bg-muted border border-border text-foreground px-3 py-1.5 rounded-lg text-xs font-bold outline-none text-center h-8"
+                  value={activePresetToEdit.hardInterval}
+                  onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, hardInterval: Math.max(1.0, parseFloat(e.target.value) || 1.0) })}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-bold text-foreground">Multiplicador de lapso</span>
+                <input
+                  type="number"
+                  min="0.0"
+                  max="1.0"
+                  step="0.05"
+                  className="bg-muted border border-border text-foreground px-3 py-1.5 rounded-lg text-xs font-bold outline-none text-center h-8"
+                  value={activePresetToEdit.lapseMultiplier}
+                  onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, lapseMultiplier: Math.max(0.0, Math.min(1.0, parseFloat(e.target.value) || 0.0)) })}
+                />
+              </div>
+            </div>
+            <div className="p-4 bg-card border-t border-border/40 flex flex-col gap-1.5">
+              <span className="text-xs font-bold text-foreground">Agendamento personalizado (JavaScript)</span>
+              <textarea
+                className="w-full bg-muted border border-border text-foreground p-3 rounded-xl text-xs outline-none focus:border-primary/50 font-mono min-h-[80px]"
+                placeholder="// Insira seu código JavaScript personalizado para agendamento aqui..."
+                value={activePresetToEdit.customScheduling}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, customScheduling: e.target.value })}
+              />
+            </div>
+          </div>
+
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4 w-full max-w-none px-2 md:px-6">
@@ -159,7 +837,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               className="h-9 w-9 rounded-lg border-border bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer flex items-center justify-center"
               title="Como funcionam os algoritmos?"
               onClick={() => {
-                setActiveTab('algorithms');
+                setActiveTab('guide', 'srs_math');
                 setCurrentView('dashboard');
               }}
             >
@@ -301,6 +979,89 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             checked={autoPlayAudio}
             onChange={e => setAutoPlayAudio(e.target.checked)}
           />
+        </div>
+      </div>
+
+      {/* PRESETS DE ESTUDO */}
+      <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/60 shadow-sm">
+        <div className="flex items-center justify-between px-4 pt-4 pb-2 bg-muted/20">
+          <div className="flex items-center gap-2">
+            <Settings size={12} className="text-primary" />
+            <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">
+              Presets de Estudo
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleImportPreset}
+              className="text-[10px] font-bold text-muted-foreground hover:text-foreground hover:underline flex items-center gap-1 cursor-pointer transition-colors"
+            >
+              <Upload size={10} /> Importar
+            </button>
+            <button
+              onClick={handleCreateNewPreset}
+              className="text-[10px] font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
+            >
+              <Plus size={10} /> Criar Novo Preset
+            </button>
+          </div>
+        </div>
+
+        <div className="p-4 bg-card space-y-3">
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            Personalize limites diários, etapas de aprendizagem, ordem de exibição, e configurações avançadas do algoritmo para cada baralho.
+          </p>
+          <div className="space-y-2">
+            {presets && presets.map((preset) => {
+              const isDefault = preset.id === 'default-study-preset';
+              return (
+                <div key={preset.id} className="flex items-center justify-between p-3 bg-muted/30 border border-border/60 rounded-xl hover:bg-muted/50 transition-colors">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-foreground">{preset.name}</span>
+                    {isDefault && (
+                      <span className="text-[9px] font-bold bg-primary/10 text-primary border border-primary/20 px-1.5 py-0.5 rounded-full">
+                        Padrão
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => downloadPresetFile(preset)}
+                      className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer border border-border bg-card shadow-sm flex items-center justify-center h-7 w-7"
+                      title="Exportar preset como JSON"
+                    >
+                      <Download size={12} />
+                    </button>
+                    <button
+                      onClick={() => setActivePresetToEdit(preset)}
+                      className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer border border-border bg-card shadow-sm flex items-center justify-center h-7 w-7"
+                      title="Editar configurações"
+                    >
+                      <Edit size={12} />
+                    </button>
+                    {!isDefault && (
+                      <button
+                        onClick={async () => {
+                          if (window.confirm(`Deseja realmente excluir o preset "${preset.name}"? Os baralhos que usam este preset voltarão ao padrão.`)) {
+                            await onDeletePreset(preset.id);
+                          }
+                        }}
+                        className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors cursor-pointer border border-border bg-card shadow-sm flex items-center justify-center h-7 w-7"
+                        title="Excluir preset"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {(!presets || presets.length === 0) && (
+              <p className="text-[10px] text-muted-foreground text-center py-2">
+                Nenhum preset carregado.
+              </p>
+            )}
+          </div>
         </div>
       </div>
 

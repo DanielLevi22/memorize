@@ -2,20 +2,26 @@ import React, { useState } from 'react';
 import { Brain, Calendar, Zap, TrendingUp, AlertCircle } from 'lucide-react';
 import { Card as ShadcnCard } from './ui/card';
 
-export const SrsAlgorithmsDocs: React.FC = () => {
+interface SrsAlgorithmsDocsProps {
+  hideHeader?: boolean;
+}
+
+export const SrsAlgorithmsDocs: React.FC<SrsAlgorithmsDocsProps> = ({ hideHeader = false }) => {
   const [activeSection, setActiveSection] = useState<'overview' | 'sm2' | 'fsrs' | 'comparison'>('overview');
 
   return (
-    <div className="flex flex-col gap-6 animate-in fade-in duration-300 w-full max-w-5xl mx-auto">
+    <div className={hideHeader ? "flex flex-col gap-6 w-full animate-in fade-in duration-300" : "flex flex-col gap-6 animate-in fade-in duration-300 w-full max-w-5xl mx-auto"}>
       {/* Cabeçalho */}
-      <div className="flex flex-col gap-1.5 border-b border-border pb-4">
-        <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-          🧠 Algoritmos de Repetição Espaçada (SRS)
-        </h2>
-        <p className="text-xs text-muted-foreground">
-          Entenda o funcionamento, as equações matemáticas e os motores de agendamento por trás do Memorize.
-        </p>
-      </div>
+      {!hideHeader && (
+        <div className="flex flex-col gap-1.5 border-b border-border pb-4">
+          <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
+            🧠 Algoritmos de Repetição Espaçada (SRS)
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Entenda o funcionamento, as equações matemáticas e os motores de agendamento por trás do Memorize.
+          </p>
+        </div>
+      )}
 
       {/* Menu de Abas */}
       <div className="flex flex-wrap gap-2 bg-muted/40 p-1 rounded-xl border border-border/60 max-w-max">

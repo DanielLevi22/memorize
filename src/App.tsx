@@ -3,12 +3,13 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { 
   Flame, Plus, Sparkles, Menu, User, 
   Search, Settings, Sun, Moon,
-  ChevronLeft, LayoutDashboard, TrendingUp, HelpCircle, ClipboardList
+  ChevronLeft, LayoutDashboard, TrendingUp, ClipboardList,
+  BookOpen, Info
 } from 'lucide-react';
 
 // Banco de Dados e Types
-import { db, seedInitialData } from './db/db';
-import type { Deck, Card } from './types';
+import { db, seedInitialData, ensureDefaultPreset, defaultPreset } from './db/db';
+import type { Deck, Card, DeckPreset } from './types';
 
 // Utilitários
 import { calculateNextReview } from './utils/srs';
@@ -20,6 +21,7 @@ import { CardsPage } from './pages/CardsPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { SettingsPage } from './pages/SettingsPage';
 import { HistoryPage } from './pages/HistoryPage';
+import { ReadingPage } from './pages/ReadingPage';
 
 // Componentes do Projeto
 import { DeckModal } from './components/DeckModal';
@@ -29,7 +31,7 @@ import { CongratsScreen } from './components/CongratsScreen';
 import { CardPreviewModal } from './components/CardPreviewModal';
 import { ImportModal } from './components/ImportModal';
 import { StatsDashboard } from './components/StatsDashboard';
-import { SrsAlgorithmsDocs } from './components/SrsAlgorithmsDocs';
+import { AppGuideDocs } from './components/AppGuideDocs';
 import { GlobalSearch } from './components/GlobalSearch';
 import { AiGeneratorModal } from './components/AiGeneratorModal';
 import { getTagColors } from './utils/tagColors';
@@ -69,8 +71,20 @@ function App() {
   // --- ESTADO DA SIDEBAR E NAVEGAÇÃO INTERNA ---
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDesktopSidebarOpen, setIsDesktopSidebarOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'algorithms' | 'history'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide'>('dashboard');
+  const [guideInitialTab, setGuideInitialTab] = useState<'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math'>('overview');
   const [searchTerm, setSearchTerm] = useState('');
+
+  const handleSetActiveTab = (
+    tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide',
+    subTab?: 'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math'
+  ) => {
+    setActiveTab(tab);
+    if (tab === 'guide') {
+      setGuideInitialTab(subTab || 'overview');
+    }
+  };
+  const [isReadingZenMode, setIsReadingZenMode] = useState(false);
 
   const toggleSidebar = () => {
     if (window.innerWidth >= 768) {
@@ -212,10 +226,12 @@ function App() {
   const decks = useLiveQuery(() => db.decks.toArray());
   const cards = useLiveQuery(() => db.cards.toArray());
   const revisions = useLiveQuery(() => db.revisions.toArray());
+  const presets = useLiveQuery(() => db.presets.toArray());
+  const readingSessions = useLiveQuery(() => db.readingSessions?.toArray());
 
   // --- EFFECT DE TEMA E INITIAL SEED ---
   useEffect(() => {
-    seedInitialData();
+    seedInitialData().then(() => ensureDefaultPreset());
     const streakData = getStreak();
     setStreak(streakData.currentStreak);
   }, []);
@@ -238,6 +254,10 @@ function App() {
     localStorage.setItem('memorize_algo', selectedAlgo);
   }, [selectedAlgo]);
 
+  useEffect(() => {
+    setIsReadingZenMode(false);
+  }, [activeTab]);
+
   // --- CTRL+K GLOBAL SEARCH LISTENER ---
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -253,8 +273,120 @@ function App() {
   // --- CÁLCULOS E ESTATÍSTICAS DO DASHBOARD ---
   const todayStr = new Date().toISOString().split('T')[0];
 
-  const totalNew = cards ? cards.filter(c => c.interval === 0).length : 0;
-  const totalDue = cards ? cards.filter(c => c.interval > 0 && c.dueDate <= todayStr).length : 0;
+  const getDeckPreset = (deck: Deck): DeckPreset => {
+    if (deck.presetId && presets) {
+      const found = presets.find(p => p.id === deck.presetId);
+      if (found) return found;
+    }
+    return defaultPreset;
+  };
+
+  const getDeckStudyCountsToday = (deckId: string) => {
+    if (!revisions || !cards) return { newStudied: 0, reviewsStudied: 0 };
+    const deckCardsList = cards.filter(c => c.deckId === deckId);
+    const deckCardIds = new Set(deckCardsList.map(c => c.id));
+    const startOfTodayMs = new Date().setHours(0, 0, 0, 0);
+    
+    const deckRevisions = revisions.filter(r => deckCardIds.has(r.cardId));
+    const revisionsToday = deckRevisions.filter(r => r.timestamp >= startOfTodayMs);
+    const revisedCardIdsToday = new Set(revisionsToday.map(r => r.cardId));
+    
+    let newStudied = 0;
+    let reviewsStudied = 0;
+    
+    for (const cardId of revisedCardIdsToday) {
+      const hasPriorRevision = deckRevisions.some(r => r.cardId === cardId && r.timestamp < startOfTodayMs);
+      if (hasPriorRevision) {
+        reviewsStudied++;
+      } else {
+        newStudied++;
+      }
+    }
+    
+    return { newStudied, reviewsStudied };
+  };
+
+  const getDeckStudyableCards = (deck: Deck, deckCards: Card[]) => {
+    const preset = getDeckPreset(deck);
+    const counts = getDeckStudyCountsToday(deck.id);
+    
+    // Sort reviews according to reviewSorting
+    let reviewCards = deckCards.filter(c => c.interval > 0 && c.repetitions > 1 && c.dueDate <= todayStr);
+    if (preset.reviewSorting === 'random') {
+      reviewCards = [...reviewCards].sort(() => Math.random() - 0.5);
+    } else {
+      // dateThenRandom
+      reviewCards = [...reviewCards].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    }
+    
+    // Learning cards (not capped by review limit)
+    const learningCards = deckCards.filter(c => c.interval > 0 && c.repetitions <= 1 && c.dueDate <= todayStr);
+    
+    // Sort new cards according to insertionOrder
+    let newCards = deckCards.filter(c => c.interval === 0);
+    if (preset.insertionOrder === 'random') {
+      newCards = [...newCards].sort(() => Math.random() - 0.5);
+    } else {
+      newCards = [...newCards].sort((a, b) => a.createdAt - b.createdAt);
+    }
+    
+    const reviewsRemaining = Math.max(0, preset.maxReviewsPerDay - counts.reviewsStudied);
+    let newRemaining = Math.max(0, preset.newCardsPerDay - counts.newStudied);
+    
+    if (!preset.newCardsIgnoreReviewLimit && reviewsRemaining <= 0) {
+      newRemaining = 0;
+    }
+    
+    const cappedReviews = reviewCards.slice(0, reviewsRemaining);
+    const cappedNew = newCards.slice(0, newRemaining);
+    
+    // Mix or order them
+    let combined = [];
+    if (preset.newVsReviewOrder === 'newFirst') {
+      combined = [...cappedNew, ...learningCards, ...cappedReviews];
+    } else if (preset.newVsReviewOrder === 'reviewFirst') {
+      combined = [...learningCards, ...cappedReviews, ...cappedNew];
+    } else {
+      // 'mix'
+      const maxLen = Math.max(cappedNew.length, cappedReviews.length + learningCards.length);
+      const reviews = [...learningCards, ...cappedReviews];
+      for (let i = 0; i < maxLen; i++) {
+        if (i < cappedNew.length) combined.push(cappedNew[i]);
+        if (i < reviews.length) combined.push(reviews[i]);
+      }
+    }
+    
+    return {
+      cards: combined,
+      newCount: cappedNew.length,
+      learningCount: learningCards.length,
+      reviewCount: cappedReviews.length,
+      totalCount: cappedNew.length + learningCards.length + cappedReviews.length
+    };
+  };
+
+  const getDeckStudyableCounts = (deck: Deck, deckCards: Card[]) => {
+    const studyable = getDeckStudyableCards(deck, deckCards);
+    return {
+      newCount: studyable.newCount,
+      learningCount: studyable.learningCount,
+      reviewCount: studyable.reviewCount,
+      totalCount: studyable.totalCount
+    };
+  };
+
+  // Capped totals for dashboard
+  let totalNew = 0;
+  let totalDue = 0;
+  if (decks && cards) {
+    for (const deck of decks) {
+      const deckCards = cards.filter(c => c.deckId === deck.id);
+      const studyable = getDeckStudyableCards(deck, deckCards);
+      totalNew += studyable.newCount;
+      totalDue += studyable.learningCount + studyable.reviewCount;
+    }
+  }
+
   const totalLearned = cards ? cards.filter(c => c.interval > 0 && c.dueDate > todayStr).length : 0;
 
   // --- NOTIFICAÇÕES (dispara quando totalDue muda) ---
@@ -280,11 +412,12 @@ function App() {
     setIsDeckModalOpen(true);
   };
 
-  const handleSaveDeck = async (name: string, description: string) => {
+  const handleSaveDeck = async (name: string, description: string, presetId: string) => {
     if (deckToEdit) {
       await db.decks.update(deckToEdit.id, {
         name,
         description,
+        presetId,
         updatedAt: Date.now()
       });
     } else {
@@ -292,6 +425,7 @@ function App() {
         id: crypto.randomUUID(),
         name,
         description,
+        presetId,
         createdAt: Date.now(),
         updatedAt: Date.now()
       };
@@ -307,6 +441,22 @@ function App() {
     if (selectedDeckId === deckId) {
       setCurrentView('dashboard');
       setSelectedDeckId(null);
+    }
+  };
+
+  // --- OPERAÇÕES CRUD DE PRESETS ---
+  const handleSavePreset = async (preset: DeckPreset) => {
+    await db.presets.put(preset);
+  };
+
+  const handleDeletePreset = async (presetId: string) => {
+    if (presetId === 'default-study-preset') return;
+    await db.presets.delete(presetId);
+    
+    // Decks using this preset should fall back to undefined
+    const affectedDecks = await db.decks.where('presetId').equals(presetId).toArray();
+    for (const deck of affectedDecks) {
+      await db.decks.update(deck.id, { presetId: undefined });
     }
   };
 
@@ -378,13 +528,12 @@ function App() {
   };
 
   const getFilteredCardsCount = (deckId: string, activeTags: string[]) => {
-    if (!cards) return 0;
-    return cards.filter(c => {
-      const matchesDeck = c.deckId === deckId;
-      const matchesDue = c.interval === 0 || c.dueDate <= todayStr;
-      const matchesTags = activeTags.length === 0 || (c.tags && c.tags.some(t => activeTags.includes(t)));
-      return matchesDeck && matchesDue && matchesTags;
-    }).length;
+    if (!cards || !decks) return 0;
+    const deck = decks.find(d => d.id === deckId);
+    if (!deck) return 0;
+    const deckCards = cards.filter(c => c.deckId === deckId);
+    const matchedCards = deckCards.filter(c => activeTags.length === 0 || (c.tags && c.tags.some(t => activeTags.includes(t))));
+    return getDeckStudyableCards(deck, matchedCards).totalCount;
   };
 
   // --- FLUXO DE ESTUDO ---
@@ -399,7 +548,9 @@ function App() {
       // Sessão Cram não altera agendamento nem registra revisão
       return;
     }
-    const nextFields = calculateNextReview(card, rating);
+    const deck = decks?.find(d => d.id === card.deckId);
+    const preset = deck ? getDeckPreset(deck) : undefined;
+    const nextFields = calculateNextReview(card, rating, preset);
     await db.cards.update(card.id, {
       ...nextFields,
       updatedAt: Date.now()
@@ -583,8 +734,9 @@ function App() {
   };
 
   // --- FLUXO NAVEGAÇÃO SIDEBAR ---
-  const handleNavigateFromSidebar = (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'algorithms' | 'history') => {
+  const handleNavigateFromSidebar = (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide') => {
     setActiveTab(tab);
+    setGuideInitialTab('overview');
     setCurrentView('dashboard');
     setIsSidebarOpen(false);
   };
@@ -598,13 +750,15 @@ function App() {
 
   const cardsToStudy = cramSessionCards 
     ? cramSessionCards
-    : (cards && selectedDeckId
-        ? cards.filter(c => {
-            const matchesDeck = c.deckId === selectedDeckId;
-            const matchesDue = c.interval === 0 || c.dueDate <= todayStr;
-            const matchesTags = selectedStudyTags.length === 0 || (c.tags && c.tags.some(t => selectedStudyTags.includes(t)));
-            return matchesDeck && matchesDue && matchesTags;
-          })
+    : (cards && selectedDeckId && decks
+        ? (() => {
+            const deck = decks.find(d => d.id === selectedDeckId);
+            if (!deck) return [];
+            const deckCards = cards.filter(c => c.deckId === selectedDeckId);
+            // Apply tag filtering first
+            const matchedCards = deckCards.filter(c => selectedStudyTags.length === 0 || (c.tags && c.tags.some(t => selectedStudyTags.includes(t))));
+            return getDeckStudyableCards(deck, matchedCards).cards;
+          })()
         : []);
 
   const selectedDeck = decks?.find(d => d.id === selectedDeckId);
@@ -668,12 +822,45 @@ function App() {
 
   const stats = getTodaysStats();
 
+  const getTodaysReadingStats = () => {
+    if (!readingSessions) return { minutes: 0, wordsRead: 0, sentencesMastered: 0 };
+    
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayStartMs = todayStart.getTime();
+
+    const todaySessions = readingSessions.filter(s => s.timestamp >= todayStartMs);
+
+    let durationSeconds = 0;
+    let wordsRead = 0;
+    let sentencesMastered = 0;
+
+    todaySessions.forEach(s => {
+      durationSeconds += s.duration;
+      wordsRead += s.wordsRead;
+      sentencesMastered += s.sentencesMastered;
+    });
+
+    return {
+      minutes: parseFloat((durationSeconds / 60).toFixed(1)),
+      wordsRead,
+      sentencesMastered
+    };
+  };
+
+  const readingStats = getTodaysReadingStats();
+
+  const handleGoToReading = () => {
+    setActiveTab('reading');
+    setCurrentView('dashboard');
+  };
+
   return (
     <div className="app-container min-h-screen flex flex-row bg-background text-foreground relative font-sans w-full">
       
       {/* 1. SIDEBAR FIXA PARA DESKTOP (md:flex) */}
       <aside className={`hidden md:flex flex-col border-r border-border bg-card h-screen sticky top-0 justify-between shrink-0 transition-all duration-300 ${
-        isDesktopSidebarOpen ? 'w-[260px] p-6 opacity-100' : 'w-0 p-0 border-r-0 opacity-0 overflow-hidden'
+        isDesktopSidebarOpen && !isReadingZenMode ? 'w-[260px] p-6 opacity-100' : 'w-0 p-0 border-r-0 opacity-0 overflow-hidden'
       }`}>
         <div className="space-y-6">
           {/* User Profile Header & Collapse Button */}
@@ -722,6 +909,24 @@ function App() {
                   {totalDue}
                 </span>
               )}
+            </Button>
+
+            <Button 
+              variant="ghost"
+              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+                activeTab === 'reading' 
+                  ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+              }`}
+              onClick={() => {
+                setActiveTab('reading');
+                setCurrentView('dashboard');
+              }}
+            >
+              <div className="flex items-center gap-3">
+                <BookOpen size={16} />
+                <span>Leitura</span>
+              </div>
             </Button>
 
             <Button 
@@ -824,21 +1029,22 @@ function App() {
               </div>
             </Button>
 
+
             <Button 
               variant="ghost"
               className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
-                activeTab === 'algorithms' 
+                activeTab === 'guide' 
                   ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
               }`}
               onClick={() => {
-                setActiveTab('algorithms');
+                handleSetActiveTab('guide', 'overview');
                 setCurrentView('dashboard');
               }}
             >
               <div className="flex items-center gap-3">
-                <HelpCircle size={16} />
-                <span>Algoritmos SRS</span>
+                <Info size={16} />
+                <span>Guia & Ajuda</span>
               </div>
             </Button>
           </nav>
@@ -889,6 +1095,21 @@ function App() {
                         {totalDue}
                       </span>
                     )}
+                  </Button>
+
+                  <Button 
+                    variant="ghost"
+                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+                      activeTab === 'reading' 
+                        ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                    }`}
+                    onClick={() => handleNavigateFromSidebar('reading')}
+                  >
+                    <div className="flex items-center gap-3">
+                      <BookOpen size={16} />
+                      <span>Leitura</span>
+                    </div>
                   </Button>
 
                   <Button 
@@ -976,18 +1197,20 @@ function App() {
                     </div>
                   </Button>
 
+
                   <Button 
                     variant="ghost"
                     className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
-                      activeTab === 'algorithms' 
+                      activeTab === 'guide' 
                         ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
                         : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                     }`}
-                    onClick={() => handleNavigateFromSidebar('algorithms')}
+                    onClick={() => handleNavigateFromSidebar('guide')}
                   >
                     <div className="flex items-center gap-3">
-                      <HelpCircle size={16} />
-                      <span>Algoritmos SRS</span>
+                      <Info size={16} />
+                      <span>Guia & Ajuda</span>
+
                     </div>
                   </Button>
                 </nav>
@@ -1002,7 +1225,7 @@ function App() {
         )}
 
         {/* Header (Dashboard View) */}
-        {currentView === 'dashboard' && (
+        {currentView === 'dashboard' && !isReadingZenMode && (
           <header className="flex items-center justify-between p-4 border-b border-border bg-background/80 backdrop-blur-md sticky top-0 z-10 w-full">
             {/* O botão hambúrguer do menu controla a sidebar */}
             <Button 
@@ -1072,14 +1295,13 @@ function App() {
 
         {/* Main Content Area */}
         {currentView === 'dashboard' && (
-          <main className="flex-1 p-5 pb-24 overflow-y-auto w-full">
+          <main className={`flex-1 overflow-y-auto w-full ${isReadingZenMode ? 'p-0 pb-0' : 'p-5 pb-24'}`}>
             
             {/* TAB 1: DASHBOARD (DECKS) */}
             {activeTab === 'dashboard' && (
               <DashboardPage
                 decks={decks}
                 cards={cards}
-                todayStr={todayStr}
                 totalNew={totalNew}
                 totalDue={totalDue}
                 totalLearned={totalLearned}
@@ -1095,6 +1317,20 @@ function App() {
                 stats={stats}
                 handleOpenAiModal={() => setIsAiModalOpen(true)}
                 dailyGoal={dailyGoal}
+                getDeckStudyableCounts={getDeckStudyableCounts}
+                readingStats={readingStats}
+                handleGoToReading={handleGoToReading}
+              />
+            )}
+
+            {/* TAB: LEITURA LINHA A LINHA */}
+            {activeTab === 'reading' && (
+              <ReadingPage
+                geminiApiKey={geminiApiKey}
+                ttsRate={ttsRate}
+                ttsVoice={ttsVoice}
+                isZenMode={isReadingZenMode}
+                setIsZenMode={setIsReadingZenMode}
               />
             )}
 
@@ -1135,7 +1371,6 @@ function App() {
               />
             )}
 
-            {/* TAB 4: CONFIGURAÇÕES */}
             {activeTab === 'settings' && (
               <SettingsPage
                 theme={theme}
@@ -1148,7 +1383,7 @@ function App() {
                 handleExportFullBackup={handleExportFullBackup}
                 setIsImportModalOpen={setIsImportModalOpen}
                 handleResetAllData={handleResetAllData}
-                setActiveTab={setActiveTab}
+                setActiveTab={handleSetActiveTab}
                 setCurrentView={setCurrentView}
                 deferredPrompt={deferredPrompt}
                 handleInstallApp={handleInstallApp}
@@ -1164,6 +1399,9 @@ function App() {
                 setGeminiApiKey={setGeminiApiKey}
                 dailyGoal={dailyGoal}
                 setDailyGoal={setDailyGoal}
+                presets={presets}
+                onSavePreset={handleSavePreset}
+                onDeletePreset={handleDeletePreset}
               />
             )}
 
@@ -1175,9 +1413,10 @@ function App() {
               />
             )}
 
-            {/* TAB 6: ALGORITMOS */}
-            {activeTab === 'algorithms' && (
-              <SrsAlgorithmsDocs />
+
+            {/* TAB 7: GUIA E AJUDA */}
+            {activeTab === 'guide' && (
+              <AppGuideDocs initialTab={guideInitialTab} />
             )}
 
           </main>
@@ -1213,6 +1452,7 @@ function App() {
               ttsRate={ttsRate}
               ttsVoice={ttsVoice}
               autoPlayAudio={autoPlayAudio}
+              preset={selectedDeck ? getDeckPreset(selectedDeck) : undefined}
             />
           </main>
         )}
@@ -1244,6 +1484,7 @@ function App() {
         }}
         onSave={handleSaveDeck}
         deckToEdit={deckToEdit}
+        presets={presets}
       />
 
       <CardModal

@@ -1,10 +1,14 @@
 import Dexie, { type Table } from 'dexie';
-import type { Deck, Card, Revision } from '../types';
+import type { Deck, Card, Revision, DeckPreset, ReadingText, ReadingSession, ReadingCollection } from '../types';
 
 class MemorizeDatabase extends Dexie {
   decks!: Table<Deck>;
   cards!: Table<Card>;
   revisions!: Table<Revision>;
+  presets!: Table<DeckPreset>;
+  readings!: Table<ReadingText>;
+  readingSessions!: Table<ReadingSession>;
+  readingCollections!: Table<ReadingCollection>;
 
   constructor() {
     super('MemorizeDatabase');
@@ -16,6 +20,40 @@ class MemorizeDatabase extends Dexie {
       decks: 'id, name, createdAt, updatedAt',
       cards: 'id, deckId, dueDate, [deckId+dueDate], createdAt, updatedAt',
       revisions: 'id, cardId, timestamp'
+    });
+
+    this.version(2).stores({
+      decks: 'id, name, createdAt, updatedAt, presetId',
+      cards: 'id, deckId, dueDate, [deckId+dueDate], createdAt, updatedAt',
+      revisions: 'id, cardId, timestamp',
+      presets: 'id, name'
+    });
+
+    this.version(3).stores({
+      decks: 'id, name, createdAt, updatedAt, presetId',
+      cards: 'id, deckId, dueDate, [deckId+dueDate], createdAt, updatedAt',
+      revisions: 'id, cardId, timestamp',
+      presets: 'id, name',
+      readings: 'id, title, createdAt'
+    });
+
+    this.version(4).stores({
+      decks: 'id, name, createdAt, updatedAt, presetId',
+      cards: 'id, deckId, dueDate, [deckId+dueDate], createdAt, updatedAt',
+      revisions: 'id, cardId, timestamp',
+      presets: 'id, name',
+      readings: 'id, title, createdAt',
+      readingSessions: 'id, readingId, timestamp'
+    });
+
+    this.version(5).stores({
+      decks: 'id, name, createdAt, updatedAt, presetId',
+      cards: 'id, deckId, dueDate, [deckId+dueDate], createdAt, updatedAt',
+      revisions: 'id, cardId, timestamp',
+      presets: 'id, name',
+      readings: 'id, title, createdAt, collectionId',
+      readingSessions: 'id, readingId, timestamp',
+      readingCollections: 'id, title, createdAt'
     });
   }
 }
@@ -103,3 +141,58 @@ export async function seedInitialData() {
   await db.cards.bulkAdd(initialCards);
   console.log('Seed de dados iniciais do Memorize executado com sucesso.');
 }
+
+export const DEFAULT_PRESET_ID = 'default-study-preset';
+
+export const defaultPreset: DeckPreset = {
+  id: DEFAULT_PRESET_ID,
+  name: 'Padrão',
+  newCardsPerDay: 20,
+  maxReviewsPerDay: 200,
+  newCardsIgnoreReviewLimit: false,
+  limitsStartFromParent: false,
+  learningSteps: '1m 10m',
+  graduatingInterval: 1,
+  easyInterval: 4,
+  insertionOrder: 'sequential',
+  relearningSteps: '10m',
+  minimumInterval: 1,
+  leechThreshold: 8,
+  leechAction: 'tag',
+  newCardGrouping: 'deck',
+  newCardSorting: 'template',
+  newVsReviewOrder: 'mix',
+  interdayLearningVsReviewOrder: 'mix',
+  reviewSorting: 'dateThenRandom',
+  buryNewSiblings: false,
+  buryReviewSiblings: false,
+  buryLearningSiblings: false,
+  disableAutoplay: false,
+  skipQuestionOnReplay: false,
+  maxAnswerSeconds: 60,
+  showTimer: false,
+  stopTimerOnAnswer: false,
+  autoShowAnswerSeconds: 0,
+  autoShowQuestionSeconds: 0,
+  waitForAudio: true,
+  questionAction: 'showAnswer',
+  answerAction: 'skip',
+  daysOffMultiplier: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+  fsrsEnabled: false,
+  maxInterval: 36500,
+  startingEase: 2.50,
+  easyBonus: 1.30,
+  intervalModifier: 1.00,
+  hardInterval: 1.20,
+  lapseMultiplier: 0.50,
+  customScheduling: ''
+};
+
+export async function ensureDefaultPreset() {
+  const count = await db.presets.count();
+  if (count === 0) {
+    await db.presets.add(defaultPreset);
+    console.log('Preset padrão criado com sucesso.');
+  }
+}
+
