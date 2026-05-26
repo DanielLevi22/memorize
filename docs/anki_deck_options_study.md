@@ -115,3 +115,50 @@ Esta seção define as etapas pelas quais os novos cartões passam antes de se t
   * **Aleatório**: Atribui posições e ordenações aleatórias aos novos cartões, misturando-os durante as sessões de estudo.
   * **Comportamento Técnico**: Ao alterar esta opção nas configurações, a posição existente dos cartões novos no banco de dados deve ser reordenada/atualizada automaticamente de acordo com o novo critério selecionado.
 
+---
+
+## Tópico 3: Falhas (Failures / Lapses Options)
+
+Esta seção define as regras aplicadas quando o usuário erra um cartão que já havia sido graduado (cartão de revisão), iniciando a fase de reaprendizagem.
+
+![Falhas](file:///C:/Users/danie/.gemini/antigravity/brain/3a0e2451-4768-4ce6-801d-c8611370b952/media__1779801133391.png)
+
+---
+
+### 1. Etapas de reaprendizagem (Relearning Steps)
+
+* **O que é**: Um ou mais atrasos temporais (delays), separados por espaços, que representam as etapas intradiárias que um cartão de revisão deve passar após receber a nota **Errei (Again)**.
+* **Comportamento Técnico**:
+  - **Pressionar Errei**: O cartão de revisão perde o seu estado de revisão ativa e é reenviado para a fila de reaprendizagem intradiária (por padrão, `10m` de espera).
+  - **Se o campo estiver vazio (Zero atrasos)**: O cartão não entra em etapas intradiárias. Ele é imediatamente reagendado com um novo intervalo diário (aplicando-se o multiplicador de lapso do algoritmo SRS), pulando a reaprendizagem imediata.
+  - **Unidades Suportadas**: Segundos (`s`), minutos (`m`), horas (`h`), dias (`d`). Exemplo: `10m`, `1d`.
+
+---
+
+### 2. Intervalo mínimo (Minimum Interval)
+
+* **O que é**: O limite inferior (em dias) que pode ser atribuído a um cartão de revisão após ele receber a nota **Errei (Again)**.
+* **Comportamento Técnico**:
+  - Quando um cartão falha, o algoritmo SRS calcula seu novo intervalo baseado em um multiplicador de lapso (ex: `intervalo anterior * 0.2`).
+  - Se o resultado deste cálculo for menor do que o intervalo mínimo definido, o sistema força o intervalo a ser exatamente este valor mínimo (por padrão: `1` dia).
+
+---
+
+### 3. Limite sanguessuga (Leech Threshold)
+
+* **O que é**: O limite de falhas acumuladas (vezes que o botão **Errei** foi pressionado) que um cartão de revisão pode sofrer antes de ser classificado como um "sanguessuga" (*leech*).
+* **Comportamento Técnico**:
+  - O sistema incrementa o contador de falhas (`lapses`) de cada cartão individualmente toda vez que o usuário erra um cartão de revisão.
+  - Quando `lapses >= limite sanguessuga` (padrão: `8` falhas), o sistema dispara a ação configurada para cartões sanguessugas.
+  - **Conceito SRS**: Cartões sanguessugas são cartões que consomem tempo excessivo por falharem constantemente. É recomendado reescrevê-los, usar mnemônicos ou excluí-los da coleção.
+
+---
+
+### 4. Ação sanguessuga (Leech Action)
+
+* **O que é**: A ação tomada pelo sistema assim que o cartão alcança o limite de falhas sanguessuga.
+* **Opções**:
+  * **Somente Etiquetas (Tag Only)**: Adiciona a etiqueta `"leech"` nas tags do cartão no banco de dados e exibe uma notificação ou pop-up. O cartão continua ativo na fila de estudos diários.
+  * **Ocultar Cartão / Suspender Cartão (Suspend Card)**: Adiciona a etiqueta `"leech"` e altera o status do cartão para suspenso (ex: `suspended = true`). O cartão é ocultado/removido de todas as filas de estudo diárias até que o usuário o retire manualmente da suspensão.
+
+
