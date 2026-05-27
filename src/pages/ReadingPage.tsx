@@ -146,11 +146,15 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   const [speechTargetSnippet, setSpeechTargetSnippet] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
   const [selectedWordIndices, setSelectedWordIndices] = useState<Set<number>>(new Set());
+  const [isDraggingSelection, setIsDraggingSelection] = useState(false);
 
-  const toggleWordSelection = (wordIndex: number) => {
+
+  const handleWordMouseDown = (wordIndex: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDraggingSelection(true);
     setSelectedWordIndices(prev => {
       const next = new Set(prev);
-      if (next.has(wordIndex)) {
+      if (next.has(wordIndex) && next.size === 1) {
         next.delete(wordIndex);
       } else {
         next.add(wordIndex);
@@ -158,6 +162,26 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
       return next;
     });
   };
+
+  const handleWordMouseEnter = (wordIndex: number) => {
+    if (isDraggingSelection) {
+      setSelectedWordIndices(prev => {
+        const next = new Set(prev);
+        next.add(wordIndex);
+        return next;
+      });
+    }
+  };
+
+  useEffect(() => {
+    const handleGlobalMouseUp = () => {
+      setIsDraggingSelection(false);
+    };
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => {
+      window.removeEventListener('mouseup', handleGlobalMouseUp);
+    };
+  }, []);
 
   // Writing Mode states
   const [writingInput, setWritingInput] = useState('');
@@ -1457,12 +1481,21 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
           key={i}
           ref={isActiveWord ? activeWordRef : undefined}
           className={`inline-block transition-all duration-150 ${wordClass} ${
-            isWordClickable ? 'cursor-pointer hover:bg-amber-500/5 hover:border-amber-500/20' : ''
+            isWordClickable ? 'cursor-pointer hover:bg-amber-500/5 hover:border-amber-500/20 select-none' : ''
           }`}
-          onClick={(e) => {
+          onMouseDown={(e) => {
             if (isWordClickable) {
-              e.stopPropagation();
-              toggleWordSelection(i);
+              handleWordMouseDown(i, e);
+            }
+          }}
+          onMouseEnter={() => {
+            if (isWordClickable) {
+              handleWordMouseEnter(i);
+            }
+          }}
+          onContextMenu={(e) => {
+            if (isWordClickable) {
+              e.preventDefault();
             }
           }}
         >
