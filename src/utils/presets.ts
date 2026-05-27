@@ -75,7 +75,6 @@ const REQUIRED_PRESET_KEYS: (keyof Omit<DeckPreset, 'id'>)[] = [
   'intervalModifier',
   'hardInterval',
   'lapseMultiplier',
-  'customScheduling',
 ];
 
 /**

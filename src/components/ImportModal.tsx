@@ -63,7 +63,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     ease: -1,
     repetitions: -1,
     lapses: -1,
-    dueDate: -1
+    dueDate: -1,
+    ankiCardId: -1,
+    ankiNoteId: -1
   });
 
   // --- ESTADOS DO RESTAURADOR JSON ---
@@ -180,7 +182,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
             c.factor,
             c.reps,
             c.lapses,
-            c.due
+            c.due,
+            c.id,
+            n.id
           FROM cards c
           JOIN notes n ON c.nid = n.id
         `;
@@ -202,6 +206,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
           const reps = val[3] as number;
           const lapses = val[4] as number;
           const due = val[5] as number;
+          const cardId = val[6] ? val[6].toString() : '';
+          const noteId = val[7] ? val[7].toString() : '';
 
           const fields = flds.split('\x1f');
           
@@ -237,7 +243,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
             (factor / 1000).toString(),
             reps.toString(),
             lapses.toString(),
-            dueDateStr
+            dueDateStr,
+            cardId,
+            noteId
           ];
           rows.push(rowData);
         });
@@ -247,7 +255,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
         if (rows.length > 0) {
           const firstRow = rows[0];
-          const fieldsCount = firstRow.length - 5;
+          const fieldsCount = firstRow.length - 7;
 
           setColMappings({
             front: 0,
@@ -257,7 +265,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
             ease: fieldsCount + 1,
             repetitions: fieldsCount + 2,
             lapses: fieldsCount + 3,
-            dueDate: fieldsCount + 4
+            dueDate: fieldsCount + 4,
+            ankiCardId: fieldsCount + 5,
+            ankiNoteId: fieldsCount + 6
           });
         }
       } catch (err: any) {
@@ -317,7 +327,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
             ease: easeIdx,
             repetitions: repsIdx,
             lapses: lapsesIdx,
-            dueDate: dueIdx
+            dueDate: dueIdx,
+            ankiCardId: -1,
+            ankiNoteId: -1
           });
         }
       };
@@ -394,9 +406,17 @@ export const ImportModal: React.FC<ImportModalProps> = ({
           }
         }
 
+        const cardId = isApkg && colMappings.ankiCardId !== -1 && row[colMappings.ankiCardId]
+          ? row[colMappings.ankiCardId]
+          : crypto.randomUUID();
+        const noteId = isApkg && colMappings.ankiNoteId !== -1 && row[colMappings.ankiNoteId]
+          ? row[colMappings.ankiNoteId]
+          : undefined;
+
         const card: Card = {
-          id: crypto.randomUUID(),
+          id: cardId,
           deckId: targetDeckId,
+          noteId: noteId,
           front: frontVal.trim(),
           back: backVal.trim(),
           context: colMappings.context !== -1 && row[colMappings.context] ? row[colMappings.context].trim() : '',

@@ -3,6 +3,7 @@ import { HelpCircle, Download, Upload, Trash2, Volume2, Eye, EyeOff, Sparkles, K
 import { Button } from '../components/ui/button';
 import type { Card, DeckPreset } from '../types';
 import { downloadPresetFile, openPresetFile, deserializePreset } from '../utils/presets';
+import { createTestDeck } from '../db/db';
 
 interface SettingsPageProps {
   theme: 'light' | 'dark';
@@ -121,8 +122,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       easyBonus: 1.30,
       intervalModifier: 1.00,
       hardInterval: 1.20,
-      lapseMultiplier: 0.50,
-      customScheduling: ''
+      lapseMultiplier: 0.50
     };
     setActivePresetToEdit(template);
   };
@@ -848,15 +848,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                 />
               </div>
             </div>
-            <div className="p-4 bg-card border-t border-border/40 flex flex-col gap-1.5">
-              <span className="text-xs font-bold text-foreground">Agendamento personalizado (JavaScript)</span>
-              <textarea
-                className="w-full bg-muted border border-border text-foreground p-3 rounded-xl text-xs outline-none focus:border-primary/50 font-mono min-h-[80px]"
-                placeholder="// Insira seu código JavaScript personalizado para agendamento aqui..."
-                value={activePresetToEdit.customScheduling}
-                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, customScheduling: e.target.value })}
-              />
-            </div>
           </div>
 
         </div>
@@ -1294,6 +1285,29 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             <Upload size={14} /> Restaurar Backup
           </Button>
         </div>
+      </div>
+
+      <div className="bg-card border border-border rounded-2xl p-5 space-y-3 shadow-sm">
+        <div className="text-[10px] text-primary font-bold uppercase tracking-wider">
+          🛠️ Ferramentas de Desenvolvimento / Testes
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          Gere um baralho contendo cartões de todos os tipos e estados do Anki para testar o exportador .apkg e o comportamento do algoritmo.
+        </p>
+        <Button
+          variant="outline"
+          className="w-full border-blue-500/30 bg-blue-500/10 hover:bg-blue-500 hover:text-zinc-50 text-blue-600 dark:text-blue-400 font-semibold cursor-pointer h-10 text-xs rounded-xl transition-all duration-200"
+          onClick={async () => {
+            try {
+              await createTestDeck();
+              alert('Baralho "🧪 Baralho de Testes Anki" criado com sucesso! Você pode estudá-lo ou exportá-lo a partir do Dashboard.');
+            } catch (err: any) {
+              alert('Erro ao criar baralho de testes: ' + err.message);
+            }
+          }}
+        >
+          Gerar Baralho de Testes do Anki
+        </Button>
       </div>
 
       <div className="bg-card border border-border rounded-2xl p-5 space-y-3 shadow-sm">

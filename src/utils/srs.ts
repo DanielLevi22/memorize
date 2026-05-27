@@ -191,7 +191,12 @@ export function calculateNextReview(card: Card, rating: number, preset?: DeckPre
         nextRepetitions = 0;
         nextLapses += 1;
       } else if (rating === 2) {
-        // Difícil (Good / Avançar): Avança de passo
+        // Difícil (Hard): Permanece no passo atual (Anki style)
+        nextLearningStep = currentStep;
+        nextInterval = 0;
+        nextRepetitions = 0;
+      } else if (rating === 3) {
+        // Bom (Good): Avança de passo
         const nextStep = currentStep + 1;
         if (nextStep < steps.length) {
           nextLearningStep = nextStep;
@@ -209,7 +214,7 @@ export function calculateNextReview(card: Card, rating: number, preset?: DeckPre
           nextLapseInterval = undefined;
         }
       } else {
-        // Fácil (3): Gradua imediatamente
+        // Fácil (Easy) - rating 4: Gradua imediatamente
         nextLearningStep = undefined;
         nextInterval = preset.easyInterval;
         nextRepetitions = 1;

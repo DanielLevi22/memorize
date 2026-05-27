@@ -88,7 +88,6 @@ function defaultPreset(overrides: Partial<DeckPreset> = {}): DeckPreset {
     intervalModifier: 1.0,
     hardInterval: 1.2,
     lapseMultiplier: 0.5,
-    customScheduling: '',
     ...overrides,
   };
 }
@@ -545,30 +544,40 @@ describe('Propriedades Gerais', () => {
   });
 
   describe('SM-2: Etapas de Aprendizagem (Anki Style)', () => {
-    it('card novo com rating 2 (Difícil) avança para o passo 1 se learningSteps = "1m 10m"', () => {
+    it('card novo com rating 2 (Difícil/Hard) permanece no passo 0', () => {
       const card = newCard({ interval: 0, repetitions: 0, learningStep: undefined });
       const preset = defaultPreset({ learningSteps: '1m 10m', graduatingInterval: 3 });
       const result = calculateNextReview(card, 2, preset);
+
+      expect(result.learningStep).toBe(0); // Permanece no passo atual (0)
+      expect(result.interval).toBe(0);
+      expect(result.repetitions).toBe(0);
+    });
+
+    it('card novo com rating 3 (Bom) avança para o passo 1 se learningSteps = "1m 10m"', () => {
+      const card = newCard({ interval: 0, repetitions: 0, learningStep: undefined });
+      const preset = defaultPreset({ learningSteps: '1m 10m', graduatingInterval: 3 });
+      const result = calculateNextReview(card, 3, preset);
 
       expect(result.learningStep).toBe(1);
       expect(result.interval).toBe(0);
       expect(result.repetitions).toBe(0);
     });
 
-    it('card no passo final com rating 2 (Difícil) gradua e vira revisão', () => {
+    it('card no passo final com rating 3 (Bom) gradua e vira revisão', () => {
       const card = newCard({ interval: 0, repetitions: 0, learningStep: 1 });
       const preset = defaultPreset({ learningSteps: '1m 10m', graduatingInterval: 3 });
-      const result = calculateNextReview(card, 2, preset);
+      const result = calculateNextReview(card, 3, preset);
 
       expect(result.learningStep).toBeUndefined();
       expect(result.interval).toBe(3);
       expect(result.repetitions).toBe(1);
     });
 
-    it('card novo com rating 3 (Fácil) gradua instantaneamente', () => {
+    it('card novo com rating 4 (Fácil) gradua instantaneamente', () => {
       const card = newCard({ interval: 0, repetitions: 0, learningStep: undefined });
       const preset = defaultPreset({ learningSteps: '1m 10m', easyInterval: 8 });
-      const result = calculateNextReview(card, 3, preset);
+      const result = calculateNextReview(card, 4, preset);
 
       expect(result.learningStep).toBeUndefined();
       expect(result.interval).toBe(8);
@@ -596,10 +605,10 @@ describe('Propriedades Gerais', () => {
       expect(result.lapses).toBe(1);
     });
 
-    it('card de revisão em reaprendizagem no passo final com rating 2 (Difícil) gradua com o intervalo de lapso calculado', () => {
+    it('card de revisão em reaprendizagem no passo final com rating 3 (Bom) gradua com o intervalo de lapso calculado', () => {
       const card = studiedCard({ interval: 0, repetitions: 0, learningStep: 0, lapseInterval: 5 });
       const preset = defaultPreset({ relearningSteps: '10m', graduatingInterval: 1 });
-      const result = calculateNextReview(card, 2, preset);
+      const result = calculateNextReview(card, 3, preset);
 
       expect(result.learningStep).toBeUndefined();
       expect(result.interval).toBe(5);

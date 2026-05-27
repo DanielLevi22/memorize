@@ -65,11 +65,13 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Inicializa a fila de sessão quando os cartões carregam pela primeira vez.
+  // Evita redefinir a fila e resetar o progresso no meio dos estudos quando ocorrem atualizações no banco.
   useEffect(() => {
-    setSessionQueue([...cardsToStudy]);
-    setCurrentIndex(0);
-    setStudiedCount(0);
-  }, [cardsToStudy]);
+    if (sessionQueue.length === 0 && cardsToStudy.length > 0) {
+      setSessionQueue([...cardsToStudy]);
+    }
+  }, [cardsToStudy, sessionQueue.length]);
 
   // Timer State
   const [seconds, setSeconds] = useState(0);
@@ -634,6 +636,16 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
     return () => window.removeEventListener('keydown', handler);
   }, [isFlipped, onCancel, currentIndex, audioUrl, isPlaying]);
 
+  // Calcular contadores de cartões restantes (estilo Anki)
+  const remainingQueue = sessionQueue.slice(currentIndex);
+  const isLearningCard = (c: Card) => (c.interval === 0 && c.learningStep !== undefined) || (c.interval > 0 && c.repetitions <= 1);
+  const isReviewCard = (c: Card) => c.interval > 0 && c.repetitions > 1;
+  const isNewCard = (c: Card) => c.interval === 0 && c.learningStep === undefined;
+
+  const newRemainingCount = remainingQueue.filter(isNewCard).length;
+  const learningRemainingCount = remainingQueue.filter(isLearningCard).length;
+  const reviewRemainingCount = remainingQueue.filter(isReviewCard).length;
+
   return (
     <div className="flex flex-col h-full gap-5">
       {/* Navbar de Estudo */}
@@ -1007,7 +1019,32 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
       </div>
 
       {/* Controls Area */}
-      <div className="mt-auto">
+      <div className="mt-auto flex flex-col items-center w-full gap-2">
+        {currentCard && (
+          <div className="flex items-center justify-center gap-1.5 text-[11px] font-extrabold select-none mb-1 tracking-wide">
+            <span 
+              className={`text-blue-500 transition-all ${isNewCard(currentCard) ? 'underline decoration-2 underline-offset-4 font-black scale-105' : 'opacity-80'}`}
+              title="Novos"
+            >
+              {newRemainingCount}
+            </span>
+            <span className="text-muted-foreground/40 font-medium">+</span>
+            <span 
+              className={`text-red-500 transition-all ${isLearningCard(currentCard) ? 'underline decoration-2 underline-offset-4 font-black scale-105' : 'opacity-80'}`}
+              title="Aprendizado"
+            >
+              {learningRemainingCount}
+            </span>
+            <span className="text-muted-foreground/40 font-medium">+</span>
+            <span 
+              className={`text-emerald-500 dark:text-emerald-400 transition-all ${isReviewCard(currentCard) ? 'underline decoration-2 underline-offset-4 font-black scale-105' : 'opacity-80'}`}
+              title="Revisões"
+            >
+              {reviewRemainingCount}
+            </span>
+          </div>
+        )}
+
         {!isFlipped ? (
           <Button 
             className="w-full bg-primary hover:bg-primary/90 text-primary-foreground py-6 rounded-xl font-bold gap-2 cursor-pointer shadow-lg text-base" 

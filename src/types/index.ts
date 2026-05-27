@@ -147,7 +147,6 @@ export interface DeckPreset {
   intervalModifier: number;
   hardInterval: number;
   lapseMultiplier: number;
-  customScheduling: string;
 }
 
 /** Um texto/lição de leitura importado */

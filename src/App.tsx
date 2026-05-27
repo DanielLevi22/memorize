@@ -32,6 +32,7 @@ import { StudyArena } from './components/StudyArena';
 import { CongratsScreen } from './components/CongratsScreen';
 import { CardPreviewModal } from './components/CardPreviewModal';
 import { ImportModal } from './components/ImportModal';
+import { ExportModal } from './components/ExportModal';
 import { StatsDashboard } from './components/StatsDashboard';
 import { AppGuideDocs } from './components/AppGuideDocs';
 import { GlobalSearch } from './components/GlobalSearch';
@@ -184,6 +185,8 @@ function App() {
   const [cardToPreview, setCardToPreview] = useState<Card | null>(null);
 
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [exportDeckId, setExportDeckId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 24;
   const [activeDeckMenuId, setActiveDeckMenuId] = useState<string | null>(null);
@@ -614,7 +617,12 @@ function App() {
     URL.revokeObjectURL(url);
   };
 
-  const handleExportDeck = async (deckId: string) => {
+  const handleExportDeck = (deckId: string) => {
+    setExportDeckId(deckId);
+    setIsExportModalOpen(true);
+  };
+
+  const handleExportDeckJson = async (deckId: string) => {
     try {
       const deck = await db.decks.get(deckId);
       if (!deck) {
@@ -650,7 +658,7 @@ function App() {
       downloadJSON(data, `${safeName}.json`);
     } catch (err: any) {
       console.error(err);
-      alert('Erro ao exportar deck: ' + err.message);
+      throw err;
     }
   };
 
@@ -1460,6 +1468,7 @@ function App() {
         {currentView === 'study' && (
           <main className="flex-1 p-5 overflow-y-auto w-full max-w-5xl mx-auto flex flex-col justify-center">
             <StudyArena
+              key={selectedDeckId || 'cram'}
               deckName={selectedDeck ? selectedDeck.name : 'Sessão de Reforço'}
               cardsToStudy={cardsToStudy}
               onGradeCard={handleGradeCard}
@@ -1686,6 +1695,16 @@ function App() {
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
         decks={decks}
+      />
+
+      <ExportModal
+        isOpen={isExportModalOpen}
+        onClose={() => {
+          setIsExportModalOpen(false);
+          setExportDeckId(null);
+        }}
+        deckId={exportDeckId}
+        onExportJson={handleExportDeckJson}
       />
 
       <AiGeneratorModal

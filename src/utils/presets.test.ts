@@ -46,7 +46,6 @@ function samplePreset(overrides: Partial<DeckPreset> = {}): DeckPreset {
     intervalModifier: 1.0,
     hardInterval: 1.2,
     lapseMultiplier: 0.5,
-    customScheduling: '',
     ...overrides,
   };
 }
