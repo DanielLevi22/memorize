@@ -3,7 +3,8 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import {
   ArrowLeft, BookOpen, Plus, Trash2, Play, Pause, Square,
   Copy, Check, ChevronRight, FileText, Volume2, HelpCircle,
-  Maximize2, EyeOff, Folder, FolderOpen, FolderPlus, Edit, Upload, Sparkles, Loader2, ExternalLink
+  Maximize2, EyeOff, Folder, FolderOpen, FolderPlus, Edit, Upload, Sparkles, Loader2, ExternalLink,
+  Mic
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { db } from '../db/db';
@@ -19,6 +20,30 @@ import {
 } from '../components/ui/dialog';
 import { extractTextFromPdf, processTextWithAI, segmentTextManually } from '../utils/readingProcessor';
 import { motion } from 'framer-motion';
+import { getWordLevenshteinDistance, diffWords, type DiffWord } from '../utils/srs';
+
+const stripHtmlTags = (str: string) => {
+  if (!str) return '';
+  let clean = str.replace(/&nbsp;/g, ' ');
+  clean = clean.replace(/<[^>]*>/g, '');
+  try {
+    const doc = new DOMParser().parseFromString(clean, 'text/html');
+    return doc.documentElement.textContent || clean;
+  } catch (e) {
+    return clean;
+  }
+};
+
+const cleanString = (str: string) => {
+  if (!str) return '';
+  return str
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"']/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+};
 
 interface ReadingPageProps {
   geminiApiKey: string;
@@ -108,6 +133,15 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
   const [showTranslation, setShowTranslation] = useState(false);
+
+  // Pronunciation Practice Mode states
+  const [isPronunciationMode, setIsPronunciationMode] = useState(false);
+  const [isListeningSpeech, setIsListeningSpeech] = useState(false);
+  const [speechTranscript, setSpeechTranscript] = useState('');
+  const [speechSimilarity, setSpeechSimilarity] = useState<number | null>(null);
+  const [speechIsCorrect, setSpeechIsCorrect] = useState<boolean | null>(null);
+  const [speechWordDiffs, setSpeechWordDiffs] = useState<DiffWord[]>([]);
+  const recognitionRef = useRef<any>(null);
   
   const activeWordRef = useRef<HTMLSpanElement>(null);
   const activeLineRef = useRef<HTMLDivElement>(null);
@@ -434,6 +468,15 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
       isPlayingRef.current = false;
       window.speechSynthesis?.cancel();
       clearTimeout(timerRef.current);
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort(); } catch (e) {}
+      }
+      setIsPronunciationMode(false);
+      setIsListeningSpeech(false);
+      setSpeechTranscript('');
+      setSpeechSimilarity(null);
+      setSpeechIsCorrect(null);
+      setSpeechWordDiffs([]);
     };
   }, [selectedTextId, activeReaderTab]);
 
@@ -448,6 +491,171 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
       if (matched) { utt.voice = matched; utt.lang = matched.lang; }
     }
     window.speechSynthesis?.speak(utt);
+  };
+
+  const playSuccessChime = () => {
+    try {
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContext) return;
+      const ctx = new AudioContext();
+      
+      const playTone = (freq: number, start: number, duration: number) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc.frequency.setValueAtTime(freq, start);
+        gain.gain.setValueAtTime(0, start);
+        gain.gain.linearRampToValueAtTime(0.15, start + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+        
+        osc.start(start);
+        osc.stop(start + duration);
+      };
+      
+      const now = ctx.currentTime;
+      playTone(523.25, now, 0.4); // C5
+      playTone(659.25, now + 0.12, 0.5); // E5
+    } catch (e) {
+      console.error("Web Audio API not supported or blocked:", e);
+    }
+  };
+
+  const togglePronunciationMode = () => {
+    if (isPronunciationMode) {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort(); } catch (e) {}
+      }
+      setIsPronunciationMode(false);
+      setIsListeningSpeech(false);
+      setSpeechTranscript('');
+      setSpeechSimilarity(null);
+      setSpeechIsCorrect(null);
+      setSpeechWordDiffs([]);
+    } else {
+      stopPlayback();
+      setIsPronunciationMode(true);
+      if (activeLineIdx < 0) {
+        setActiveLineIdx(0);
+      }
+    }
+  };
+
+  const handleStartSpeechRecognition = (targetIndexOverride?: number) => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Reconhecimento de voz não é suportado neste navegador. Use o Chrome ou Edge.");
+      return;
+    }
+
+    if (isListeningSpeech) {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (e) {}
+      }
+      return;
+    }
+
+    const targetIdx = targetIndexOverride !== undefined ? targetIndexOverride : activeLineIdx;
+
+    if (!selectedText || targetIdx < 0 || targetIdx >= selectedText.lines.length) {
+      alert("Por favor, selecione uma frase para ler.");
+      return;
+    }
+
+    setIsListeningSpeech(true);
+    setSpeechTranscript('');
+    setSpeechSimilarity(null);
+    setSpeechIsCorrect(null);
+    setSpeechWordDiffs([]);
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = (event: any) => {
+        const resultText = event.results[0][0].transcript;
+        setSpeechTranscript(resultText);
+
+        const currentLine = selectedText.lines[targetIdx];
+        const expected = stripHtmlTags(currentLine.original);
+
+        const cleanTyped = cleanString(resultText);
+        const cleanExpected = cleanString(expected);
+
+        const spokenWords = cleanTyped.split(/\s+/).filter(Boolean);
+        const expectedWords = cleanExpected.split(/\s+/).filter(Boolean);
+
+        let correct = false;
+        let similarity = 0;
+        if (spokenWords.length > 0 && expectedWords.length > 0) {
+          const wordDist = getWordLevenshteinDistance(spokenWords, expectedWords);
+          const maxWords = Math.max(spokenWords.length, expectedWords.length);
+          similarity = Math.max(0, 1 - wordDist / maxWords) * 100;
+          correct = similarity >= 80;
+        } else {
+          correct = cleanTyped === cleanExpected;
+          similarity = correct ? 100 : 0;
+        }
+
+        const diff = diffWords(resultText, expected);
+        setSpeechWordDiffs(diff);
+        setSpeechSimilarity(similarity);
+        setSpeechIsCorrect(correct);
+
+        if (correct) {
+          playSuccessChime();
+
+          if (!currentLine.mastered) {
+            handleToggleMastered(targetIdx);
+          }
+
+          setTimeout(() => {
+            setActiveLineIdx(prev => {
+              const nextIdx = prev + 1;
+              if (nextIdx < selectedText.lines.length) {
+                setSpeechTranscript('');
+                setSpeechSimilarity(null);
+                setSpeechIsCorrect(null);
+                setSpeechWordDiffs([]);
+
+                setTimeout(() => {
+                  const el = document.getElementById(`line-card-${nextIdx}`);
+                  if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }
+                  handleStartSpeechRecognition(nextIdx);
+                }, 100);
+
+                return nextIdx;
+              } else {
+                alert("Parabéns! Você concluiu a leitura e pronúncia de todas as frases do texto!");
+                return prev;
+              }
+            });
+          }, 1500);
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.error("Speech recognition error:", event);
+        setIsListeningSpeech(false);
+      };
+
+      recognition.onend = () => {
+        setIsListeningSpeech(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (error) {
+      console.error("Failed to start speech recognition:", error);
+      setIsListeningSpeech(false);
+    }
   };
 
   const startSentenceTimer = (index: number, wordOffset = 0) => {
@@ -596,6 +804,10 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   }, [playbackSpeed]);
 
   const togglePlayPause = () => {
+    if (isPronunciationMode) {
+      handleStartSpeechRecognition();
+      return;
+    }
     if (isPlaying) {
       window.speechSynthesis?.pause();
       clearTimeout(timerRef.current);
@@ -615,6 +827,17 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   };
 
   const stopPlayback = () => {
+    if (isPronunciationMode) {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort(); } catch (e) {}
+      }
+      setIsListeningSpeech(false);
+      setSpeechTranscript('');
+      setSpeechSimilarity(null);
+      setSpeechIsCorrect(null);
+      setSpeechWordDiffs([]);
+      return;
+    }
     isPlayingRef.current = false;
     window.speechSynthesis?.cancel();
     clearTimeout(timerRef.current);
@@ -1577,14 +1800,27 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-primary animate-ping" />
-                  Destaque Interativo (Clique para ouvir de onde quiser)
+                  {isPronunciationMode ? 'Modo Treino de Pronúncia Ativo' : 'Destaque Interativo (Clique para ouvir de onde quiser)'}
                 </span>
-                <button
-                  onClick={() => setShowTranslation(!showTranslation)}
-                  className="text-[10px] font-bold text-primary hover:underline cursor-pointer flex items-center gap-1"
-                >
-                  {showTranslation ? 'Ocultar Tradução Geral' : 'Mostrar Tradução Geral'}
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={togglePronunciationMode}
+                    className={`text-[10px] font-bold px-2.5 py-1 rounded-xl transition-all cursor-pointer flex items-center gap-1 border ${
+                      isPronunciationMode
+                        ? 'bg-destructive/10 border-destructive/20 text-destructive hover:bg-destructive/15'
+                        : 'border-primary/20 hover:border-primary/40 text-primary hover:bg-primary/5 bg-transparent'
+                    }`}
+                  >
+                    <Mic size={11} className={isListeningSpeech ? 'animate-pulse text-destructive' : ''} />
+                    {isPronunciationMode ? 'Parar Treino' : 'Treinar Pronúncia'}
+                  </button>
+                  <button
+                    onClick={() => setShowTranslation(!showTranslation)}
+                    className="text-[10px] font-bold text-primary hover:underline cursor-pointer flex items-center gap-1"
+                  >
+                    {showTranslation ? 'Ocultar Tradução Geral' : 'Mostrar Tradução Geral'}
+                  </button>
+                </div>
               </div>
             )}
 
@@ -1622,7 +1858,20 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                       <div
                         key={index}
                         ref={isActiveLine ? activeLineRef : undefined}
-                        onClick={() => startFromSentence(index)}
+                        onClick={() => {
+                          if (isPronunciationMode) {
+                            if (isListeningSpeech && recognitionRef.current) {
+                              try { recognitionRef.current.abort(); } catch (e) {}
+                            }
+                            setActiveLineIdx(index);
+                            setSpeechTranscript('');
+                            setSpeechSimilarity(null);
+                            setSpeechIsCorrect(null);
+                            setSpeechWordDiffs([]);
+                          } else {
+                            startFromSentence(index);
+                          }
+                        }}
                         data-line-index={index}
                         className={`p-3 rounded-xl transition-all duration-200 cursor-pointer border ${containerClass}`}
                       >
@@ -1640,6 +1889,81 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                             {line.translated}
                           </p>
                         )}
+
+                        {isActiveLine && isPronunciationMode && (
+                          <div className="mt-3 pt-2.5 border-t border-border/40 flex flex-col gap-2.5 w-full animate-fadeIn" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                type="button"
+                                className={`h-8 px-3 rounded-lg border-2 flex items-center justify-center gap-1.5 cursor-pointer shadow-sm text-xs font-bold transition-all duration-200 ${
+                                  isListeningSpeech
+                                    ? 'bg-destructive/10 text-destructive border-destructive animate-pulse ring-4 ring-destructive/20'
+                                    : 'bg-primary/10 border-primary text-primary hover:bg-primary/20'
+                                }`}
+                                onClick={() => handleStartSpeechRecognition()}
+                              >
+                                <Mic size={13} />
+                                {isListeningSpeech ? 'Ouvindo...' : 'Gravar Pronúncia'}
+                              </Button>
+
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-8 px-2.5 rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
+                                onClick={() => speakText(line.original)}
+                                title="Ouvir pronúncia correta"
+                              >
+                                <Volume2 size={12} />
+                                Ouvir Frase
+                              </Button>
+
+                              {line.mastered && (
+                                <span className="text-[10px] bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                                  ✓ Pronunciado
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Speech feedback box */}
+                            {speechSimilarity !== null && (
+                              <div className="w-full max-w-xl p-2 rounded-xl border text-left text-xs space-y-1 bg-muted/40 border-border animate-in fade-in slide-in-from-top-1" title={speechTranscript}>
+                                {speechIsCorrect ? (
+                                  <span className="font-bold text-emerald-600 dark:text-emerald-400 block text-[11px]">
+                                    ✨ Excelente Pronúncia! ({Math.round(speechSimilarity)}%)
+                                  </span>
+                                ) : (
+                                  <span className="font-bold text-red-500 block text-[11px]">
+                                    ❌ Pronúncia incorreta ({Math.round(speechSimilarity)}%)
+                                  </span>
+                                )}
+                                
+                                <div className="border-t border-border/20 pt-1">
+                                  <span className="text-[9px] text-zinc-400 block mb-0.5">Você Falou:</span>
+                                  <div className="font-bold text-[12px] tracking-wide flex flex-wrap gap-x-1 gap-y-0.5 leading-normal font-mono">
+                                    {speechWordDiffs.length === 0 ? (
+                                      <span className="text-zinc-500 italic">Sem transcrição</span>
+                                    ) : (
+                                      speechWordDiffs.filter(t => t.type !== 'missing').map((token, idx) => (
+                                        <span 
+                                          key={idx} 
+                                          className={token.type === 'correct' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 line-through bg-red-500/10 px-0.5 rounded'}
+                                        >
+                                          {token.word}
+                                        </span>
+                                      ))
+                                    )}
+                                  </div>
+                                </div>
+                                
+                                {speechIsCorrect && (
+                                  <div className="text-[8.5px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-0.5 animate-pulse pt-0.5">
+                                    🚀 Pronúncia correta! Avançando para a próxima frase...
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -1655,79 +1979,145 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                 ? 'bg-[#1a1c23]/95 backdrop-blur-lg border-white/10 text-[#cbd5e1]'
                 : 'bg-card/95 backdrop-blur-lg border-border'
             }`}>
-              <div className="max-w-4xl mx-auto flex items-center justify-between gap-4">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={togglePlayPause}
-                    className={`p-3 rounded-full transition-colors cursor-pointer shadow-lg ${
-                      isZenMode && zenTheme === 'sepia'
-                        ? 'bg-[#8b5a2b] text-[#f4ecd8] hover:bg-[#8b5a2b]/90'
-                        : isZenMode && zenTheme === 'dark-matte'
-                        ? 'bg-[#51afef] text-[#1a1c23] hover:bg-[#51afef]/90'
-                        : 'bg-primary text-primary-foreground hover:bg-primary/90'
-                    }`}
-                    title={isPlaying ? 'Pausar' : 'Play'}
-                  >
-                    {isPlaying ? <Pause size={18} /> : <Play size={18} />}
-                  </button>
-                  <button
-                    onClick={stopPlayback}
-                    className={`p-2 rounded-xl transition-colors cursor-pointer ${
-                      isZenMode && zenTheme === 'sepia'
-                        ? 'hover:bg-[#8b5a2b]/15 text-[#5c4033]/70 hover:text-[#5c4033]'
-                        : isZenMode && zenTheme === 'dark-matte'
-                        ? 'hover:bg-white/10 text-[#cbd5e1]/70 hover:text-[#cbd5e1]'
-                        : 'hover:bg-muted text-muted-foreground hover:text-foreground'
-                    }`}
-                    title="Parar"
-                  >
-                    <Square size={16} />
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground">
-                  <Volume2 size={14} className={
-                    isZenMode && zenTheme === 'sepia'
-                      ? 'text-[#5c4033]/70'
-                      : isZenMode && zenTheme === 'dark-matte'
-                      ? 'text-[#cbd5e1]/70'
-                      : 'text-muted-foreground'
-                  } />
-                  <span className={
-                    isZenMode && zenTheme === 'sepia'
-                      ? 'text-[#5c4033]/70'
-                      : isZenMode && zenTheme === 'dark-matte'
-                      ? 'text-[#cbd5e1]/70'
-                      : 'text-muted-foreground'
-                  }>Velocidade:</span>
-                  <div className="flex items-center gap-1">
-                    {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((speed) => (
+              <div className="max-w-4xl mx-auto flex items-center justify-between gap-4 w-full">
+                {isPronunciationMode ? (
+                  /* --- PRONUNCIATION CONTROLS --- */
+                  <div className="flex items-center justify-between gap-4 w-full">
+                    <div className="flex items-center gap-2">
                       <button
-                        key={speed}
-                        onClick={() => setPlaybackSpeed(speed)}
-                        className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer transition-all ${
-                          playbackSpeed === speed
-                            ? (
-                                isZenMode && zenTheme === 'sepia'
-                                  ? 'bg-[#8b5a2b] text-[#f4ecd8]'
-                                  : isZenMode && zenTheme === 'dark-matte'
-                                  ? 'bg-[#51afef] text-[#1a1c23]'
-                                  : 'bg-primary text-primary-foreground'
-                              )
+                        onClick={() => handleStartSpeechRecognition()}
+                        className={`p-3 rounded-full transition-colors cursor-pointer shadow-lg ${
+                          isListeningSpeech
+                            ? 'bg-red-600 text-white animate-pulse ring-4 ring-red-600/30'
                             : (
                                 isZenMode && zenTheme === 'sepia'
-                                  ? 'hover:bg-[#8b5a2b]/10 text-[#5c4033]/70'
+                                  ? 'bg-[#8b5a2b] text-[#f4ecd8] hover:bg-[#8b5a2b]/90'
                                   : isZenMode && zenTheme === 'dark-matte'
-                                  ? 'hover:bg-white/10 text-[#cbd5e1]/70'
-                                  : 'hover:bg-muted text-muted-foreground'
+                                  ? 'bg-[#51afef] text-[#1a1c23] hover:bg-[#51afef]/90'
+                                  : 'bg-primary text-primary-foreground hover:bg-primary/90'
                               )
                         }`}
+                        title={isListeningSpeech ? 'Parar microfone' : 'Gravar pronúncia'}
                       >
-                        {speed}x
+                        <Mic size={18} />
                       </button>
-                    ))}
+                      <button
+                        onClick={() => {
+                          if (activeLineIdx >= 0 && selectedText) {
+                            speakText(selectedText.lines[activeLineIdx].original);
+                          }
+                        }}
+                        className={`p-2 rounded-xl transition-colors cursor-pointer border ${
+                          isZenMode && zenTheme === 'sepia'
+                            ? 'border-[#8b5a2b]/30 hover:bg-[#8b5a2b]/10 text-[#5c4033]'
+                            : isZenMode && zenTheme === 'dark-matte'
+                            ? 'border-white/10 hover:bg-white/10 text-[#cbd5e1]'
+                            : 'border-border hover:bg-muted text-muted-foreground hover:text-foreground'
+                        }`}
+                        title="Ouvir frase atual"
+                        disabled={activeLineIdx < 0}
+                      >
+                        <Volume2 size={16} />
+                      </button>
+                    </div>
+
+                    <div className="flex-1 text-center hidden sm:flex items-center justify-center gap-1.5 text-xs font-bold text-muted-foreground select-none">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <span>Modo Pronúncia: leia a frase ativa. Avanço automático ao acertar.</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={togglePronunciationMode}
+                        className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                          isZenMode && zenTheme === 'sepia'
+                            ? 'bg-[#8b5a2b]/10 border-[#8b5a2b]/20 text-[#5c4033] hover:bg-[#8b5a2b]/20'
+                            : isZenMode && zenTheme === 'dark-matte'
+                            ? 'bg-white/5 border-white/10 text-[#cbd5e1] hover:bg-white/10'
+                            : 'bg-destructive/10 border-destructive/20 text-destructive hover:bg-destructive/15'
+                        }`}
+                      >
+                        Parar Pronúncia
+                      </button>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  /* --- STANDARD KARAOKE CONTROLS --- */
+                  <>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={togglePlayPause}
+                        className={`p-3 rounded-full transition-colors cursor-pointer shadow-lg ${
+                          isZenMode && zenTheme === 'sepia'
+                            ? 'bg-[#8b5a2b] text-[#f4ecd8] hover:bg-[#8b5a2b]/90'
+                            : isZenMode && zenTheme === 'dark-matte'
+                            ? 'bg-[#51afef] text-[#1a1c23] hover:bg-[#51afef]/90'
+                            : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                        }`}
+                        title={isPlaying ? 'Pausar' : 'Play'}
+                      >
+                        {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+                      </button>
+                      <button
+                        onClick={stopPlayback}
+                        className={`p-2 rounded-xl transition-colors cursor-pointer ${
+                          isZenMode && zenTheme === 'sepia'
+                            ? 'hover:bg-[#8b5a2b]/15 text-[#5c4033]/70 hover:text-[#5c4033]'
+                            : isZenMode && zenTheme === 'dark-matte'
+                            ? 'hover:bg-white/10 text-[#cbd5e1]/70 hover:text-[#cbd5e1]'
+                            : 'hover:bg-muted text-muted-foreground hover:text-foreground'
+                        }`}
+                        title="Parar"
+                      >
+                        <Square size={16} />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground">
+                      <Volume2 size={14} className={
+                        isZenMode && zenTheme === 'sepia'
+                          ? 'text-[#5c4033]/70'
+                          : isZenMode && zenTheme === 'dark-matte'
+                          ? 'text-[#cbd5e1]/70'
+                          : 'text-muted-foreground'
+                      } />
+                      <span className={
+                        isZenMode && zenTheme === 'sepia'
+                          ? 'text-[#5c4033]/70'
+                          : isZenMode && zenTheme === 'dark-matte'
+                          ? 'text-[#cbd5e1]/70'
+                          : 'text-muted-foreground'
+                      }>Velocidade:</span>
+                      <div className="flex items-center gap-1">
+                        {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((speed) => (
+                          <button
+                            key={speed}
+                            onClick={() => setPlaybackSpeed(speed)}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer transition-all ${
+                              playbackSpeed === speed
+                                ? (
+                                    isZenMode && zenTheme === 'sepia'
+                                      ? 'bg-[#8b5a2b] text-[#f4ecd8]'
+                                      : isZenMode && zenTheme === 'dark-matte'
+                                      ? 'bg-[#51afef] text-[#1a1c23]'
+                                      : 'bg-primary text-primary-foreground'
+                                  )
+                                : (
+                                    isZenMode && zenTheme === 'sepia'
+                                      ? 'hover:bg-[#8b5a2b]/10 text-[#5c4033]/70'
+                                      : isZenMode && zenTheme === 'dark-matte'
+                                      ? 'hover:bg-white/10 text-[#cbd5e1]/70'
+                                      : 'hover:bg-muted text-muted-foreground'
+                                  )
+                            }`}
+                          >
+                            {speed}x
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
             </div>
