@@ -17,6 +17,7 @@ interface DashboardPageProps {
   handleStartStudy: (deckId: string) => void;
   handleOpenAddCardModal: (deckId: string) => void;
   handleOpenEditDeckModal: (deck: Deck) => void;
+  handleOpenDeckOptionsModal: (deck: Deck) => void;
   handleExportDeck: (deckId: string) => void;
   handleDeleteDeck: (deckId: string) => void;
   stats: {
@@ -53,6 +54,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   handleStartStudy,
   handleOpenAddCardModal,
   handleOpenEditDeckModal,
+  handleOpenDeckOptionsModal,
   handleExportDeck,
   handleDeleteDeck,
   stats,
@@ -296,6 +298,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                           onClick={() => { handleOpenAddCardModal(deck.id); setActiveDeckMenuId(null); }}
                         >
                           ➕ Adicionar Cartão
+                        </button>
+                        <button 
+                          type="button"
+                          className="w-full text-left px-3 py-2 hover:bg-muted cursor-pointer flex items-center gap-2"
+                          onClick={() => { handleOpenDeckOptionsModal(deck); setActiveDeckMenuId(null); }}
+                        >
+                          ⚙️ Opções
                         </button>
                         <button 
                           type="button"

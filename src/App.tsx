@@ -27,6 +27,7 @@ import { ReadingPage } from './pages/ReadingPage';
 
 // Componentes do Projeto
 import { DeckModal } from './components/DeckModal';
+import { DeckOptionsModal } from './components/DeckOptionsModal';
 import { CardModal } from './components/CardModal';
 import { StudyArena } from './components/StudyArena';
 import { CongratsScreen } from './components/CongratsScreen';
@@ -176,6 +177,8 @@ function App() {
   // --- ESTADOS DE MODAIS ---
   const [isDeckModalOpen, setIsDeckModalOpen] = useState(false);
   const [deckToEdit, setDeckToEdit] = useState<Deck | null>(null);
+  const [isDeckOptionsModalOpen, setIsDeckOptionsModalOpen] = useState(false);
+  const [deckForOptions, setDeckForOptions] = useState<Deck | null>(null);
   
   const [isCardModalOpen, setIsCardModalOpen] = useState(false);
   const [deckForNewCard, setDeckForNewCard] = useState<Deck | null>(null);
@@ -279,11 +282,26 @@ function App() {
   const todayStr = new Date().toISOString().split('T')[0];
 
   const getDeckPreset = (deck: Deck): DeckPreset => {
+    let basePreset = defaultPreset;
     if (deck.presetId && presets) {
       const found = presets.find(p => p.id === deck.presetId);
-      if (found) return found;
+      if (found) basePreset = found;
     }
-    return defaultPreset;
+
+    // Aplicar overrides do baralho para o algoritmo se existirem
+    let fsrsEnabled = basePreset.fsrsEnabled;
+    const today = new Date().toISOString().split('T')[0];
+
+    if (deck.algoLimitType === 'deck' && deck.algoLimitValue) {
+      fsrsEnabled = deck.algoLimitValue === 'FSRS';
+    } else if (deck.algoLimitType === 'today' && deck.algoLimitToday && deck.algoLimitTodayDate === today) {
+      fsrsEnabled = deck.algoLimitToday === 'FSRS';
+    }
+
+    return {
+      ...basePreset,
+      fsrsEnabled
+    };
   };
 
   const getDeckStudyCountsToday = (deckId: string) => {
@@ -381,41 +399,56 @@ function App() {
     setIsDeckModalOpen(true);
   };
 
+  const handleOpenDeckOptionsModal = (deck: Deck) => {
+    setDeckForOptions(deck);
+    setIsDeckOptionsModalOpen(true);
+  };
+
   const handleSaveDeck = async (
     name: string,
-    description: string,
-    presetId: string,
-    overrides?: Partial<Deck>,
-    presetUpdates?: Partial<DeckPreset>
+    description: string
   ) => {
     if (deckToEdit) {
       await db.decks.update(deckToEdit.id, {
         name,
         description,
-        presetId,
-        updatedAt: Date.now(),
-        ...overrides
+        updatedAt: Date.now()
       });
     } else {
       const newDeck: Deck = {
         id: crypto.randomUUID(),
         name,
         description,
-        presetId,
+        presetId: 'default-study-preset',
         createdAt: Date.now(),
-        updatedAt: Date.now(),
-        ...overrides
+        updatedAt: Date.now()
       };
       await db.decks.add(newDeck);
     }
 
-    // Persistir atualizações globais de preset se existirem
+    setIsDeckModalOpen(false);
+    setDeckToEdit(null);
+  };
+
+  const handleSaveDeckOptions = async (
+    presetId: string,
+    overrides?: Partial<Deck>,
+    presetUpdates?: Partial<DeckPreset>
+  ) => {
+    if (!deckForOptions) return;
+
+    await db.decks.update(deckForOptions.id, {
+      presetId,
+      updatedAt: Date.now(),
+      ...overrides
+    });
+
     if (presetUpdates && presetId) {
       await db.presets.update(presetId, presetUpdates);
     }
 
-    setIsDeckModalOpen(false);
-    setDeckToEdit(null);
+    setIsDeckOptionsModalOpen(false);
+    setDeckForOptions(null);
   };
 
   const handleDeleteDeck = async (deckId: string) => {
@@ -1341,6 +1374,7 @@ function App() {
                 handleStartStudy={handleStartStudy}
                 handleOpenAddCardModal={handleOpenAddCardModal}
                 handleOpenEditDeckModal={handleOpenEditDeckModal}
+                handleOpenDeckOptionsModal={handleOpenDeckOptionsModal}
                 handleExportDeck={handleExportDeck}
                 handleDeleteDeck={handleDeleteDeck}
                 stats={stats}
@@ -1510,6 +1544,16 @@ function App() {
         }}
         onSave={handleSaveDeck}
         deckToEdit={deckToEdit}
+      />
+
+      <DeckOptionsModal
+        isOpen={isDeckOptionsModalOpen}
+        onClose={() => {
+          setIsDeckOptionsModalOpen(false);
+          setDeckForOptions(null);
+        }}
+        onSave={handleSaveDeckOptions}
+        deck={deckForOptions}
         presets={presets}
       />
 

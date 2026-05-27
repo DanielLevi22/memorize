@@ -17,6 +17,12 @@ export interface Deck {
   reviewsLimitValue?: number; // Usado quando limitType === 'deck'
   reviewsLimitToday?: number; // Usado quando limitType === 'today'
   reviewsLimitTodayDate?: string; // YYYY-MM-DD em que o limite de hoje foi definido
+
+  // Overrides de Algoritmo
+  algoLimitType?: 'preset' | 'deck' | 'today';
+  algoLimitValue?: 'SM-2' | 'FSRS'; // Usado quando algoLimitType === 'deck'
+  algoLimitToday?: 'SM-2' | 'FSRS'; // Usado quando algoLimitType === 'today'
+  algoLimitTodayDate?: string; // YYYY-MM-DD em que o limite de hoje foi definido
 }
 
 export interface Note {
