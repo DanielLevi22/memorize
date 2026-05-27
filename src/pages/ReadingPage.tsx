@@ -4,7 +4,7 @@ import {
   ArrowLeft, BookOpen, Plus, Trash2, Play, Pause, Square,
   Copy, Check, ChevronRight, FileText, Volume2, HelpCircle,
   Maximize2, EyeOff, Folder, FolderOpen, FolderPlus, Edit, Upload, Sparkles, Loader2, ExternalLink,
-  Mic
+  Mic, Keyboard
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { db } from '../db/db';
@@ -20,7 +20,7 @@ import {
 } from '../components/ui/dialog';
 import { extractTextFromPdf, processTextWithAI, segmentTextManually } from '../utils/readingProcessor';
 import { motion } from 'framer-motion';
-import { getWordLevenshteinDistance, diffWords, type DiffWord } from '../utils/srs';
+import { getWordLevenshteinDistance, diffWords, type DiffWord, getLevenshteinDistance, diffStrings, type DiffChar } from '../utils/srs';
 
 const stripHtmlTags = (str: string) => {
   if (!str) return '';
@@ -134,14 +134,22 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
   const [showTranslation, setShowTranslation] = useState(false);
 
-  // Pronunciation Practice Mode states
-  const [isPronunciationMode, setIsPronunciationMode] = useState(false);
+  // Practice Mode states
+  const [readingPracticeMode, setReadingPracticeMode] = useState<'none' | 'speaking' | 'writing'>('none');
+  const isPronunciationMode = readingPracticeMode === 'speaking';
+  const isWritingMode = readingPracticeMode === 'writing';
   const [isListeningSpeech, setIsListeningSpeech] = useState(false);
   const [speechTranscript, setSpeechTranscript] = useState('');
   const [speechSimilarity, setSpeechSimilarity] = useState<number | null>(null);
   const [speechIsCorrect, setSpeechIsCorrect] = useState<boolean | null>(null);
   const [speechWordDiffs, setSpeechWordDiffs] = useState<DiffWord[]>([]);
+  const [speechTargetSnippet, setSpeechTargetSnippet] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
+
+  // Writing Mode states
+  const [writingInput, setWritingInput] = useState('');
+  const [writingCharDiffs, setWritingCharDiffs] = useState<DiffChar[]>([]);
+  const [writingIsCorrect, setWritingIsCorrect] = useState<boolean | null>(null);
   
   const activeWordRef = useRef<HTMLSpanElement>(null);
   const activeLineRef = useRef<HTMLDivElement>(null);
@@ -471,12 +479,18 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
       if (recognitionRef.current) {
         try { recognitionRef.current.abort(); } catch (e) {}
       }
-      setIsPronunciationMode(false);
+      setReadingPracticeMode('none');
       setIsListeningSpeech(false);
       setSpeechTranscript('');
       setSpeechSimilarity(null);
       setSpeechIsCorrect(null);
       setSpeechWordDiffs([]);
+      setSpeechTargetSnippet(null);
+
+      // Reset writing states
+      setWritingInput('');
+      setWritingCharDiffs([]);
+      setWritingIsCorrect(null);
     };
   }, [selectedTextId, activeReaderTab]);
 
@@ -527,15 +541,16 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
       if (recognitionRef.current) {
         try { recognitionRef.current.abort(); } catch (e) {}
       }
-      setIsPronunciationMode(false);
+      setReadingPracticeMode('none');
       setIsListeningSpeech(false);
       setSpeechTranscript('');
       setSpeechSimilarity(null);
       setSpeechIsCorrect(null);
       setSpeechWordDiffs([]);
+      setSpeechTargetSnippet(null);
     } else {
       stopPlayback();
-      setIsPronunciationMode(true);
+      setReadingPracticeMode('speaking');
       if (activeLineIdx < 0) {
         setActiveLineIdx(0);
       }
@@ -565,11 +580,23 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
       return;
     }
 
+    const currentLine = selectedText.lines[targetIdx];
+    const rawExpected = stripHtmlTags(currentLine.original);
+
+    // Get current highlighted/selected text snippet
+    const selection = window.getSelection();
+    const selectionText = selection ? selection.toString().trim() : "";
+    const cleanLineOriginal = cleanString(rawExpected);
+    const cleanSelectionText = cleanString(selectionText);
+    const hasSnippetSelection = selectionText.length > 0 && cleanLineOriginal.includes(cleanSelectionText);
+    const targetExpected = hasSnippetSelection ? selectionText : rawExpected;
+
     setIsListeningSpeech(true);
     setSpeechTranscript('');
     setSpeechSimilarity(null);
     setSpeechIsCorrect(null);
     setSpeechWordDiffs([]);
+    setSpeechTargetSnippet(hasSnippetSelection ? targetExpected : null);
 
     try {
       const recognition = new SpeechRecognition();
@@ -581,11 +608,8 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
         const resultText = event.results[0][0].transcript;
         setSpeechTranscript(resultText);
 
-        const currentLine = selectedText.lines[targetIdx];
-        const expected = stripHtmlTags(currentLine.original);
-
         const cleanTyped = cleanString(resultText);
-        const cleanExpected = cleanString(expected);
+        const cleanExpected = cleanString(targetExpected);
 
         const spokenWords = cleanTyped.split(/\s+/).filter(Boolean);
         const expectedWords = cleanExpected.split(/\s+/).filter(Boolean);
@@ -602,7 +626,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
           similarity = correct ? 100 : 0;
         }
 
-        const diff = diffWords(resultText, expected);
+        const diff = diffWords(resultText, targetExpected);
         setSpeechWordDiffs(diff);
         setSpeechSimilarity(similarity);
         setSpeechIsCorrect(correct);
@@ -610,34 +634,37 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
         if (correct) {
           playSuccessChime();
 
-          if (!currentLine.mastered) {
-            handleToggleMastered(targetIdx);
+          if (!hasSnippetSelection) {
+            if (!currentLine.mastered) {
+              handleToggleMastered(targetIdx);
+            }
+
+            setTimeout(() => {
+              setActiveLineIdx(prev => {
+                const nextIdx = prev + 1;
+                if (nextIdx < selectedText.lines.length) {
+                  setSpeechTranscript('');
+                  setSpeechSimilarity(null);
+                  setSpeechIsCorrect(null);
+                  setSpeechWordDiffs([]);
+                  setSpeechTargetSnippet(null);
+
+                  setTimeout(() => {
+                    const el = document.getElementById(`line-card-${nextIdx}`);
+                    if (el) {
+                      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                    handleStartSpeechRecognition(nextIdx);
+                  }, 100);
+
+                  return nextIdx;
+                } else {
+                  alert("Parabéns! Você concluiu a leitura e pronúncia de todas as frases do texto!");
+                  return prev;
+                }
+              });
+            }, 1500);
           }
-
-          setTimeout(() => {
-            setActiveLineIdx(prev => {
-              const nextIdx = prev + 1;
-              if (nextIdx < selectedText.lines.length) {
-                setSpeechTranscript('');
-                setSpeechSimilarity(null);
-                setSpeechIsCorrect(null);
-                setSpeechWordDiffs([]);
-
-                setTimeout(() => {
-                  const el = document.getElementById(`line-card-${nextIdx}`);
-                  if (el) {
-                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                  }
-                  handleStartSpeechRecognition(nextIdx);
-                }, 100);
-
-                return nextIdx;
-              } else {
-                alert("Parabéns! Você concluiu a leitura e pronúncia de todas as frases do texto!");
-                return prev;
-              }
-            });
-          }, 1500);
         }
       };
 
@@ -808,6 +835,12 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
       handleStartSpeechRecognition();
       return;
     }
+    if (isWritingMode) {
+      if (activeLineIdx >= 0 && selectedText) {
+        speakText(selectedText.lines[activeLineIdx].original);
+      }
+      return;
+    }
     if (isPlaying) {
       window.speechSynthesis?.pause();
       clearTimeout(timerRef.current);
@@ -836,6 +869,16 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
       setSpeechSimilarity(null);
       setSpeechIsCorrect(null);
       setSpeechWordDiffs([]);
+      setSpeechTargetSnippet(null);
+      return;
+    }
+    if (isWritingMode) {
+      window.speechSynthesis?.cancel();
+      clearTimeout(timerRef.current);
+      setIsPlaying(false);
+      setWritingInput('');
+      setWritingCharDiffs([]);
+      setWritingIsCorrect(null);
       return;
     }
     isPlayingRef.current = false;
@@ -844,6 +887,95 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
     setActiveCharIndex(-1);
     setIsPlaying(false);
     currentWordIdxRef.current = -1;
+  };
+
+  const handleCheckWritingPracticeAnswer = () => {
+    if (!selectedText || activeLineIdx < 0) return;
+    const currentLine = selectedText.lines[activeLineIdx];
+    const expected = stripHtmlTags(currentLine.original);
+
+    const cleanTyped = cleanString(writingInput);
+    const cleanExpected = cleanString(expected);
+
+    const dist = getLevenshteinDistance(cleanTyped, cleanExpected);
+    const maxLen = Math.max(cleanTyped.length, cleanExpected.length);
+    const similarity = maxLen > 0 ? Math.max(0, 1 - dist / maxLen) * 100 : (cleanTyped === cleanExpected ? 100 : 0);
+
+    const isCorrect = similarity >= 90;
+    
+    const diff = diffStrings(writingInput, expected);
+    setWritingCharDiffs(diff);
+    setWritingIsCorrect(isCorrect);
+
+    if (isCorrect) {
+      playSuccessChime();
+
+      if (!currentLine.mastered) {
+        handleToggleMastered(activeLineIdx);
+      }
+
+      setTimeout(() => {
+        setActiveLineIdx(prev => {
+          const nextIdx = prev + 1;
+          if (nextIdx < selectedText.lines.length) {
+            setWritingInput('');
+            setWritingCharDiffs([]);
+            setWritingIsCorrect(null);
+
+            setTimeout(() => {
+              const el = document.getElementById(`line-card-${nextIdx}`);
+              if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
+              const nextInput = document.getElementById(`writing-input-${nextIdx}`);
+              if (nextInput) {
+                nextInput.focus();
+              }
+              speakText(selectedText.lines[nextIdx].original);
+            }, 100);
+
+            return nextIdx;
+          } else {
+            alert("Parabéns! Você concluiu a escrita de todas as frases do texto!");
+            return prev;
+          }
+        });
+      }, 1500);
+    }
+  };
+
+  const handleRevealWritingAnswer = () => {
+    if (!selectedText || activeLineIdx < 0) return;
+    const currentLine = selectedText.lines[activeLineIdx];
+    const expected = stripHtmlTags(currentLine.original);
+    
+    const diff = diffStrings("", expected);
+    setWritingCharDiffs(diff);
+    setWritingIsCorrect(false);
+  };
+
+  const handleNextWritingSentence = () => {
+    if (!selectedText || activeLineIdx < 0) return;
+    const nextIdx = activeLineIdx + 1;
+    if (nextIdx < selectedText.lines.length) {
+      setWritingInput('');
+      setWritingCharDiffs([]);
+      setWritingIsCorrect(null);
+      setActiveLineIdx(nextIdx);
+      setTimeout(() => {
+        const el = document.getElementById(`line-card-${nextIdx}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        const nextInput = document.getElementById(`writing-input-${nextIdx}`);
+        if (nextInput) {
+          nextInput.focus();
+        }
+        speakText(selectedText.lines[nextIdx].original);
+      }, 100);
+    } else {
+      alert("Parabéns! Você concluiu a escrita de todas as frases do texto!");
+    }
   };
 
   const handleSaveReading = async (reading: ReadingText) => {
@@ -1800,20 +1932,64 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-primary animate-ping" />
-                  {isPronunciationMode ? 'Modo Treino de Pronúncia Ativo' : 'Destaque Interativo (Clique para ouvir de onde quiser)'}
+                  {readingPracticeMode === 'speaking' ? 'Modo Treino de Pronúncia Ativo' : readingPracticeMode === 'writing' ? 'Modo Treino de Escrita Ativo' : 'Destaque Interativo (Clique para ouvir de onde quiser)'}
                 </span>
                 <div className="flex items-center gap-3">
-                  <button
-                    onClick={togglePronunciationMode}
-                    className={`text-[10px] font-bold px-2.5 py-1 rounded-xl transition-all cursor-pointer flex items-center gap-1 border ${
-                      isPronunciationMode
-                        ? 'bg-destructive/10 border-destructive/20 text-destructive hover:bg-destructive/15'
-                        : 'border-primary/20 hover:border-primary/40 text-primary hover:bg-primary/5 bg-transparent'
-                    }`}
-                  >
-                    <Mic size={11} className={isListeningSpeech ? 'animate-pulse text-destructive' : ''} />
-                    {isPronunciationMode ? 'Parar Treino' : 'Treinar Pronúncia'}
-                  </button>
+                  <div className="flex items-center gap-1 bg-muted p-1 rounded-xl border border-border/60">
+                    <button
+                      onClick={() => {
+                        stopPlayback();
+                        setReadingPracticeMode('none');
+                      }}
+                      className={`text-[10px] font-black px-2.5 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+                        readingPracticeMode === 'none'
+                          ? 'bg-card text-foreground shadow-sm shadow-black/5 dark:shadow-white/5 border border-border/40'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-card/50 border border-transparent'
+                      }`}
+                    >
+                      <BookOpen size={11} />
+                      Leitura
+                    </button>
+                    <button
+                      onClick={() => {
+                        stopPlayback();
+                        setReadingPracticeMode('speaking');
+                        if (activeLineIdx < 0) setActiveLineIdx(0);
+                      }}
+                      className={`text-[10px] font-black px-2.5 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+                        readingPracticeMode === 'speaking'
+                          ? 'bg-card text-foreground shadow-sm shadow-black/5 dark:shadow-white/5 border border-border/40'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-card/50 border border-transparent'
+                      }`}
+                    >
+                      <Mic size={11} className={isListeningSpeech ? 'animate-pulse text-destructive' : ''} />
+                      Modo Fala
+                    </button>
+                    <button
+                      onClick={() => {
+                        stopPlayback();
+                        setReadingPracticeMode('writing');
+                        const startIdx = activeLineIdx >= 0 ? activeLineIdx : 0;
+                        if (activeLineIdx < 0) setActiveLineIdx(0);
+                        // Auto-speak the line
+                        setTimeout(() => {
+                          if (selectedText) {
+                            speakText(selectedText.lines[startIdx].original);
+                            const input = document.getElementById(`writing-input-${startIdx}`);
+                            if (input) input.focus();
+                          }
+                        }, 100);
+                      }}
+                      className={`text-[10px] font-black px-2.5 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+                        readingPracticeMode === 'writing'
+                          ? 'bg-card text-foreground shadow-sm shadow-black/5 dark:shadow-white/5 border border-border/40'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-card/50 border border-transparent'
+                      }`}
+                    >
+                      <Keyboard size={11} />
+                      Modo Escrita
+                    </button>
+                  </div>
                   <button
                     onClick={() => setShowTranslation(!showTranslation)}
                     className="text-[10px] font-bold text-primary hover:underline cursor-pointer flex items-center gap-1"
@@ -1854,6 +2030,10 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                       }
                     }
 
+                    const displayOriginalText = isActiveLine && readingPracticeMode === 'writing' && writingIsCorrect === null
+                      ? line.original.replace(/[a-zA-Z0-9]/g, '•')
+                      : line.original;
+
                     return (
                       <div
                         key={index}
@@ -1868,6 +2048,16 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                             setSpeechSimilarity(null);
                             setSpeechIsCorrect(null);
                             setSpeechWordDiffs([]);
+                          } else if (readingPracticeMode === 'writing') {
+                            setActiveLineIdx(index);
+                            setWritingInput('');
+                            setWritingCharDiffs([]);
+                            setWritingIsCorrect(null);
+                            speakText(line.original);
+                            setTimeout(() => {
+                              const input = document.getElementById(`writing-input-${index}`);
+                              if (input) input.focus();
+                            }, 100);
                           } else {
                             startFromSentence(index);
                           }
@@ -1880,7 +2070,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                             ? 'text-lg md:text-2xl leading-[2] md:leading-[2.2]'
                             : 'text-sm md:text-base leading-relaxed'
                         }`}>
-                          {renderSentenceWithWordHighlights(line.original, start, isActiveLine)}
+                          {renderSentenceWithWordHighlights(displayOriginalText, start, isActiveLine)}
                         </p>
                         {(isActiveLine || showTranslation) && (
                           <p className={`text-muted-foreground mt-1.5 font-medium leading-relaxed animate-fadeIn pl-2 border-l border-primary/30 ${
@@ -1929,12 +2119,21 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                               <div className="w-full max-w-xl p-2 rounded-xl border text-left text-xs space-y-1 bg-muted/40 border-border animate-in fade-in slide-in-from-top-1" title={speechTranscript}>
                                 {speechIsCorrect ? (
                                   <span className="font-bold text-emerald-600 dark:text-emerald-400 block text-[11px]">
-                                    ✨ Excelente Pronúncia! ({Math.round(speechSimilarity)}%)
+                                    {speechTargetSnippet ? '✨ Excelente Pronúncia do Trecho!' : '✨ Excelente Pronúncia!'} ({Math.round(speechSimilarity)}%)
                                   </span>
                                 ) : (
                                   <span className="font-bold text-red-500 block text-[11px]">
                                     ❌ Pronúncia incorreta ({Math.round(speechSimilarity)}%)
                                   </span>
+                                )}
+
+                                {speechTargetSnippet && (
+                                  <div className="border-t border-border/20 pt-1">
+                                    <span className="text-[9px] text-zinc-400 block mb-0.5">Trecho Esperado:</span>
+                                    <span className="font-bold text-foreground text-[11px] bg-primary/10 px-1.5 py-0.5 rounded font-mono inline-block mb-1">
+                                      "{speechTargetSnippet}"
+                                    </span>
+                                  </div>
                                 )}
                                 
                                 <div className="border-t border-border/20 pt-1">
@@ -1957,7 +2156,141 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                                 
                                 {speechIsCorrect && (
                                   <div className="text-[8.5px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-0.5 animate-pulse pt-0.5">
-                                    🚀 Pronúncia correta! Avançando para a próxima frase...
+                                    {speechTargetSnippet ? '🚀 Trecho correto! Continue praticando ou limpe a seleção para avançar.' : '🚀 Pronúncia correta! Avançando para a próxima frase...'}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {isActiveLine && readingPracticeMode === 'writing' && (
+                          <div className="mt-3 pt-2.5 border-t border-border/40 flex flex-col gap-2.5 w-full animate-fadeIn" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-8 px-2.5 rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
+                                onClick={() => speakText(line.original)}
+                                title="Ouvir áudio da frase"
+                              >
+                                <Volume2 size={12} />
+                                Ouvir Frase
+                              </Button>
+
+                              {line.mastered && (
+                                <span className="text-[10px] bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                                  ✓ Masterizado
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Input typing field */}
+                            <div className="flex items-center gap-2 w-full max-w-xl">
+                              <input
+                                id={`writing-input-${index}`}
+                                type="text"
+                                value={writingInput}
+                                onChange={(e) => setWritingInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleCheckWritingPracticeAnswer();
+                                  }
+                                }}
+                                placeholder="Digite a frase em inglês..."
+                                className="flex-1 h-9 px-3 text-xs bg-background border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-foreground placeholder:text-muted-foreground"
+                                autoFocus={isActiveLine}
+                                disabled={writingIsCorrect === true}
+                              />
+                              <Button
+                                type="button"
+                                className="h-9 px-3 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-bold cursor-pointer"
+                                onClick={handleCheckWritingPracticeAnswer}
+                                disabled={writingIsCorrect === true}
+                              >
+                                Verificar
+                              </Button>
+                              {writingIsCorrect !== true && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  className="h-9 px-2.5 rounded-xl border border-border hover:bg-muted text-xs font-bold text-muted-foreground hover:text-foreground cursor-pointer"
+                                  onClick={handleRevealWritingAnswer}
+                                >
+                                  Revelar
+                                </Button>
+                              )}
+                              {writingIsCorrect !== null && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  className="h-9 px-2.5 rounded-xl border border-border hover:bg-muted text-xs font-bold text-muted-foreground hover:text-foreground cursor-pointer"
+                                  onClick={handleNextWritingSentence}
+                                >
+                                  Pular
+                                </Button>
+                              )}
+                            </div>
+
+                            {/* Writing feedback box */}
+                            {writingIsCorrect !== null && (
+                              <div className="w-full max-w-xl p-3 rounded-xl border text-left text-xs space-y-2 bg-muted/40 border-border animate-in fade-in slide-in-from-top-1">
+                                {writingIsCorrect ? (
+                                  <span className="font-bold text-emerald-600 dark:text-emerald-400 block text-[11px]">
+                                    ✨ Excelente Escrita!
+                                  </span>
+                                ) : (
+                                  <span className="font-bold text-red-500 block text-[11px]">
+                                    ❌ Resposta incorreta - compare abaixo:
+                                  </span>
+                                )}
+
+                                {/* Compare side-by-side or stacked layout */}
+                                <div className="space-y-1.5">
+                                  <div>
+                                    <span className="text-[9px] text-zinc-400 block mb-0.5">Esperado (Correto):</span>
+                                    <div className="font-bold text-[12px] tracking-wide leading-normal font-mono text-foreground">
+                                      {line.original}
+                                    </div>
+                                  </div>
+                                  
+                                  <div className="border-t border-border/20 pt-1.5">
+                                    <span className="text-[9px] text-zinc-400 block mb-0.5">Você Digitou:</span>
+                                    <div className="font-bold text-[12px] tracking-wide flex flex-wrap gap-x-0.5 gap-y-0.5 leading-normal font-mono whitespace-pre-wrap">
+                                      {writingCharDiffs.length === 0 ? (
+                                        <span className="text-zinc-500 italic">Vazio</span>
+                                      ) : (
+                                        writingCharDiffs.map((token, idx) => {
+                                          if (token.type === 'correct') {
+                                            return (
+                                              <span key={idx} className="text-emerald-600 dark:text-emerald-400">
+                                                {token.char}
+                                              </span>
+                                            );
+                                          } else if (token.type === 'incorrect') {
+                                            return (
+                                              <span key={idx} className="text-red-500 line-through bg-red-500/10 px-0.5 rounded">
+                                                {token.char}
+                                              </span>
+                                            );
+                                          } else {
+                                            // missing
+                                            return (
+                                              <span key={idx} className="text-amber-500 bg-amber-500/10 px-0.5 rounded font-black">
+                                                {token.char}
+                                              </span>
+                                            );
+                                          }
+                                        })
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {writingIsCorrect && (
+                                  <div className="text-[8.5px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-0.5 animate-pulse pt-0.5">
+                                    🚀 Resposta correta! Avançando para a próxima frase...
                                   </div>
                                 )}
                               </div>
@@ -2038,6 +2371,53 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                         }`}
                       >
                         Parar Pronúncia
+                      </button>
+                    </div>
+                  </div>
+                ) : readingPracticeMode === 'writing' ? (
+                  /* --- WRITING PRACTICE CONTROLS --- */
+                  <div className="flex items-center justify-between gap-4 w-full">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          if (activeLineIdx >= 0 && selectedText) {
+                            speakText(selectedText.lines[activeLineIdx].original);
+                          }
+                        }}
+                        className={`p-3 rounded-full transition-colors cursor-pointer shadow-lg ${
+                          isZenMode && zenTheme === 'sepia'
+                            ? 'bg-[#8b5a2b] text-[#f4ecd8] hover:bg-[#8b5a2b]/90'
+                            : isZenMode && zenTheme === 'dark-matte'
+                            ? 'bg-[#51afef] text-[#1a1c23] hover:bg-[#51afef]/90'
+                            : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                        }`}
+                        title="Ouvir frase atual"
+                        disabled={activeLineIdx < 0}
+                      >
+                        <Volume2 size={18} />
+                      </button>
+                    </div>
+
+                    <div className="flex-1 text-center hidden sm:flex items-center justify-center gap-1.5 text-xs font-bold text-muted-foreground select-none">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                      <span>Modo Escrita: ouça o áudio e digite o que ouviu.</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          stopPlayback();
+                          setReadingPracticeMode('none');
+                        }}
+                        className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                          isZenMode && zenTheme === 'sepia'
+                            ? 'bg-[#8b5a2b]/10 border-[#8b5a2b]/20 text-[#5c4033] hover:bg-[#8b5a2b]/20'
+                            : isZenMode && zenTheme === 'dark-matte'
+                            ? 'bg-white/5 border-white/10 text-[#cbd5e1] hover:bg-white/10'
+                            : 'bg-destructive/10 border-destructive/20 text-destructive hover:bg-destructive/15'
+                        }`}
+                      >
+                        Parar Escrita
                       </button>
                     </div>
                   </div>
