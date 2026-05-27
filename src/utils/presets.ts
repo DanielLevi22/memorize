@@ -1,4 +1,4 @@
-import type { DeckPreset } from '../types';
+import type { Deck, DeckPreset } from '../types';
 
 /**
  * Versão do formato de exportação. Permite compatibilidade futura.
@@ -208,3 +208,36 @@ export function openPresetFile(): Promise<string | null> {
     input.click();
   });
 }
+
+/**
+  * Resolve as configurações de preset finais de um baralho, mesclando e aplicando
+  * quaisquer overrides de algoritmo/limites definidos no nível do deck.
+  */
+export function resolveDeckPreset(
+  deck: Deck,
+  presets: DeckPreset[],
+  defaultPreset: DeckPreset,
+  todayStr?: string
+): DeckPreset {
+  let basePreset = defaultPreset;
+  if (deck.presetId) {
+    const found = presets.find(p => p.id === deck.presetId);
+    if (found) basePreset = found;
+  }
+
+  // Aplicar overrides do baralho para o algoritmo se existirem
+  let fsrsEnabled = basePreset.fsrsEnabled;
+  const today = todayStr || new Date().toISOString().split('T')[0];
+
+  if (deck.algoLimitType === 'deck' && deck.algoLimitValue) {
+    fsrsEnabled = deck.algoLimitValue === 'FSRS';
+  } else if (deck.algoLimitType === 'today' && deck.algoLimitToday && deck.algoLimitTodayDate === today) {
+    fsrsEnabled = deck.algoLimitToday === 'FSRS';
+  }
+
+  return {
+    ...basePreset,
+    fsrsEnabled
+  };
+}
+

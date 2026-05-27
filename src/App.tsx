@@ -13,6 +13,7 @@ import type { Deck, Card, Note, DeckPreset } from './types';
 
 // Utilitários
 import { calculateNextReview } from './utils/srs';
+import { resolveDeckPreset } from './utils/presets';
 import { getStreak, recordStudy } from './utils/streak';
 import { getDeckStudyableCards as calculateDeckStudyableCards } from './utils/limits';
 import { syncNoteCards } from './utils/siblings';
@@ -282,26 +283,7 @@ function App() {
   const todayStr = new Date().toISOString().split('T')[0];
 
   const getDeckPreset = (deck: Deck): DeckPreset => {
-    let basePreset = defaultPreset;
-    if (deck.presetId && presets) {
-      const found = presets.find(p => p.id === deck.presetId);
-      if (found) basePreset = found;
-    }
-
-    // Aplicar overrides do baralho para o algoritmo se existirem
-    let fsrsEnabled = basePreset.fsrsEnabled;
-    const today = new Date().toISOString().split('T')[0];
-
-    if (deck.algoLimitType === 'deck' && deck.algoLimitValue) {
-      fsrsEnabled = deck.algoLimitValue === 'FSRS';
-    } else if (deck.algoLimitType === 'today' && deck.algoLimitToday && deck.algoLimitTodayDate === today) {
-      fsrsEnabled = deck.algoLimitToday === 'FSRS';
-    }
-
-    return {
-      ...basePreset,
-      fsrsEnabled
-    };
+    return resolveDeckPreset(deck, presets || [], defaultPreset);
   };
 
   const getDeckStudyCountsToday = (deckId: string) => {

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { serializePreset, deserializePreset } from './presets';
-import type { DeckPreset } from '../types';
+import { serializePreset, deserializePreset, resolveDeckPreset } from './presets';
+import { calculateNextReview } from './srs';
+import type { Deck, DeckPreset } from '../types';
 
 // ─── Helper ─────────────────────────────────────────────────────────
 
@@ -326,5 +327,175 @@ describe('deserializePreset: IDs únicos', () => {
     if (!result1.success || !result2.success) return;
 
     expect(result1.preset.id).not.toBe(result2.preset.id);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════
+// resolveDeckPreset & Overrides de Algoritmo/Agendamento
+// ═════════════════════════════════════════════════════════════════════
+
+describe('resolveDeckPreset & Scheduling overrides', () => {
+  const defaultPresetInstance: DeckPreset = samplePreset({
+    fsrsEnabled: false,
+  });
+
+  // 1. Modificar o preset altera a resolução de todos os baralhos que o usam
+  it('quando um preset é modificado, a resolução de todos os baralhos associados reflete a mudança', () => {
+    const preset = samplePreset({ id: 'shared-preset', fsrsEnabled: false });
+    const deckA: Deck = { id: 'deck-a', name: 'Deck A', description: '', presetId: 'shared-preset', createdAt: 0, updatedAt: 0 };
+    const deckB: Deck = { id: 'deck-b', name: 'Deck B', description: '', presetId: 'shared-preset', createdAt: 0, updatedAt: 0 };
+    const deckC: Deck = { id: 'deck-c', name: 'Deck C', description: '', presetId: 'shared-preset', createdAt: 0, updatedAt: 0 };
+
+    const resolvedA1 = resolveDeckPreset(deckA, [preset], defaultPresetInstance);
+    const resolvedB1 = resolveDeckPreset(deckB, [preset], defaultPresetInstance);
+    const resolvedC1 = resolveDeckPreset(deckC, [preset], defaultPresetInstance);
+
+    expect(resolvedA1.fsrsEnabled).toBe(false);
+    expect(resolvedB1.fsrsEnabled).toBe(false);
+    expect(resolvedC1.fsrsEnabled).toBe(false);
+
+    // Simulando alteração do preset (ex: habilitando FSRS globalmente para este preset)
+    const updatedPreset = { ...preset, fsrsEnabled: true };
+
+    const resolvedA2 = resolveDeckPreset(deckA, [updatedPreset], defaultPresetInstance);
+    const resolvedB2 = resolveDeckPreset(deckB, [updatedPreset], defaultPresetInstance);
+    const resolvedC2 = resolveDeckPreset(deckC, [updatedPreset], defaultPresetInstance);
+
+    expect(resolvedA2.fsrsEnabled).toBe(true);
+    expect(resolvedB2.fsrsEnabled).toBe(true);
+    expect(resolvedC2.fsrsEnabled).toBe(true);
+  });
+
+  // 2. Override em nível de baralho (Esse baralho)
+  it('quando um baralho tem override de algoritmo local (Esse baralho), apenas ele é afetado', () => {
+    const preset = samplePreset({ id: 'shared-preset', fsrsEnabled: false });
+    // Deck A tem override para FSRS
+    const deckA: Deck = {
+      id: 'deck-a',
+      name: 'Deck A',
+      description: '',
+      presetId: 'shared-preset',
+      createdAt: 0,
+      updatedAt: 0,
+      algoLimitType: 'deck',
+      algoLimitValue: 'FSRS'
+    };
+    // Deck B não tem override
+    const deckB: Deck = {
+      id: 'deck-b',
+      name: 'Deck B',
+      description: '',
+      presetId: 'shared-preset',
+      createdAt: 0,
+      updatedAt: 0
+    };
+
+    const resolvedA = resolveDeckPreset(deckA, [preset], defaultPresetInstance);
+    const resolvedB = resolveDeckPreset(deckB, [preset], defaultPresetInstance);
+
+    // Deck A deve ter FSRS habilitado por conta do override local
+    expect(resolvedA.fsrsEnabled).toBe(true);
+    // Deck B deve continuar com FSRS desabilitado herdado do preset
+    expect(resolvedB.fsrsEnabled).toBe(false);
+  });
+
+  // 3. Override de hoje (Somente hoje)
+  it('quando um baralho tem override para hoje (Somente hoje), o override é aplicado no mesmo dia e expira no dia seguinte', () => {
+    const preset = samplePreset({ id: 'shared-preset', fsrsEnabled: false });
+    const deck: Deck = {
+      id: 'deck-a',
+      name: 'Deck A',
+      description: '',
+      presetId: 'shared-preset',
+      createdAt: 0,
+      updatedAt: 0,
+      algoLimitType: 'today',
+      algoLimitToday: 'FSRS',
+      algoLimitTodayDate: '2026-05-27'
+    };
+
+    // Caso 1: Mesma data -> Aplica o override FSRS
+    const resolvedToday = resolveDeckPreset(deck, [preset], defaultPresetInstance, '2026-05-27');
+    expect(resolvedToday.fsrsEnabled).toBe(true);
+
+    // Caso 2: Data diferente -> Ignora o override e volta para o preset (SM-2)
+    const resolvedTomorrow = resolveDeckPreset(deck, [preset], defaultPresetInstance, '2026-05-28');
+    expect(resolvedTomorrow.fsrsEnabled).toBe(false);
+  });
+
+  // 4. Integração do Preset Resolvido com o Roteamento de calculateNextReview
+  it('o agendamento calcula com SM-2 ou FSRS baseado nas configurações de override resolvidas', () => {
+    const preset = samplePreset({ id: 'shared-preset', fsrsEnabled: false });
+    const deckWithFsrsOverride: Deck = {
+      id: 'deck-a',
+      name: 'Deck A',
+      description: '',
+      presetId: 'shared-preset',
+      createdAt: 0,
+      updatedAt: 0,
+      algoLimitType: 'deck',
+      algoLimitValue: 'FSRS'
+    };
+    const deckWithoutOverride: Deck = {
+      id: 'deck-b',
+      name: 'Deck B',
+      description: '',
+      presetId: 'shared-preset',
+      createdAt: 0,
+      updatedAt: 0
+    };
+
+    const resolvedFsrs = resolveDeckPreset(deckWithFsrsOverride, [preset], defaultPresetInstance);
+    const resolvedSm2 = resolveDeckPreset(deckWithoutOverride, [preset], defaultPresetInstance);
+
+    const testCard = {
+      id: 'card-1',
+      deckId: 'deck-a',
+      front: 'Front',
+      back: 'Back',
+      context: '',
+      interval: 0,
+      ease: 2.5,
+      repetitions: 0,
+      lapses: 0,
+      dueDate: '',
+      createdAt: 0,
+      updatedAt: 0
+    };
+
+    // Para o deck com override FSRS -> Deve retornar campos de FSRS no agendamento
+    const resultFsrs = calculateNextReview(testCard, 3, resolvedFsrs);
+    expect(resultFsrs.difficulty).toBeDefined();
+    expect(resultFsrs.stability).toBeDefined();
+
+    // Para o deck sem override -> Deve usar SM-2 e não ter campos do FSRS
+    const resultSm2 = calculateNextReview(testCard, 3, resolvedSm2);
+    expect(resultSm2.difficulty).toBeUndefined();
+    expect(resultSm2.stability).toBeUndefined();
+  });
+
+  // 5. Cenários adicionais (Edge cases)
+  it('retorna o preset padrão se o deck não tiver presetId associado', () => {
+    const deck: Deck = { id: 'deck-a', name: 'Deck A', description: '', createdAt: 0, updatedAt: 0 };
+    const resolved = resolveDeckPreset(deck, [], defaultPresetInstance);
+    expect(resolved.id).toBe(defaultPresetInstance.id);
+  });
+
+  it('ignora override de "hoje" se a data do override for inválida ou vazia', () => {
+    const preset = samplePreset({ id: 'shared-preset', fsrsEnabled: false });
+    const deck: Deck = {
+      id: 'deck-a',
+      name: 'Deck A',
+      description: '',
+      presetId: 'shared-preset',
+      createdAt: 0,
+      updatedAt: 0,
+      algoLimitType: 'today',
+      algoLimitToday: 'FSRS',
+      algoLimitTodayDate: '' // Data vazia
+    };
+
+    const resolved = resolveDeckPreset(deck, [preset], defaultPresetInstance, '2026-05-27');
+    expect(resolved.fsrsEnabled).toBe(false); // Fallback para o preset
   });
 });
