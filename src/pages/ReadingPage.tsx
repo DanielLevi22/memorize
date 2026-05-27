@@ -145,6 +145,19 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   const [speechWordDiffs, setSpeechWordDiffs] = useState<DiffWord[]>([]);
   const [speechTargetSnippet, setSpeechTargetSnippet] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
+  const [selectedWordIndices, setSelectedWordIndices] = useState<Set<number>>(new Set());
+
+  const toggleWordSelection = (wordIndex: number) => {
+    setSelectedWordIndices(prev => {
+      const next = new Set(prev);
+      if (next.has(wordIndex)) {
+        next.delete(wordIndex);
+      } else {
+        next.add(wordIndex);
+      }
+      return next;
+    });
+  };
 
   // Writing Mode states
   const [writingInput, setWritingInput] = useState('');
@@ -468,6 +481,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
     if (activeLineRef.current) {
       activeLineRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
+    setSelectedWordIndices(new Set());
   }, [activeLineIdx]);
 
   // Stop TTS and clear timer on unmount or view/lesson change
@@ -486,6 +500,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
       setSpeechIsCorrect(null);
       setSpeechWordDiffs([]);
       setSpeechTargetSnippet(null);
+      setSelectedWordIndices(new Set());
 
       // Reset writing states
       setWritingInput('');
@@ -548,6 +563,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
       setSpeechIsCorrect(null);
       setSpeechWordDiffs([]);
       setSpeechTargetSnippet(null);
+      setSelectedWordIndices(new Set());
     } else {
       stopPlayback();
       setReadingPracticeMode('speaking');
@@ -583,13 +599,19 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
     const currentLine = selectedText.lines[targetIdx];
     const rawExpected = stripHtmlTags(currentLine.original);
 
-    // Get current highlighted/selected text snippet
-    const selection = window.getSelection();
-    const selectionText = selection ? selection.toString().trim() : "";
-    const cleanLineOriginal = cleanString(rawExpected);
-    const cleanSelectionText = cleanString(selectionText);
-    const hasSnippetSelection = selectionText.length > 0 && cleanLineOriginal.includes(cleanSelectionText);
-    const targetExpected = hasSnippetSelection ? selectionText : rawExpected;
+    // Reconstruct target expected based on clicked word indices if there is any selection
+    const sentenceWords: string[] = [];
+    const regex = /\S+/g;
+    let match;
+    while ((match = regex.exec(rawExpected)) !== null) {
+      sentenceWords.push(match[0]);
+    }
+
+    const hasSnippetSelection = selectedWordIndices.size > 0;
+    const selectedSnippetWords = Array.from(selectedWordIndices)
+      .sort((a, b) => a - b)
+      .map(idx => sentenceWords[idx]);
+    const targetExpected = hasSnippetSelection ? selectedSnippetWords.join(' ') : rawExpected;
 
     setIsListeningSpeech(true);
     setSpeechTranscript('');
@@ -870,6 +892,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
       setSpeechIsCorrect(null);
       setSpeechWordDiffs([]);
       setSpeechTargetSnippet(null);
+      setSelectedWordIndices(new Set());
       return;
     }
     if (isWritingMode) {
@@ -1416,11 +1439,32 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
         }
       }
 
+      const isWordClickable = isActiveLine && isPronunciationMode;
+      const isSelectedForPractice = isActiveLine && isPronunciationMode && selectedWordIndices.has(i);
+      
+      if (isSelectedForPractice) {
+        if (isZenMode && zenTheme === 'sepia') {
+          wordClass = 'bg-[#8b5a2b]/25 text-[#5c4033] border-[#8b5a2b]/50 border rounded px-1 py-0.5 shadow-sm font-black';
+        } else if (isZenMode && zenTheme === 'dark-matte') {
+          wordClass = 'bg-[#51afef]/25 text-[#cbd5e1] border-[#51afef]/50 border rounded px-1 py-0.5 shadow-sm font-black';
+        } else {
+          wordClass = 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/40 border rounded px-1 py-0.5 shadow-sm font-black';
+        }
+      }
+
       return (
         <span
           key={i}
           ref={isActiveWord ? activeWordRef : undefined}
-          className={`inline-block transition-colors duration-150 ${wordClass}`}
+          className={`inline-block transition-all duration-150 ${wordClass} ${
+            isWordClickable ? 'cursor-pointer hover:bg-amber-500/5 hover:border-amber-500/20' : ''
+          }`}
+          onClick={(e) => {
+            if (isWordClickable) {
+              e.stopPropagation();
+              toggleWordSelection(i);
+            }
+          }}
         >
           {word}
         </span>
