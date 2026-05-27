@@ -4,11 +4,11 @@ import { Card } from './ui/card';
 import { SrsAlgorithmsDocs } from './SrsAlgorithmsDocs';
 
 interface AppGuideDocsProps {
-  initialTab?: 'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math';
+  initialTab?: 'overview' | 'study_modes' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math';
 }
 
 export const AppGuideDocs: React.FC<AppGuideDocsProps> = ({ initialTab = 'overview' }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'overview' | 'study_modes' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math'>(initialTab);
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -38,6 +38,17 @@ export const AppGuideDocs: React.FC<AppGuideDocsProps> = ({ initialTab = 'overvi
         >
           <Lightbulb size={14} />
           Visão Geral
+        </button>
+        <button
+          onClick={() => setActiveTab('study_modes')}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-all duration-200 ${
+            activeTab === 'study_modes'
+              ? 'bg-background text-primary shadow-sm font-bold'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Zap size={14} />
+          Modos de Estudo
         </button>
         <button
           onClick={() => setActiveTab('shortcuts')}
@@ -142,6 +153,78 @@ export const AppGuideDocs: React.FC<AppGuideDocsProps> = ({ initialTab = 'overvi
                 <p className="text-[11px] text-muted-foreground leading-relaxed">
                   Use a <strong>Pesquisa Global</strong> (na tela de Biblioteca) para buscar palavras específicas nos seus textos. Isso ajuda você a ver a palavra aplicada em diferentes situações, criando um forte aprendizado baseado em contexto real.
                 </p>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: MODOS DE ESTUDO */}
+          {activeTab === 'study_modes' && (
+            <div className="space-y-6">
+              <div className="space-y-3.5">
+                <span className="text-[10px] font-black uppercase text-primary bg-primary/10 px-2 py-0.5 rounded tracking-wider">
+                  Dinâmica de Prática
+                </span>
+                <h3 className="text-base font-bold text-foreground">Como funcionam os diferentes modos de estudo?</h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Para maximizar seu aprendizado, o Memorize oferece três modos distintos na <strong>Arena de Estudos</strong>. Você pode configurar o modo de estudo de cada baralho individualmente em suas opções.
+                </p>
+              </div>
+
+              <div className="space-y-5">
+                {/* 1. MODO CLÁSSICO */}
+                <div className="p-4 border border-border bg-muted/5 rounded-xl space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-blue-600 dark:text-blue-400">🎴 Modo Clássico (Manual)</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    O método tradicional de flashcards, idêntico ao Anki. Você vê a frente do cartão, pensa na resposta e clica em <strong>Revelar Resposta</strong>.
+                  </p>
+                  <ul className="list-disc pl-4 text-[11px] text-muted-foreground space-y-1">
+                    <li>Você avalia seu próprio desempenho manualmente selecionando uma das quatro opções de nota: <strong>Errei (1)</strong>, <strong>Difícil (2)</strong>, <strong>Bom (3)</strong> ou <strong>Fácil (4)</strong>.</li>
+                    <li>Ideal para revisões gerais onde não há necessidade de digitação ou validação de pronúncia.</li>
+                  </ul>
+                </div>
+
+                {/* 2. MODO ESCRITA */}
+                <div className="p-4 border border-border bg-muted/5 rounded-xl space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-violet-600 dark:text-violet-400">✍️ Modo Escrita (Auto-Grading)</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Focado na prática de ortografia e escrita ativa (Writing). O sistema reproduz o áudio do termo em inglês e você deve digitá-lo no campo de entrada.
+                  </p>
+                  <ul className="list-disc pl-4 text-[11px] text-muted-foreground space-y-1">
+                    <li>Ao clicar em <strong>Verificar</strong> ou pressionar <strong>Enter</strong>, nosso algoritmo compara sua resposta caractere por caractere (usando a Distância de Levenshtein e LCS).</li>
+                    <li><strong>Classificação 100% Automática</strong>: O sistema pontua a resposta sem exigir que você escolha as notas manualmente:
+                      <ul className="list-circle pl-4 mt-0.5 space-y-0.5">
+                        <li><span className="font-semibold">Exato (100% correto)</span>: Avaliado automaticamente como <strong>Bom (3)</strong>.</li>
+                        <li><span className="font-semibold">Erro leve (typos)</span>: Se você errar apenas 1 ou 2 letras, o sistema tolera a falha leve, exibe o aviso <em>⚠️ Quase Correto! (Erro de digitação leve)</em> e classifica como <strong>Difícil (2)</strong>.</li>
+                        <li><span className="font-semibold">Incorreto / Pulado</span>: Se errar mais caracteres ou pular a questão, classifica automaticamente como <strong>Errei (1)</strong>.</li>
+                      </ul>
+                    </li>
+                    <li>Os botões manuais de avaliação (Errei, Difícil, Bom, Fácil) são desativados para evitar interrupções no fluxo; basta pressionar <strong>Enter</strong> ou <strong>Espaço</strong> novamente no botão <strong>Continuar</strong> para passar para o próximo cartão.</li>
+                  </ul>
+                </div>
+
+                {/* 3. MODO FALA */}
+                <div className="p-4 border border-border bg-muted/5 rounded-xl space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">🗣️ Modo Fala (Auto-Grading)</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Projetado para melhorar sua pronúncia e conversação (Speaking). O sistema exibe o termo e você deve pronunciá-lo no microfone.
+                  </p>
+                  <ul className="list-disc pl-4 text-[11px] text-muted-foreground space-y-1">
+                    <li>O reconhecimento de fala transcreve sua voz e calcula o score de proximidade palavra por palavra:
+                      <ul className="list-circle pl-4 mt-0.5 space-y-0.5">
+                        <li><span className="font-semibold">Exato (100% correto)</span>: Avaliado como <strong>Bom (3)</strong>.</li>
+                        <li><span className="font-semibold">Similaridade &ge; 80%</span>: Tolera pequenas discrepâncias ou desvios de pronúncia, avaliando como <strong>Difícil (2)</strong>.</li>
+                        <li><span className="font-semibold">Similaridade &lt; 80%</span>: Classificado como <strong>Errei (1)</strong>.</li>
+                      </ul>
+                    </li>
+                    <li>Assim como no modo Escrita, o fluxo é totalmente automático através do botão único <strong>Continuar</strong>, ocultando a seleção manual de notas.</li>
+                  </ul>
+                </div>
               </div>
             </div>
           )}

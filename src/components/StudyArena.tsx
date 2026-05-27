@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Eye, AlertCircle, Volume2, Mic } from 'lucide-react';
+import { ArrowLeft, Eye, AlertCircle, Volume2, Mic, Lock } from 'lucide-react';
 import type { Card, DeckPreset } from '../types';
 import { 
   getFriendlyInterval, 
@@ -97,12 +97,49 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
   const [isAlmostCorrect, setIsAlmostCorrect] = useState(false);
   const [charDiffs, setCharDiffs] = useState<DiffChar[]>([]);
   const [wordDiffs, setWordDiffs] = useState<DiffWord[]>([]);
+  const [speechSimilarity, setSpeechSimilarity] = useState<number | null>(null);
   const [isListeningSpeech, setIsListeningSpeech] = useState(false);
+  const [lockedGrade, setLockedGrade] = useState<number | null>(null);
   const recognitionRef = useRef<any>(null);
   const cardStartTimeRef = useRef<number>(Date.now());
 
+  const getRecommendedGrade = (): number | null => {
+    if (studyMode === 'classic') return null;
+    if (lockedGrade !== null) return lockedGrade;
+    if (!hasCheckedAnswer) return null;
+
+    if (studyMode === 'writing') {
+      if (!typedAnswer.trim()) {
+        return 1; // Errei
+      }
+      if (isAnswerCorrect) {
+        return isAlmostCorrect ? 2 : 3; // 2: Difícil, 3: Bom
+      }
+      return 1; // Errei
+    }
+
+    if (studyMode === 'speaking') {
+      if (speechSimilarity === null) {
+        return 1; // Errei (no voice recognized or skipped)
+      }
+      if (speechSimilarity === 100) {
+        return 3; // Bom
+      }
+      if (speechSimilarity >= 80) {
+        return 2; // Difícil (almost correct)
+      }
+      return 1; // Errei (<80%)
+    }
+
+    return null;
+  };
+
   const totalCards = sessionQueue.length;
   const currentCard = sessionQueue[currentIndex];
+
+  const isReversed = currentCard?.cardType === 'reversed';
+  const termText = currentCard ? (isReversed ? currentCard.back : currentCard.front) : '';
+  const meaningText = currentCard ? (isReversed ? currentCard.front : currentCard.back) : '';
 
   const speakText = (text: string, lang: 'en' | 'pt', onEnd?: () => void) => {
     if (typeof window === 'undefined' || !window.speechSynthesis) {
@@ -151,7 +188,9 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
     setIsAlmostCorrect(false);
     setCharDiffs([]);
     setWordDiffs([]);
+    setSpeechSimilarity(null);
     setIsListeningSpeech(false);
+    setLockedGrade(null);
     if (recognitionRef.current) {
       try {
         recognitionRef.current.abort();
@@ -201,7 +240,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
         setIsPlaying(false);
         // Auto-play do TTS em inglês (only when enabled)
         if (shouldAutoplay) {
-          speakText(currentCard.front, 'en');
+          speakText(termText, 'en');
         }
       }
     }
@@ -226,53 +265,19 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
     };
   }, [currentIndex, currentCard]);
 
-  // Autoplay ao revelar a resposta (verso)
+  // Parar qualquer áudio ao revelar a resposta (verso)
   useEffect(() => {
     if (isFlipped && currentCard) {
-      const shouldAutoplay = preset ? !preset.disableAutoplay : autoPlayAudio;
-      if (shouldAutoplay) {
-        // Para parar qualquer áudio em andamento antes de iniciar a resposta
-        if (activeAudioRef.current) {
-          activeAudioRef.current.pause();
-          activeAudioRef.current = null;
-        }
-        if (typeof window !== 'undefined' && window.speechSynthesis) {
-          window.speechSynthesis.cancel();
-        }
-        setIsPlaying(false);
-
-        // Tocar a resposta sequencialmente ou apenas o verso
-        const shouldSkipQuestion = preset?.skipQuestionOnReplay;
-        if (shouldSkipQuestion) {
-          // Apenas o verso
-          speakText(currentCard.back, 'pt');
-        } else {
-          // Frente + Verso sequencial
-          if (currentCard.audio) {
-            if (audioUrl) {
-              try {
-                const audio = new Audio(audioUrl);
-                activeAudioRef.current = audio;
-                setIsPlaying(true);
-                audio.play().catch(() => setIsPlaying(false));
-                audio.onended = () => {
-                  activeAudioRef.current = null;
-                  speakText(currentCard.back, 'pt');
-                };
-              } catch (err) {
-                console.error(err);
-                setIsPlaying(false);
-              }
-            }
-          } else {
-            speakText(currentCard.front, 'en', () => {
-              speakText(currentCard.back, 'pt');
-            });
-          }
-        }
+      if (activeAudioRef.current) {
+        activeAudioRef.current.pause();
+        activeAudioRef.current = null;
       }
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      setIsPlaying(false);
     }
-  }, [isFlipped, currentCard, audioUrl, preset?.disableAutoplay, preset?.skipQuestionOnReplay, autoPlayAudio]);
+  }, [isFlipped, currentCard]);
 
   if (totalCards === 0) {
     return (
@@ -306,61 +311,30 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
       return;
     }
 
-    const shouldSkipQuestion = isFlipped && preset?.skipQuestionOnReplay;
-
-    if (!isFlipped || shouldSkipQuestion) {
-      // Frente, ou verso com skipQuestionOnReplay = true (toca apenas o respectivo lado)
-      if (!isFlipped) {
-        if (currentCard.audio) {
-          if (!audioUrl) return;
-          try {
-            const audio = new Audio(audioUrl);
-            activeAudioRef.current = audio;
-            setIsPlaying(true);
-            audio.play().catch(() => setIsPlaying(false));
-            audio.onended = () => {
-              setIsPlaying(false);
-              activeAudioRef.current = null;
-            };
-          } catch (err) {
-            console.error(err);
-            setIsPlaying(false);
-          }
-        } else {
-          speakText(currentCard.front, 'en');
-        }
-      } else {
-        // Verso com skipQuestionOnReplay = true (apenas o verso)
-        speakText(currentCard.back, 'pt');
+    // Toca apenas o termo (frente)
+    if (currentCard.audio) {
+      if (!audioUrl) return;
+      try {
+        const audio = new Audio(audioUrl);
+        activeAudioRef.current = audio;
+        setIsPlaying(true);
+        audio.play().catch(() => setIsPlaying(false));
+        audio.onended = () => {
+          setIsPlaying(false);
+          activeAudioRef.current = null;
+        };
+      } catch (err) {
+        console.error(err);
+        setIsPlaying(false);
       }
     } else {
-      // Verso com skipQuestionOnReplay = false (toca sequencialmente: frente e depois verso)
-      if (currentCard.audio) {
-        if (!audioUrl) return;
-        try {
-          const audio = new Audio(audioUrl);
-          activeAudioRef.current = audio;
-          setIsPlaying(true);
-          audio.play().catch(() => setIsPlaying(false));
-          audio.onended = () => {
-            activeAudioRef.current = null;
-            speakText(currentCard.back, 'pt');
-          };
-        } catch (err) {
-          console.error(err);
-          setIsPlaying(false);
-        }
-      } else {
-        speakText(currentCard.front, 'en', () => {
-          speakText(currentCard.back, 'pt');
-        });
-      }
+      speakText(termText, 'en');
     }
   };
 
   const handleCheckWritingAnswer = () => {
     if (!typedAnswer.trim()) return;
-    const expected = stripHtmlTags(currentCard.front);
+    const expected = stripHtmlTags(termText);
     
     const cleanTyped = cleanString(typedAnswer);
     const cleanExpected = cleanString(expected);
@@ -385,7 +359,15 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
     setIsAnswerCorrect(correct);
     setIsAlmostCorrect(almost);
     setHasCheckedAnswer(true);
-    setIsFlipped(true);
+
+    setLockedGrade(prev => {
+      if (prev !== null) return prev;
+      let grade = 1;
+      if (correct) {
+        grade = almost ? 2 : 3;
+      }
+      return grade;
+    });
   };
 
   const handleStartSpeechRecognition = () => {
@@ -413,7 +395,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
       recognition.onresult = (event: any) => {
         const resultText = event.results[0][0].transcript;
         
-        const expected = stripHtmlTags(currentCard.front);
+        const expected = stripHtmlTags(termText);
         
         const cleanTyped = cleanString(resultText);
         const cleanExpected = cleanString(expected);
@@ -422,21 +404,30 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
         const expectedWords = cleanExpected.split(/\s+/).filter(Boolean);
         
         let correct = false;
+        let similarity = 0;
         if (spokenWords.length > 0 && expectedWords.length > 0) {
           const wordDist = getWordLevenshteinDistance(spokenWords, expectedWords);
           const maxWords = Math.max(spokenWords.length, expectedWords.length);
-          const similarity = Math.max(0, 1 - wordDist / maxWords) * 100;
+          similarity = Math.max(0, 1 - wordDist / maxWords) * 100;
           correct = similarity >= 80;
         } else {
           correct = cleanTyped === cleanExpected;
+          similarity = correct ? 100 : 0;
         }
 
         const diff = diffWords(resultText, expected);
         setWordDiffs(diff);
+        setSpeechSimilarity(similarity);
 
         setIsAnswerCorrect(correct);
         setHasCheckedAnswer(true);
-        setIsFlipped(true);
+
+        setLockedGrade(prev => {
+          if (prev !== null) return prev;
+          if (similarity === 100) return 3; // Bom
+          if (similarity >= 80) return 2; // Difícil
+          return 1; // Errei
+        });
       };
 
       recognition.onerror = (event: any) => {
@@ -465,6 +456,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
         setIsFlipped(true);
       }
     } else {
+      setLockedGrade(prev => prev ?? 1);
       setHasCheckedAnswer(true);
       setIsFlipped(true);
     }
@@ -667,17 +659,25 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
 
       if (e.key === 'Escape') {
         onCancel();
-      } else if ((e.key === ' ' || e.key === 'Spacebar') && !isFlipped) {
+      } else if ((e.key === ' ' || e.key === 'Spacebar' || (e.key === 'Enter' && studyMode !== 'classic' && hasCheckedAnswer)) && !isFlipped) {
         e.preventDefault();
         handleReveal();
+      } else if ((e.key === ' ' || e.key === 'Spacebar' || e.key === 'Enter') && isFlipped) {
+        e.preventDefault();
+        const recGrade = getRecommendedGrade();
+        if (recGrade !== null) {
+          handleGrade(recGrade);
+        } else {
+          handleGrade(3); // Default to "Bom" (3) like Anki
+        }
       } else if (e.key === '1' && isFlipped) {
-        e.preventDefault(); handleGrade(1);
+        if (studyMode === 'classic') { e.preventDefault(); handleGrade(1); }
       } else if (e.key === '2' && isFlipped) {
-        e.preventDefault(); handleGrade(2);
+        if (studyMode === 'classic') { e.preventDefault(); handleGrade(2); }
       } else if (e.key === '3' && isFlipped) {
-        e.preventDefault(); handleGrade(3);
+        if (studyMode === 'classic') { e.preventDefault(); handleGrade(3); }
       } else if (e.key === '4' && isFlipped) {
-        e.preventDefault(); handleGrade(4);
+        if (studyMode === 'classic') { e.preventDefault(); handleGrade(4); }
       } else if (e.key === 'r' || e.key === 'R') {
         e.preventDefault();
         handlePlayAudio();
@@ -685,7 +685,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isFlipped, onCancel, currentIndex, audioUrl, isPlaying]);
+  }, [isFlipped, onCancel, currentIndex, audioUrl, isPlaying, studyMode, hasCheckedAnswer, typedAnswer, isAnswerCorrect, isAlmostCorrect, speechSimilarity, lockedGrade]);
 
   // Calcular contadores de cartões restantes (estilo Anki)
   const remainingQueue = sessionQueue.slice(currentIndex);
@@ -795,23 +795,25 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
             
             {/* 1. MODO ESCRITA */}
             {studyMode === 'writing' ? (
-              <div className="flex-1 flex flex-col justify-center items-center text-center gap-4 w-full">
+              <div className={`flex-1 flex flex-col justify-center items-center text-center ${hasCheckedAnswer ? 'gap-2.5' : 'gap-4'} w-full`}>
                 <Button
                   type="button"
                   variant="outline"
-                  className="w-16 h-16 rounded-full border-2 border-primary bg-primary/10 hover:bg-primary/20 text-primary flex items-center justify-center cursor-pointer shadow-md transition-transform duration-200 hover:scale-105"
+                  className={`${hasCheckedAnswer ? 'w-10 h-10' : 'w-16 h-16'} rounded-full border-2 border-primary bg-primary/10 hover:bg-primary/20 text-primary flex items-center justify-center cursor-pointer shadow-md transition-all duration-200 hover:scale-105`}
                   onClick={handlePlayAudio}
                   title="Ouvir pronúncia"
                 >
-                  <Volume2 size={28} className={isPlaying ? 'animate-bounce text-primary' : 'text-primary'} />
+                  <Volume2 size={hasCheckedAnswer ? 18 : 28} className={isPlaying ? 'animate-bounce text-primary' : 'text-primary'} />
                 </Button>
                 
-                <div className="space-y-1">
-                  <h3 className="font-extrabold text-sm text-foreground">Escute e digite o termo:</h3>
-                  <p className="text-[10px] text-muted-foreground">O que você ouviu em inglês?</p>
-                </div>
+                {!hasCheckedAnswer && (
+                  <div className="space-y-1">
+                    <h3 className="font-extrabold text-sm text-foreground">Escute e digite o termo:</h3>
+                    <p className="text-[10px] text-muted-foreground">O que você ouviu em inglês?</p>
+                  </div>
+                )}
 
-                <div className="w-full max-w-xs mt-2" onClick={(e) => e.stopPropagation()}>
+                <div className="w-full max-w-xs" onClick={(e) => e.stopPropagation()}>
                   <input
                     type="text"
                     className="w-full bg-background border border-border rounded-xl px-3 py-2 text-center text-sm font-bold focus:outline-none focus:ring-2 focus:ring-primary/50 text-foreground"
@@ -821,6 +823,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         handleCheckWritingAnswer();
+                        (e.target as HTMLInputElement).blur();
                       }
                     }}
                     disabled={hasCheckedAnswer}
@@ -830,7 +833,11 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
 
                 {hasCheckedAnswer && (
                   <div className="w-full p-2.5 rounded-xl border mt-2 text-left text-xs space-y-2 bg-muted/40 border-border">
-                    {isAnswerCorrect ? (
+                    {isAnswerCorrect === null ? (
+                      <span className="font-bold text-zinc-500 dark:text-zinc-400 block text-center">
+                        ℹ️ Resposta Revelada
+                      </span>
+                    ) : isAnswerCorrect ? (
                       isAlmostCorrect ? (
                         <span className="font-bold text-amber-500 dark:text-amber-400 block text-center">
                           ⚠️ Quase Correto! (Erro de digitação leve)
@@ -846,32 +853,52 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                       </span>
                     )}
 
-                    <div className="border-t border-border/40 pt-2 space-y-1">
-                      <span className="text-[10px] text-zinc-400 block text-center">Comparação:</span>
-                      <div className="text-center font-bold text-[13px] tracking-wide py-1.5 flex flex-wrap justify-center gap-px font-mono">
-                        {charDiffs.map((token, idx) => {
-                          if (token.type === 'correct') {
-                            return (
-                              <span key={idx} className="text-emerald-600 dark:text-emerald-400">
-                                {token.char}
-                              </span>
-                            );
-                          } else if (token.type === 'incorrect') {
-                            return (
-                              <span key={idx} className="text-red-500 line-through bg-red-500/10 px-0.5 rounded" title="Caractere extra">
-                                {token.char}
-                              </span>
-                            );
-                          } else {
-                            return (
-                              <span key={idx} className="text-zinc-400 dark:text-zinc-500 border-b-2 border-dashed border-zinc-400 px-0.5" title="Caractere faltante">
-                                {token.char}
-                              </span>
-                            );
-                          }
-                        })}
+                    {isAnswerCorrect === null ? (
+                      <div className="border-t border-border/40 pt-2 text-center">
+                        <span className="text-[10px] text-zinc-400 block mb-0.5">Resposta Esperada:</span>
+                        <span className="font-mono text-sm font-bold text-foreground">
+                          {stripHtmlTags(termText)}
+                        </span>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="border-t border-border/40 pt-2 space-y-2.5">
+                        <div>
+                          <span className="text-[10px] text-zinc-400 block mb-0.5">Palavra Correta (Esperada):</span>
+                          <div className="font-mono font-bold text-sm tracking-wide flex flex-wrap gap-px leading-normal">
+                            {charDiffs.length === 0 ? (
+                              <span className="text-foreground italic">{stripHtmlTags(termText)}</span>
+                            ) : (
+                              charDiffs.filter(t => t.type !== 'incorrect').map((token, idx) => (
+                                <span 
+                                  key={idx} 
+                                  className={token.type === 'correct' ? 'text-zinc-700 dark:text-zinc-300' : 'text-zinc-400 dark:text-zinc-500 border-b border-dashed border-zinc-400 px-0.5'}
+                                  title={token.type === 'correct' ? 'Correto' : 'Caractere faltante'}
+                                >
+                                  {token.char}
+                                </span>
+                              ))
+                            )}
+                          </div>
+                        </div>
+
+                        {charDiffs.length > 0 && (
+                          <div className="pt-1.5 border-t border-border/20">
+                            <span className="text-[10px] text-zinc-400 block mb-0.5">Você Digitou:</span>
+                            <div className="font-mono font-bold text-sm tracking-wide flex flex-wrap gap-px leading-normal">
+                              {charDiffs.filter(t => t.type !== 'missing').map((token, idx) => (
+                                <span 
+                                  key={idx} 
+                                  className={token.type === 'correct' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 line-through bg-red-500/10 px-0.5 rounded'}
+                                  title={token.type === 'correct' ? 'Correto' : 'Caractere incorreto'}
+                                >
+                                  {token.char}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -888,28 +915,28 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                     Verificar
                   </Button>
                 ) : (
-                  <div className="text-[9px] text-zinc-400 mt-auto">
-                    💡 Resposta verificada. Avalie seu desempenho abaixo.
+                  <div className="text-[9px] text-zinc-400 mt-auto flex items-center justify-center gap-1 font-medium">
+                    <Lock size={10} className="shrink-0 text-primary/70" /> Pontuação travada na 1ª tentativa.
                   </div>
                 )}
               </div>
             ) : studyMode === 'speaking' ? (
               /* 2. MODO FALA */
-              <div className="flex-1 flex flex-col justify-center items-center text-center gap-4 w-full">
+              <div className={`flex-1 flex flex-col justify-center items-center text-center ${hasCheckedAnswer ? 'gap-2.5' : 'gap-4'} w-full`}>
                 <div className="flex gap-4">
                   <Button
                     type="button"
                     variant="outline"
-                    className="w-14 h-14 rounded-full border border-border bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center cursor-pointer shadow-sm transition-transform duration-200 hover:scale-105"
+                    className={`${hasCheckedAnswer ? 'w-10 h-10' : 'w-14 h-14'} rounded-full border border-border bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center cursor-pointer shadow-sm transition-all duration-200 hover:scale-105`}
                     onClick={handlePlayAudio}
                     title="Ouvir pronúncia"
                   >
-                    <Volume2 size={24} className={isPlaying ? 'animate-pulse text-primary' : ''} />
+                    <Volume2 size={hasCheckedAnswer ? 18 : 24} className={isPlaying ? 'animate-pulse text-primary' : ''} />
                   </Button>
 
                   <Button
                     type="button"
-                    className={`w-14 h-14 rounded-full border-2 flex items-center justify-center cursor-pointer shadow-sm transition-all duration-200 hover:scale-105 ${
+                    className={`${hasCheckedAnswer ? 'w-10 h-10' : 'w-14 h-14'} rounded-full border-2 flex items-center justify-center cursor-pointer shadow-sm transition-all duration-200 hover:scale-105 ${
                       isListeningSpeech
                         ? 'bg-destructive/10 text-destructive border-destructive animate-pulse ring-4 ring-destructive/20'
                         : 'bg-primary/10 border-primary text-primary hover:bg-primary/20'
@@ -920,20 +947,26 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                     }}
                     title={isListeningSpeech ? 'Parar microfone' : 'Gravar pronúncia'}
                   >
-                    <Mic size={24} />
+                    <Mic size={hasCheckedAnswer ? 18 : 24} />
                   </Button>
                 </div>
 
-                <div className="space-y-1">
-                  <h3 className="font-extrabold text-sm text-foreground">Escute e fale o termo:</h3>
-                  <p className="text-[10px] text-muted-foreground">
-                    {isListeningSpeech ? 'Ouvindo sua voz... Fale agora!' : 'Clique no microfone para pronunciar'}
-                  </p>
-                </div>
+                {!hasCheckedAnswer && (
+                  <div className="space-y-1">
+                    <h3 className="font-extrabold text-sm text-foreground">Escute e fale o termo:</h3>
+                    <p className="text-[10px] text-muted-foreground">
+                      {isListeningSpeech ? 'Ouvindo sua voz... Fale agora!' : 'Clique no microfone para pronunciar'}
+                    </p>
+                  </div>
+                )}
 
                 {hasCheckedAnswer && (
-                  <div className="w-full p-2.5 rounded-xl border mt-2 text-left text-xs space-y-2 bg-muted/40 border-border">
-                    {isAnswerCorrect ? (
+                  <div className="w-full p-2.5 rounded-xl border mt-2 text-left text-xs space-y-2 bg-muted/40 border-border animate-in fade-in slide-in-from-top-1">
+                    {isAnswerCorrect === null ? (
+                      <span className="font-bold text-zinc-500 dark:text-zinc-400 block text-center">
+                        ℹ️ Resposta Revelada
+                      </span>
+                    ) : isAnswerCorrect ? (
                       <span className="font-bold text-emerald-600 dark:text-emerald-400 block text-center">
                         ✨ Excelente Pronúncia!
                       </span>
@@ -943,32 +976,52 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                       </span>
                     )}
 
-                    <div className="border-t border-border/40 pt-2 space-y-1">
-                      <span className="text-[10px] text-zinc-400 block text-center">Alinhamento de palavras:</span>
-                      <div className="text-center font-semibold text-sm tracking-wide py-1.5 flex flex-wrap justify-center gap-x-1.5 gap-y-1 leading-relaxed">
-                        {wordDiffs.map((token, idx) => {
-                          if (token.type === 'correct') {
-                            return (
-                              <span key={idx} className="text-emerald-600 dark:text-emerald-400 font-bold">
-                                {token.word}
-                              </span>
-                            );
-                          } else if (token.type === 'incorrect') {
-                            return (
-                              <span key={idx} className="text-red-500 line-through bg-red-500/10 px-1 rounded font-bold" title="Palavra extra ou incorreta na pronúncia">
-                                {token.word}
-                              </span>
-                            );
-                          } else {
-                            return (
-                              <span key={idx} className="text-zinc-400 dark:text-zinc-500 border-b border-dashed border-zinc-400 px-0.5" title="Palavra faltante na pronúncia">
-                                {token.word}
-                              </span>
-                            );
-                          }
-                        })}
+                    {isAnswerCorrect === null ? (
+                      <div className="border-t border-border/40 pt-2 text-center">
+                        <span className="text-[10px] text-zinc-400 block mb-0.5">Frase Esperada:</span>
+                        <span className="text-sm font-bold text-foreground italic">
+                          "{stripHtmlTags(termText)}"
+                        </span>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="border-t border-border/40 pt-2 space-y-2.5">
+                        <div>
+                          <span className="text-[10px] text-zinc-400 block mb-0.5">Frase Correta (Esperada):</span>
+                          <div className="font-bold text-[13px] tracking-wide flex flex-wrap gap-x-1 gap-y-0.5 leading-normal">
+                            {wordDiffs.length === 0 ? (
+                              <span className="text-foreground italic">"{stripHtmlTags(termText)}"</span>
+                            ) : (
+                              wordDiffs.filter(t => t.type !== 'incorrect').map((token, idx) => (
+                                <span 
+                                  key={idx} 
+                                  className={token.type === 'correct' ? 'text-zinc-700 dark:text-zinc-300' : 'text-zinc-400 dark:text-zinc-500 border-b border-dashed border-zinc-400 px-0.5'}
+                                  title={token.type === 'correct' ? 'Correto' : 'Palavra omitida na pronúncia'}
+                                >
+                                  {token.word}
+                                </span>
+                              ))
+                            )}
+                          </div>
+                        </div>
+
+                        {wordDiffs.length > 0 && (
+                          <div className="pt-1.5 border-t border-border/20">
+                            <span className="text-[10px] text-zinc-400 block mb-0.5">Você Falou:</span>
+                            <div className="font-bold text-[13px] tracking-wide flex flex-wrap gap-x-1 gap-y-0.5 leading-normal">
+                              {wordDiffs.filter(t => t.type !== 'missing').map((token, idx) => (
+                                <span 
+                                  key={idx} 
+                                  className={token.type === 'correct' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 line-through bg-red-500/10 px-1 rounded'}
+                                  title={token.type === 'correct' ? 'Correto' : 'Palavra extra ou pronunciada incorretamente'}
+                                >
+                                  {token.word}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -978,16 +1031,14 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                     variant="outline"
                     className="mt-2 border-border bg-card hover:bg-muted text-muted-foreground hover:text-foreground text-xs font-bold px-4 py-2 rounded-xl cursor-pointer"
                     onClick={(e) => {
-                      e.stopPropagation();
-                      setHasCheckedAnswer(true);
-                      setIsFlipped(true);
+                      handleReveal(e);
                     }}
                   >
                     Revelar Resposta
                   </Button>
                 ) : (
-                  <div className="text-[9px] text-zinc-400 mt-auto">
-                    💡 Pronúncia avaliada. Escolha uma nota abaixo para continuar.
+                  <div className="text-[9px] text-zinc-400 mt-auto flex items-center justify-center gap-1 font-medium">
+                    <Lock size={10} className="shrink-0 text-primary/70" /> Pontuação travada na 1ª tentativa.
                   </div>
                 )}
               </div>
@@ -1081,12 +1132,67 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
             <div className="flex-1 flex flex-col justify-center items-center text-center gap-4">
               <span 
                 className="text-sm text-muted-foreground font-semibold tracking-wide"
-                dangerouslySetInnerHTML={{ __html: currentCard.front }}
+                dangerouslySetInnerHTML={{ __html: termText }}
               />
               <h3 
                 className="font-bold text-xl text-primary leading-snug"
-                dangerouslySetInnerHTML={{ __html: currentCard.back }}
+                dangerouslySetInnerHTML={{ __html: meaningText }}
               />
+
+              {studyMode === 'speaking' && (
+                <div className="w-full flex flex-col items-center gap-2 my-1" onClick={(e) => e.stopPropagation()}>
+                  <Button
+                    type="button"
+                    className={`w-11 h-11 rounded-full border-2 flex items-center justify-center cursor-pointer shadow-sm transition-all duration-200 hover:scale-105 ${
+                      isListeningSpeech
+                        ? 'bg-destructive/10 text-destructive border-destructive animate-pulse ring-4 ring-destructive/20'
+                        : 'bg-primary/10 border-primary text-primary hover:bg-primary/20'
+                    }`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleStartSpeechRecognition();
+                    }}
+                    title={isListeningSpeech ? 'Parar microfone' : 'Gravar pronúncia'}
+                  >
+                    <Mic size={20} />
+                  </Button>
+                  
+                  {speechSimilarity !== null && (
+                    <div className="w-full max-w-sm p-2 rounded-xl border text-left text-xs space-y-1 bg-muted/40 border-border animate-in fade-in slide-in-from-top-1">
+                      {isAnswerCorrect ? (
+                        <span className="font-bold text-emerald-600 dark:text-emerald-400 block text-center text-[10px]">
+                          ✨ Excelente Pronúncia! ({Math.round(speechSimilarity)}%)
+                        </span>
+                      ) : (
+                        <span className="font-bold text-red-500 block text-center text-[10px]">
+                          ❌ Pronúncia incorreta ({Math.round(speechSimilarity)}%)
+                        </span>
+                      )}
+                      
+                      <div className="border-t border-border/20 pt-1">
+                        <span className="text-[9px] text-zinc-400 block mb-0.5">Você Falou:</span>
+                        <div className="font-bold text-[11px] tracking-wide flex flex-wrap gap-x-1 gap-y-0.5 leading-normal font-mono">
+                          {wordDiffs.length === 0 ? (
+                            <span className="text-zinc-500 italic">Sem transcrição</span>
+                          ) : (
+                            wordDiffs.filter(t => t.type !== 'missing').map((token, idx) => (
+                              <span 
+                                key={idx} 
+                                className={token.type === 'correct' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 line-through bg-red-500/10 px-0.5 rounded'}
+                              >
+                                {token.word}
+                              </span>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-[8px] text-zinc-400 text-center pt-1.5 mt-1.5 border-t border-border/10 flex items-center justify-center gap-0.5 font-medium">
+                        <Lock size={9} /> Prática livre: a pontuação válida é a da 1ª tentativa
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
               
               {currentCard.context && (
                 <div className="text-sm text-foreground font-medium italic p-3 bg-muted/30 border-l-2 border-primary rounded w-full text-left leading-relaxed">
@@ -1145,63 +1251,143 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
             onClick={() => handleReveal()}
           >
             <Eye size={16} />
-            {currentCard.audio && !isAudioTextRevealed ? 'Revelar Texto (Inglês)' : 'Revelar Resposta'}
+            {studyMode === 'classic'
+              ? (currentCard.audio && !isAudioTextRevealed ? 'Revelar Texto (Inglês)' : 'Revelar Resposta')
+              : (hasCheckedAnswer ? 'Revelar Significado' : 'Revelar Resposta')
+            }
           </Button>
         ) : (
           <>
-            <div className="grid grid-cols-4 gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
-              <Button 
-                className="flex flex-col h-auto py-3 rounded-xl font-bold bg-red-500/10 border border-red-500/20 hover:bg-red-500 hover:text-zinc-50 text-red-500 dark:text-red-400 text-sm gap-0.5 cursor-pointer"
-                onClick={() => handleGrade(1)}
-              >
-                <span>Errei</span>
-                <span className="text-[10px] font-medium opacity-70">
-                  {getFriendlyInterval(currentCard, 1, preset)}
-                </span>
-              </Button>
-              <Button 
-                className="flex flex-col h-auto py-3 rounded-xl font-bold bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500 hover:text-zinc-950 dark:hover:text-zinc-950 text-amber-500 text-sm gap-0.5 cursor-pointer"
-                onClick={() => handleGrade(2)}
-              >
-                <span>Difícil</span>
-                <span className="text-[10px] font-medium opacity-70">
-                  {getFriendlyInterval(currentCard, 2, preset)}
-                </span>
-              </Button>
-              <Button 
-                className="flex flex-col h-auto py-3 rounded-xl font-bold bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500 hover:text-zinc-50 text-sky-600 dark:text-sky-400 text-sm gap-0.5 cursor-pointer"
-                onClick={() => handleGrade(3)}
-              >
-                <span>Bom</span>
-                <span className="text-[10px] font-medium opacity-70">
-                  {getFriendlyInterval(currentCard, 3, preset)}
-                </span>
-              </Button>
-              <Button 
-                className="flex flex-col h-auto py-3 rounded-xl font-bold bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500 hover:text-zinc-50 text-emerald-600 dark:text-emerald-400 text-sm gap-0.5 cursor-pointer"
-                onClick={() => handleGrade(4)}
-              >
-                <span>Fácil</span>
-                <span className="text-[10px] font-medium opacity-70">
-                  {getFriendlyInterval(currentCard, 4, preset)}
-                </span>
-              </Button>
-            </div>
+            {studyMode === 'classic' ? (
+              (() => {
+                const recommendedGrade = getRecommendedGrade();
+                return (
+                  <div className="grid grid-cols-4 gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    <Button 
+                      className={`flex flex-col h-20 items-center justify-center rounded-xl font-bold transition-all duration-300 cursor-pointer ${
+                        recommendedGrade === 1
+                          ? 'bg-red-500/20 border-2 border-red-500 text-red-500 dark:text-red-400 scale-[1.04] shadow-[0_0_15px_rgba(239,68,68,0.5)] z-10 animate-pulse'
+                          : 'bg-red-500/10 border border-red-500/20 hover:bg-red-500 hover:text-zinc-50 text-red-500 dark:text-red-400 text-sm'
+                      }`}
+                      onClick={() => handleGrade(1)}
+                    >
+                      <span>Errei</span>
+                      <span className="text-[10px] font-medium opacity-70">
+                        {getFriendlyInterval(currentCard, 1, preset)}
+                      </span>
+                      {recommendedGrade === 1 && (
+                        <span className="text-[7.5px] font-black uppercase tracking-wider bg-red-500/15 px-1 py-0.5 rounded mt-0.5 animate-pulse">
+                          ⭐ Recom.
+                        </span>
+                      )}
+                    </Button>
+                    <Button 
+                      className={`flex flex-col h-20 items-center justify-center rounded-xl font-bold transition-all duration-300 cursor-pointer ${
+                        recommendedGrade === 2
+                          ? 'bg-amber-500/20 border-2 border-amber-500 text-amber-600 dark:text-amber-400 scale-[1.04] shadow-[0_0_15px_rgba(245,158,11,0.5)] z-10 animate-pulse'
+                          : 'bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500 hover:text-zinc-950 dark:hover:text-zinc-950 text-amber-500 text-sm'
+                      }`}
+                      onClick={() => handleGrade(2)}
+                    >
+                      <span>Difícil</span>
+                      <span className="text-[10px] font-medium opacity-70">
+                        {getFriendlyInterval(currentCard, 2, preset)}
+                      </span>
+                      {recommendedGrade === 2 && (
+                        <span className="text-[7.5px] font-black uppercase tracking-wider bg-amber-500/15 px-1 py-0.5 rounded mt-0.5 animate-pulse">
+                          ⭐ Recom.
+                        </span>
+                      )}
+                    </Button>
+                    <Button 
+                      className={`flex flex-col h-20 items-center justify-center rounded-xl font-bold transition-all duration-300 cursor-pointer ${
+                        recommendedGrade === 3
+                          ? 'bg-sky-500/20 border-2 border-sky-500 text-sky-600 dark:text-sky-400 scale-[1.04] shadow-[0_0_15px_rgba(14,165,233,0.5)] z-10 animate-pulse'
+                          : 'bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500 hover:text-zinc-50 text-sky-600 dark:text-sky-400 text-sm'
+                      }`}
+                      onClick={() => handleGrade(3)}
+                    >
+                      <span>Bom</span>
+                      <span className="text-[10px] font-medium opacity-70">
+                        {getFriendlyInterval(currentCard, 3, preset)}
+                      </span>
+                      {recommendedGrade === 3 && (
+                        <span className="text-[7.5px] font-black uppercase tracking-wider bg-sky-500/15 px-1 py-0.5 rounded mt-0.5 animate-pulse">
+                          ⭐ Recom.
+                        </span>
+                      )}
+                    </Button>
+                    <Button 
+                      className={`flex flex-col h-20 items-center justify-center rounded-xl font-bold transition-all duration-300 cursor-pointer ${
+                        recommendedGrade === 4
+                          ? 'bg-emerald-500/20 border-2 border-emerald-500 text-emerald-600 dark:text-emerald-400 scale-[1.04] shadow-[0_0_15px_rgba(16,185,129,0.5)] z-10 animate-pulse'
+                          : 'bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500 hover:text-zinc-50 text-emerald-600 dark:text-emerald-400 text-sm'
+                      }`}
+                      onClick={() => handleGrade(4)}
+                    >
+                      <span>Fácil</span>
+                      <span className="text-[10px] font-medium opacity-70">
+                        {getFriendlyInterval(currentCard, 4, preset)}
+                      </span>
+                      {recommendedGrade === 4 && (
+                        <span className="text-[7.5px] font-black uppercase tracking-wider bg-emerald-500/15 px-1 py-0.5 rounded mt-0.5 animate-pulse">
+                          ⭐ Recom.
+                        </span>
+                      )}
+                    </Button>
+                  </div>
+                );
+              })()
+            ) : (
+              (() => {
+                const recommendedGrade = getRecommendedGrade() ?? 3;
+                return (
+                  <div className="flex flex-col w-full items-center gap-1.5 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    <Button
+                      className={`w-full py-6 rounded-xl font-bold gap-2 cursor-pointer shadow-lg text-base transition-all duration-300 ${
+                        recommendedGrade === 1
+                          ? 'bg-red-600 hover:bg-red-600/90 text-white shadow-red-600/20'
+                          : recommendedGrade === 2
+                          ? 'bg-amber-600 hover:bg-amber-600/90 text-white shadow-amber-600/20'
+                          : 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                      }`}
+                      onClick={() => handleGrade(recommendedGrade)}
+                    >
+                      <span>Continuar</span>
+                      <span className="text-xs opacity-80 font-medium">
+                        (Nota: {recommendedGrade === 1 ? 'Errei' : recommendedGrade === 2 ? 'Difícil' : 'Bom'} — {getFriendlyInterval(currentCard, recommendedGrade, preset)})
+                      </span>
+                    </Button>
+                    <span className="text-[9.5px] text-muted-foreground/60 flex items-center gap-1 font-medium select-none">
+                      <Lock size={11} className="text-primary/70 shrink-0" /> Pontuação travada na primeira resposta
+                    </span>
+                  </div>
+                );
+              })()
+            )}
             {/* Shortcut hints */}
-            <div className="flex items-center justify-center gap-3 mt-2">
-              <span className="text-[9px] text-muted-foreground/50 flex items-center gap-1">
-                <kbd className="bg-muted border border-border px-1 py-0.5 rounded text-[8px] font-bold">1</kbd> Errei
-              </span>
-              <span className="text-[9px] text-muted-foreground/50 flex items-center gap-1">
-                <kbd className="bg-muted border border-border px-1 py-0.5 rounded text-[8px] font-bold">2</kbd> Difícil
-              </span>
-              <span className="text-[9px] text-muted-foreground/50 flex items-center gap-1">
-                <kbd className="bg-muted border border-border px-1 py-0.5 rounded text-[8px] font-bold">3</kbd> Bom
-              </span>
-              <span className="text-[9px] text-muted-foreground/50 flex items-center gap-1">
-                <kbd className="bg-muted border border-border px-1 py-0.5 rounded text-[8px] font-bold">4</kbd> Fácil
-              </span>
-            </div>
+            {studyMode === 'classic' ? (
+              <div className="flex items-center justify-center gap-3 mt-2">
+                <span className="text-[9px] text-muted-foreground/50 flex items-center gap-1">
+                  <kbd className="bg-muted border border-border px-1 py-0.5 rounded text-[8px] font-bold">1</kbd> Errei
+                </span>
+                <span className="text-[9px] text-muted-foreground/50 flex items-center gap-1">
+                  <kbd className="bg-muted border border-border px-1 py-0.5 rounded text-[8px] font-bold">2</kbd> Difícil
+                </span>
+                <span className="text-[9px] text-muted-foreground/50 flex items-center gap-1">
+                  <kbd className="bg-muted border border-border px-1 py-0.5 rounded text-[8px] font-bold">3</kbd> Bom
+                </span>
+                <span className="text-[9px] text-muted-foreground/50 flex items-center gap-1">
+                  <kbd className="bg-muted border border-border px-1 py-0.5 rounded text-[8px] font-bold">4</kbd> Fácil
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center gap-3 mt-2">
+                <span className="text-[9px] text-muted-foreground/50 flex items-center gap-1">
+                  <kbd className="bg-muted border border-border px-1.5 py-0.5 rounded text-[8px] font-bold">Enter</kbd> ou <kbd className="bg-muted border border-border px-1.5 py-0.5 rounded text-[8px] font-bold">Espaço</kbd> para continuar
+                </span>
+              </div>
+            )}
           </>
         )}
         {!isFlipped && (
@@ -1215,15 +1401,24 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
 
       <KeyboardShortcutCheatsheet
         positionClassName="fixed bottom-6 right-6"
-        shortcuts={[
-          { keys: ['Espaço', 'Enter'], description: 'Revelar resposta' },
-          { keys: ['1'], description: 'Avaliar como "Errei"' },
-          { keys: ['2'], description: 'Avaliar como "Difícil"' },
-          { keys: ['3'], description: 'Avaliar como "Bom"' },
-          { keys: ['4'], description: 'Avaliar como "Fácil"' },
-          { keys: ['R'], description: 'Repetir Áudio / TTS' },
-          { keys: ['Esc'], description: 'Sair dos estudos' },
-        ]}
+        shortcuts={
+          studyMode === 'classic'
+            ? [
+                { keys: ['Espaço', 'Enter'], description: 'Revelar resposta' },
+                { keys: ['1'], description: 'Avaliar como "Errei"' },
+                { keys: ['2'], description: 'Avaliar como "Difícil"' },
+                { keys: ['3'], description: 'Avaliar como "Bom"' },
+                { keys: ['4'], description: 'Avaliar como "Fácil"' },
+                { keys: ['R'], description: 'Repetir Áudio / TTS' },
+                { keys: ['Esc'], description: 'Sair dos estudos' },
+              ]
+            : [
+                { keys: ['Enter'], description: !hasCheckedAnswer ? 'Verificar resposta' : 'Continuar estudos' },
+                { keys: ['Espaço'], description: !hasCheckedAnswer ? 'Revelar resposta' : 'Continuar estudos' },
+                { keys: ['R'], description: 'Repetir Áudio / TTS' },
+                { keys: ['Esc'], description: 'Sair dos estudos' },
+              ]
+        }
       />
     </div>
   );
