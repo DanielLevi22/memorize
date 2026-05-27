@@ -2151,6 +2151,21 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                                 Ouvir Frase
                               </Button>
 
+                              {selectedWordIndices.size > 0 && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  className="h-8 px-2.5 rounded-lg border border-dashed border-border bg-card hover:bg-muted text-muted-foreground hover:text-foreground text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
+                                  onClick={() => {
+                                    setSelectedWordIndices(new Set());
+                                    setSpeechTargetSnippet(null);
+                                  }}
+                                  title="Limpar seleção e praticar frase inteira"
+                                >
+                                  Limpar Seleção
+                                </Button>
+                              )}
+
                               {line.mastered && (
                                 <span className="text-[10px] bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
                                   ✓ Pronunciado
