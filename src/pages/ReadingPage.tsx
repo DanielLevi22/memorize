@@ -546,6 +546,22 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
     window.speechSynthesis?.speak(utt);
   };
 
+  const speakSentenceOrSelection = (lineText: string) => {
+    const rawOriginal = stripHtmlTags(lineText);
+    const sentenceWords: string[] = [];
+    const regex = /\S+/g;
+    let match;
+    while ((match = regex.exec(rawOriginal)) !== null) {
+      sentenceWords.push(match[0]);
+    }
+    const hasSnippetSelection = selectedWordIndices.size > 0;
+    const selectedSnippetWords = Array.from(selectedWordIndices)
+      .sort((a, b) => a - b)
+      .map(idx => sentenceWords[idx]);
+    const speakTargetText = hasSnippetSelection ? selectedSnippetWords.join(' ') : lineText;
+    speakText(speakTargetText);
+  };
+
   const playSuccessChime = () => {
     try {
       const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
@@ -2177,7 +2193,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                                 type="button"
                                 variant="outline"
                                 className="h-8 px-2.5 rounded-lg border border-border bg-card text-muted-foreground hover:text-foreground text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
-                                onClick={() => speakText(line.original)}
+                                onClick={() => speakSentenceOrSelection(line.original)}
                                 title="Ouvir pronúncia correta"
                               >
                                 <Volume2 size={12} />
@@ -2429,7 +2445,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                       <button
                         onClick={() => {
                           if (activeLineIdx >= 0 && selectedText) {
-                            speakText(selectedText.lines[activeLineIdx].original);
+                            speakSentenceOrSelection(selectedText.lines[activeLineIdx].original);
                           }
                         }}
                         className={`p-2 rounded-xl transition-colors cursor-pointer border ${
