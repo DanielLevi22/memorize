@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import {
   ArrowLeft, BookOpen, Plus, Trash2, Play, Pause, Square,
   Copy, Check, ChevronRight, FileText, Volume2, HelpCircle,
-  Maximize2, EyeOff, Folder, FolderOpen, FolderPlus, Edit, Upload, Sparkles, Loader2, ExternalLink,
+  Maximize2, Eye, EyeOff, Folder, FolderOpen, FolderPlus, Edit, Upload, Sparkles, Loader2, ExternalLink,
   Mic, Keyboard
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
@@ -18,7 +18,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '../components/ui/dialog';
-import { extractTextFromPdf, processTextWithAI, segmentTextManually } from '../utils/readingProcessor';
+import { extractTextFromPdf, processTextWithAI, segmentTextManually, segmentAndTranslateWithFreeAPI, translateWithMyMemory } from '../utils/readingProcessor';
 import { motion } from 'framer-motion';
 import { getWordLevenshteinDistance, diffWords, type DiffWord, getLevenshteinDistance, diffStrings, type DiffChar } from '../utils/srs';
 
@@ -95,7 +95,10 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   const [isAppendBlockModalOpen, setIsAppendBlockModalOpen] = useState(false);
   const [appendBlockOriginalText, setAppendBlockOriginalText] = useState('');
   const [appendBlockTranslatedText, setAppendBlockTranslatedText] = useState('');
-  const [appendBlockUseAI, setAppendBlockUseAI] = useState(false);
+  const [appendBlockMode, setAppendBlockMode] = useState<'manual' | 'gemini' | 'mymemory'>(() => {
+    const key = localStorage.getItem('memorize_gemini_api_key') || '';
+    return key.trim() ? 'gemini' : 'mymemory';
+  });
   const [appendBlockIsProcessing, setAppendBlockIsProcessing] = useState(false);
   const [appendBlockProcessingStep, setAppendBlockProcessingStep] = useState('');
   const [appendBlockErrorMsg, setAppendBlockErrorMsg] = useState('');
@@ -133,6 +136,24 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
   const [showTranslation, setShowTranslation] = useState(false);
+
+  // Click-to-reveal translation states
+  const [hideActiveTranslation, setHideActiveTranslation] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('memorize_hide_active_translation') === 'true';
+    }
+    return false;
+  });
+  const [revealedLines, setRevealedLines] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    localStorage.setItem('memorize_hide_active_translation', String(hideActiveTranslation));
+  }, [hideActiveTranslation]);
+
+  // Reset revealed lines when active sentence changes
+  useEffect(() => {
+    setRevealedLines(new Set());
+  }, [activeLineIdx]);
 
   // Practice Mode states
   const [readingPracticeMode, setReadingPracticeMode] = useState<'none' | 'speaking' | 'writing'>('none');
@@ -1168,10 +1189,22 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
     try {
       let newLines;
       
-      if (appendBlockUseAI && geminiApiKey.trim()) {
+      if (appendBlockMode === 'gemini') {
+        if (!geminiApiKey.trim()) {
+          throw new Error('Chave de API do Gemini não configurada.');
+        }
         setAppendBlockProcessingStep('🤖 Gemini está segmentando e traduzindo o texto...');
         const aiResult = await processTextWithAI(appendBlockOriginalText, geminiApiKey);
         newLines = aiResult.lines;
+      } else if (appendBlockMode === 'mymemory') {
+        setAppendBlockProcessingStep('🌐 Traduzindo e segmentando gratuitamente...');
+        const freeResult = await segmentAndTranslateWithFreeAPI(
+          appendBlockOriginalText,
+          (curr, tot) => {
+            setAppendBlockProcessingStep(`🌐 Traduzindo frase ${curr} de ${tot} com MyMemory API...`);
+          }
+        );
+        newLines = freeResult.lines;
       } else {
         setAppendBlockProcessingStep('📝 Segmentando texto por linhas...');
         newLines = segmentTextManually(appendBlockOriginalText, appendBlockTranslatedText);
@@ -2083,12 +2116,33 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                       Modo Escrita
                     </button>
                   </div>
-                  <button
-                    onClick={() => setShowTranslation(!showTranslation)}
-                    className="text-[10px] font-bold text-primary hover:underline cursor-pointer flex items-center gap-1"
-                  >
-                    {showTranslation ? 'Ocultar Tradução Geral' : 'Mostrar Tradução Geral'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setShowTranslation(!showTranslation)}
+                      className={`text-[10px] font-black px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer flex items-center gap-1 shadow-sm ${
+                        showTranslation
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted'
+                      }`}
+                      title={showTranslation ? 'Ocultar a tradução de todas as frases do texto' : 'Mostrar a tradução de todas as frases do texto'}
+                    >
+                      <Eye size={11} />
+                      <span>{showTranslation ? 'Tradução Geral: Visível' : 'Tradução Geral: Oculta'}</span>
+                    </button>
+
+                    <button
+                      onClick={() => setHideActiveTranslation(!hideActiveTranslation)}
+                      className={`text-[10px] font-black px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer flex items-center gap-1 shadow-sm ${
+                        hideActiveTranslation
+                          ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 hover:bg-amber-500/20'
+                          : 'border-border bg-card text-zinc-500 hover:text-foreground hover:bg-muted'
+                      }`}
+                      title="Se ativado, a tradução da frase selecionada ficará oculta por padrão até que você clique nela"
+                    >
+                      {hideActiveTranslation ? <EyeOff size={11} /> : <Eye size={11} />}
+                      <span>{hideActiveTranslation ? 'Ocultar Frase Ativa: Sim' : 'Ocultar Frase Ativa: Não'}</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -2166,13 +2220,94 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                         }`}>
                           {renderSentenceWithWordHighlights(displayOriginalText, start, isActiveLine)}
                         </p>
-                        {(isActiveLine || showTranslation) && (
-                          <p className={`text-muted-foreground mt-1.5 font-medium leading-relaxed animate-fadeIn pl-2 border-l border-primary/30 ${
-                            isZenMode ? 'text-sm md:text-base pl-3' : 'text-xs'
-                          }`}>
-                            {line.translated}
-                          </p>
-                        )}
+                        {(() => {
+                          const isTranslationVisible = showTranslation || revealedLines.has(index) || (isActiveLine && !hideActiveTranslation);
+                          
+                          if (isTranslationVisible) {
+                            if (line.translated) {
+                              return (
+                                <p 
+                                  onClick={(e) => {
+                                    if (revealedLines.has(index)) {
+                                      e.stopPropagation();
+                                      const newSet = new Set(revealedLines);
+                                      newSet.delete(index);
+                                      setRevealedLines(newSet);
+                                    }
+                                  }}
+                                  className={`text-muted-foreground mt-1.5 font-medium leading-relaxed animate-fadeIn pl-2 border-l border-primary/30 hover:opacity-80 transition-opacity ${
+                                    isZenMode ? 'text-sm md:text-base pl-3' : 'text-xs'
+                                  } ${revealedLines.has(index) ? 'cursor-pointer' : ''}`}
+                                  title={revealedLines.has(index) ? "Clique para ocultar tradução" : undefined}
+                                >
+                                  {line.translated}
+                                </p>
+                              );
+                            } else {
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    try {
+                                      const translatedText = await translateWithMyMemory(line.original);
+                                      if (translatedText && selectedText?.id) {
+                                        const updatedLines = [...selectedText.lines];
+                                        updatedLines[index].translated = translatedText;
+                                        await db.readings.update(selectedText.id, { lines: updatedLines, updatedAt: Date.now() });
+                                      }
+                                    } catch (err) {
+                                      console.error("Failed on-the-fly translation:", err);
+                                    }
+                                  }}
+                                  className="text-[10px] text-primary font-bold hover:underline mt-1.5 flex items-center gap-1 cursor-pointer"
+                                >
+                                  <span>🌐 Traduzir frase gratuitamente</span>
+                                </button>
+                              );
+                            }
+                          } else {
+                            if (line.translated) {
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const newSet = new Set(revealedLines);
+                                    newSet.add(index);
+                                    setRevealedLines(newSet);
+                                  }}
+                                  className="text-[10px] text-amber-500/80 hover:text-amber-500 font-bold hover:underline mt-1.5 flex items-center gap-1.5 cursor-pointer animate-fadeIn bg-amber-500/5 px-2 py-0.5 rounded-lg border border-amber-500/10 w-fit"
+                                >
+                                  <Eye size={10} />
+                                  <span>Mostrar tradução</span>
+                                </button>
+                              );
+                            } else {
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    try {
+                                      const translatedText = await translateWithMyMemory(line.original);
+                                      if (translatedText && selectedText?.id) {
+                                        const updatedLines = [...selectedText.lines];
+                                        updatedLines[index].translated = translatedText;
+                                        await db.readings.update(selectedText.id, { lines: updatedLines, updatedAt: Date.now() });
+                                      }
+                                    } catch (err) {
+                                      console.error("Failed on-the-fly translation:", err);
+                                    }
+                                  }}
+                                  className="text-[10px] text-primary font-bold hover:underline mt-1.5 flex items-center gap-1 cursor-pointer"
+                                >
+                                  <span>🌐 Traduzir frase gratuitamente</span>
+                                </button>
+                              );
+                            }
+                          }
+                        })()}
 
                         {isActiveLine && isPronunciationMode && (
                           <div className="mt-3 pt-2.5 border-t border-border/40 flex flex-col gap-2.5 w-full animate-fadeIn" onClick={(e) => e.stopPropagation()}>
@@ -2874,18 +3009,18 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                   <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
                     Tradução (Seu idioma nativo)
                   </label>
-                  {appendBlockUseAI && (
-                    <span className="text-[10px] font-bold text-violet-500 bg-violet-500/10 px-2 py-0.5 rounded-full border border-violet-500/20">
-                      Será preenchida pela IA ✨
+                  {appendBlockMode !== 'manual' && (
+                    <span className="text-[10px] font-bold text-violet-500 bg-violet-500/10 px-2 py-0.5 rounded-full border border-violet-500/20 animate-fadeIn">
+                      {appendBlockMode === 'gemini' ? 'Preenchida pela IA ✨' : 'Traduzido gratuitamente 🌐'}
                     </span>
                   )}
                 </div>
                 <textarea
-                  placeholder="Cole aqui a tradução (ou deixe vazio e use a IA)..."
+                  placeholder="Cole aqui a tradução (ou deixe vazio se usar IA/MyMemory)..."
                   className="w-full bg-muted border border-border text-foreground p-3.5 rounded-xl text-xs outline-none focus:border-primary/50 min-h-[120px] resize-y font-mono leading-relaxed transition-colors disabled:opacity-50"
                   value={appendBlockTranslatedText}
                   onChange={(e) => setAppendBlockTranslatedText(e.target.value)}
-                  disabled={appendBlockIsProcessing || appendBlockUseAI}
+                  disabled={appendBlockIsProcessing || appendBlockMode !== 'manual'}
                 />
               </div>
 
@@ -2937,29 +3072,94 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                 />
               </div>
 
-              {/* AI checkbox */}
-              <div className="flex items-center gap-3 p-3 bg-muted/30 border border-border/60 rounded-xl">
-                <input
-                  type="checkbox"
-                  className="w-4 h-4 accent-violet-500 cursor-pointer"
-                  checked={appendBlockUseAI}
-                  onChange={(e) => setAppendBlockUseAI(e.target.checked)}
-                  disabled={appendBlockIsProcessing || !geminiApiKey.trim()}
-                />
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                    <Sparkles size={12} className="text-violet-500" />
-                    Usar IA para segmentar, traduzir e destacar vocabulário
-                  </span>
-                  {!geminiApiKey.trim() ? (
-                    <span className="text-[9px] text-destructive font-semibold">
-                      Configure sua chave Gemini API em Configurações primeiro
-                    </span>
-                  ) : (
-                    <span className="text-[9px] text-muted-foreground">
-                      A IA vai separar as frases, traduzir cada uma e identificar palavras-chave
-                    </span>
-                  )}
+              {/* Método de Processamento / Tradução */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                  Método de Tradução e Segmentação
+                </label>
+                <div className="grid grid-cols-1 gap-2.5">
+                  {/* Gemini Option */}
+                  <label className={`flex items-start gap-3 p-3 border rounded-xl cursor-pointer transition-all duration-200 ${
+                    appendBlockMode === 'gemini'
+                      ? 'border-violet-500 bg-violet-500/5 dark:bg-violet-500/10'
+                      : 'border-border/60 hover:bg-muted/30'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="appendBlockMode"
+                      value="gemini"
+                      checked={appendBlockMode === 'gemini'}
+                      onChange={() => setAppendBlockMode('gemini')}
+                      disabled={appendBlockIsProcessing || !geminiApiKey.trim()}
+                      className="mt-1.5 w-4 h-4 text-violet-600 border-zinc-300 dark:border-zinc-700 bg-background focus:ring-violet-500 cursor-pointer"
+                    />
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                        <Sparkles size={12} className="text-violet-500" />
+                        Segmentação e Tradução por IA (Gemini)
+                      </span>
+                      {!geminiApiKey.trim() ? (
+                        <span className="text-[9px] text-destructive font-semibold">
+                          Requer chave de API nas Configurações (Permite destacar palavras-chave)
+                        </span>
+                      ) : (
+                        <span className="text-[9px] text-muted-foreground">
+                          A IA segmenta por frases de forma contextualizada, traduz e destaca palavras difíceis
+                        </span>
+                      )}
+                    </div>
+                  </label>
+
+                  {/* MyMemory Option */}
+                  <label className={`flex items-start gap-3 p-3 border rounded-xl cursor-pointer transition-all duration-200 ${
+                    appendBlockMode === 'mymemory'
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border/60 hover:bg-muted/30'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="appendBlockMode"
+                      value="mymemory"
+                      checked={appendBlockMode === 'mymemory'}
+                      onChange={() => setAppendBlockMode('mymemory')}
+                      disabled={appendBlockIsProcessing}
+                      className="mt-1.5 w-4 h-4 text-primary border-zinc-300 dark:border-zinc-700 bg-background focus:ring-primary cursor-pointer"
+                    />
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                        <Upload size={12} className="text-primary" />
+                        Tradução Automática Gratuita (MyMemory API)
+                      </span>
+                      <span className="text-[9px] text-muted-foreground">
+                        Gratuito, sem necessidade de chave de API. Divide o texto em frases e traduz de forma independente
+                      </span>
+                    </div>
+                  </label>
+
+                  {/* Manual Option */}
+                  <label className={`flex items-start gap-3 p-3 border rounded-xl cursor-pointer transition-all duration-200 ${
+                    appendBlockMode === 'manual'
+                      ? 'border-border bg-muted/40'
+                      : 'border-border/60 hover:bg-muted/30'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="appendBlockMode"
+                      value="manual"
+                      checked={appendBlockMode === 'manual'}
+                      onChange={() => setAppendBlockMode('manual')}
+                      disabled={appendBlockIsProcessing}
+                      className="mt-1.5 w-4 h-4 text-zinc-500 border-zinc-300 dark:border-zinc-700 bg-background focus:ring-zinc-400 cursor-pointer"
+                    />
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-xs font-bold text-foreground">
+                        Manual (Segmentar por linha original ↔ tradução)
+                      </span>
+                      <span className="text-[9px] text-muted-foreground">
+                        Crie cartões alinhando as linhas digitadas no campo original com as linhas do campo de tradução
+                      </span>
+                    </div>
+                  </label>
                 </div>
               </div>
 

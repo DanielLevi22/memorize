@@ -197,3 +197,24 @@ export interface ReadingSession {
   wordsRead: number;            // Quantidade de palavras lidas
   sentencesMastered: number;     // Saldo de frases dominadas (+1 ou -1)
 }
+
+/** Um parceiro de conversação por voz */
+export interface ChatPartner {
+  id: string;
+  name: string;
+  role: string;
+  description: string;
+  systemPrompt: string;
+  avatar: string;               // Emoji
+  initialMessage: string;
+}
+
+/** Uma mensagem individual do chat de conversação */
+export interface ChatMessage {
+  id: string;
+  partnerId: string;
+  sender: 'user' | 'ai';
+  text: string;
+  timestamp: number;
+  grammarCorrection?: string | null;
+}

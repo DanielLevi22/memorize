@@ -44,14 +44,15 @@ Você é um especialista em ensino de idiomas. Receba o texto abaixo e retorne:
 
 1. Um título curto e descritivo para o texto (campo "title")
 2. Para cada frase/sentença do texto:
-   - "original": a frase no idioma original (exatamente como está no texto)
+   - "original": a frase no idioma original (exatamente como está escrita no texto fornecido, sem qualquer tradução)
    - "translated": a tradução natural para português do Brasil
    - "highlights": 2 a 4 palavras ou expressões-chave da frase original que são importantes para o aprendizado de vocabulário
 
 Regras:
 - Separe o texto em frases naturais (por pontuação: . ! ? ou quebras de linha significativas)
 - Mantenha a ordem original das frases
-- As highlights devem ser palavras que aparecem EXATAMENTE na frase original
+- ATENÇÃO CRÍTICA: O campo "original" DEVE ser mantido no idioma original (ex: inglês, espanhol, etc.) conforme enviado no texto abaixo. NUNCA coloque a tradução em português no campo "original". Apenas o campo "translated" deve ser traduzido para o português.
+- As highlights devem ser palavras que aparecem EXATAMENTE na frase original (no idioma original)
 - A tradução deve ser natural e coloquial, não literal
 - Não pule nenhuma frase do texto
 
@@ -77,12 +78,12 @@ ${originalText}
                 items: {
                   type: 'OBJECT',
                   properties: {
-                    original: { type: 'STRING', description: 'Frase original' },
-                    translated: { type: 'STRING', description: 'Tradução para português' },
+                    original: { type: 'STRING', description: 'A frase no idioma original de estudo (ex: em inglês, sem tradução).' },
+                    translated: { type: 'STRING', description: 'A tradução da frase original para português do Brasil.' },
                     highlights: {
                       type: 'ARRAY',
                       items: { type: 'STRING' },
-                      description: '2-4 palavras-chave do original',
+                      description: '2-4 palavras-chave do original (no idioma original)',
                     },
                   },
                   required: ['original', 'translated', 'highlights'],
@@ -190,3 +191,82 @@ export function segmentTextManually(
     mastered: false,
   }));
 }
+
+/**
+ * Traduz texto usando a API gratuita MyMemory (limitada a 1000 palavras/dia por IP).
+ */
+export async function translateWithMyMemory(
+  text: string,
+  sourceLang = 'en',
+  targetLang = 'pt'
+): Promise<string> {
+  if (!text.trim()) return '';
+  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.trim())}&langpair=${sourceLang}|${targetLang}`;
+  
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Erro na API MyMemory: código ${response.status}`);
+  }
+  const data = await response.json();
+  if (data.responseStatus !== 200) {
+    throw new Error(data.responseDetails || 'Erro de resposta da API MyMemory');
+  }
+  return data.responseData?.translatedText || '';
+}
+
+/**
+ * Segmenta um texto original em sentenças (por regex de pontuação) e as traduz
+ * usando a API pública gratuita do MyMemory sequencialmente.
+ */
+export async function segmentAndTranslateWithFreeAPI(
+  originalText: string,
+  onProgress?: (current: number, total: number) => void
+): Promise<{ title: string; lines: ReadingLine[] }> {
+  // Extrai a primeira linha/sentença para fazer o título padrão
+  const linesOfText = originalText
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  
+  const firstLine = linesOfText[0] || 'Texto Sem Título';
+  const title = firstLine.length > 40 ? firstLine.substring(0, 40) + '...' : firstLine;
+
+  // Segmenta o texto original em frases por pontuação (. ! ?) seguida de espaço/nova linha
+  const rawSentences = originalText
+    .replace(/([.!?])\s+(?=[A-Z0-9\u00C0-\u00FF])/g, '$1|')
+    .split('|')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
+  const lines: ReadingLine[] = [];
+  const total = rawSentences.length;
+
+  for (let i = 0; i < total; i++) {
+    const sentence = rawSentences[i];
+    let translated = '';
+    
+    if (onProgress) {
+      onProgress(i + 1, total);
+    }
+
+    try {
+      translated = await translateWithMyMemory(sentence);
+      // Pausa pequena de 200ms para respeitar a API e evitar rate limits
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    } catch (e) {
+      console.error(`Falha ao traduzir a frase "${sentence}":`, e);
+      translated = ''; // salva em branco se falhar para não travar toda a importação
+    }
+
+    lines.push({
+      id: crypto.randomUUID(),
+      original: sentence,
+      translated,
+      highlights: [],
+      mastered: false,
+    });
+  }
+
+  return { title, lines };
+}
+

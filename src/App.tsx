@@ -4,7 +4,7 @@ import {
   Flame, Plus, Sparkles, Menu, User, 
   Search, Settings, Sun, Moon,
   ChevronLeft, LayoutDashboard, TrendingUp, ClipboardList,
-  BookOpen, Info
+  BookOpen, Info, MessageSquare
 } from 'lucide-react';
 
 // Banco de Dados e Types
@@ -25,6 +25,7 @@ import { ProfilePage } from './pages/ProfilePage';
 import { SettingsPage } from './pages/SettingsPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { ReadingPage } from './pages/ReadingPage';
+import { ConversationPage } from './pages/ConversationPage';
 
 // Componentes do Projeto
 import { DeckModal } from './components/DeckModal';
@@ -76,12 +77,12 @@ function App() {
   // --- ESTADO DA SIDEBAR E NAVEGAÇÃO INTERNA ---
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDesktopSidebarOpen, setIsDesktopSidebarOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation'>('dashboard');
   const [guideInitialTab, setGuideInitialTab] = useState<'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math'>('overview');
   const [searchTerm, setSearchTerm] = useState('');
 
   const handleSetActiveTab = (
-    tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide',
+    tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation',
     subTab?: 'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math'
   ) => {
     setActiveTab(tab);
@@ -774,7 +775,7 @@ function App() {
   };
 
   // --- FLUXO NAVEGAÇÃO SIDEBAR ---
-  const handleNavigateFromSidebar = (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide') => {
+  const handleNavigateFromSidebar = (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation') => {
     setActiveTab(tab);
     setGuideInitialTab('overview');
     setCurrentView('dashboard');
@@ -976,6 +977,24 @@ function App() {
             <Button 
               variant="ghost"
               className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+                activeTab === 'conversation' 
+                  ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+              }`}
+              onClick={() => {
+                setActiveTab('conversation');
+                setCurrentView('dashboard');
+              }}
+            >
+              <div className="flex items-center gap-3">
+                <MessageSquare size={16} />
+                <span>Conversação</span>
+              </div>
+            </Button>
+
+            <Button 
+              variant="ghost"
+              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
                 activeTab === 'stats' 
                   ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
@@ -1153,6 +1172,21 @@ function App() {
                     <div className="flex items-center gap-3">
                       <BookOpen size={16} />
                       <span>Leitura</span>
+                    </div>
+                  </Button>
+
+                  <Button 
+                    variant="ghost"
+                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+                      activeTab === 'conversation' 
+                        ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                    }`}
+                    onClick={() => handleNavigateFromSidebar('conversation')}
+                  >
+                    <div className="flex items-center gap-3">
+                      <MessageSquare size={16} />
+                      <span>Conversação</span>
                     </div>
                   </Button>
 
@@ -1376,6 +1410,15 @@ function App() {
                 ttsVoice={ttsVoice}
                 isZenMode={isReadingZenMode}
                 setIsZenMode={setIsReadingZenMode}
+              />
+            )}
+
+            {/* TAB: CONVERSAÇÃO COM IA */}
+            {activeTab === 'conversation' && (
+              <ConversationPage
+                geminiApiKey={geminiApiKey}
+                ttsRate={ttsRate}
+                ttsVoice={ttsVoice}
               />
             )}
 

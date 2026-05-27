@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { Deck, Card, Note, Revision, DeckPreset, ReadingText, ReadingSession, ReadingCollection } from '../types';
+import type { Deck, Card, Note, Revision, DeckPreset, ReadingText, ReadingSession, ReadingCollection, ChatMessage } from '../types';
 
 class MemorizeDatabase extends Dexie {
   decks!: Table<Deck>;
@@ -10,6 +10,7 @@ class MemorizeDatabase extends Dexie {
   readings!: Table<ReadingText>;
   readingSessions!: Table<ReadingSession>;
   readingCollections!: Table<ReadingCollection>;
+  chatMessages!: Table<ChatMessage>;
 
   constructor() {
     super('MemorizeDatabase');
@@ -100,6 +101,18 @@ class MemorizeDatabase extends Dexie {
       for (const card of cardsToUpdate) {
         await tx.table('cards').put(card);
       }
+    });
+
+    this.version(7).stores({
+      decks: 'id, name, createdAt, updatedAt, presetId',
+      cards: 'id, deckId, dueDate, [deckId+dueDate], noteId, createdAt, updatedAt',
+      revisions: 'id, cardId, timestamp',
+      presets: 'id, name',
+      readings: 'id, title, createdAt, collectionId',
+      readingSessions: 'id, readingId, timestamp',
+      readingCollections: 'id, title, createdAt',
+      notes: 'id, deckId, createdAt',
+      chatMessages: 'id, partnerId, timestamp'
     });
   }
 }
