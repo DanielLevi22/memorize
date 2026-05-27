@@ -2123,7 +2123,8 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                       }
                     }
 
-                    const displayOriginalText = isActiveLine && readingPracticeMode === 'writing' && writingIsCorrect === null
+                    const displayOriginalText = readingPracticeMode === 'writing' &&
+                      (index > activeLineIdx || (isActiveLine && writingIsCorrect === null))
                       ? line.original.replace(/[a-zA-Z0-9]/g, '•')
                       : line.original;
 
