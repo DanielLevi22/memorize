@@ -22,8 +22,8 @@ export function calculateFSRSReview(card: Card, rating: number, preset?: DeckPre
   stability: number;
   lastReview: number;
 } {
-  // Mapeamento: 1 (Errei) -> 1 (Again), 2 (Difícil) -> 2 (Hard), 3 (Fácil) -> 4 (Easy)
-  const g = rating === 1 ? 1 : rating === 2 ? 2 : 4;
+  // Mapeamento: 1 (Errei) -> 1 (Again), 2 (Difícil) -> 2 (Hard), 3 (Bom) -> 3 (Good), 4 (Fácil) -> 4 (Easy)
+  const g = Math.max(1, Math.min(4, Math.round(rating)));
   
   let difficulty = card.difficulty;
   let stability = card.stability;
@@ -371,8 +371,22 @@ export function calculateNextReview(card: Card, rating: number, preset?: DeckPre
  */
 export function getFriendlyInterval(card: Card, rating: number, preset?: DeckPreset): string {
   const next = calculateNextReview(card, rating, preset);
-  const days = next.interval;
   
+  // Se for aprendizado intra-dia (intervalo = 0)
+  if (next.interval === 0) {
+    if (preset) {
+      const isRelearning = next.lapseInterval !== undefined;
+      const stepsStr = isRelearning
+        ? (preset.relearningSteps || '10m')
+        : (preset.learningSteps || '1m 10m');
+      const steps = stepsStr.split(/\s+/).filter(Boolean);
+      const stepIdx = next.learningStep !== undefined ? next.learningStep : 0;
+      return steps[Math.min(stepIdx, steps.length - 1)] || '1m';
+    }
+    return '1m';
+  }
+
+  const days = next.interval;
   if (days <= 1) return 'Amanhã';
   if (days < 30) return `${days}d`;
   

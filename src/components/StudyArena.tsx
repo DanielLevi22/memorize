@@ -704,9 +704,16 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
         </div>
       </div>
 
-      <div className="text-center -mt-2">
+      <div className="flex items-center justify-center gap-1.5 -mt-2">
         <span className="text-[10px] bg-card border border-border text-muted-foreground px-3 py-1 rounded-full font-bold uppercase tracking-wider">
           {deckName.replace(/[^a-zA-Z0-9\s]/g, '').trim()}
+        </span>
+        <span className={`text-[10px] border px-3 py-1 rounded-full font-bold uppercase tracking-wider flex items-center gap-1 shadow-sm ${
+          preset?.fsrsEnabled 
+            ? 'bg-purple-500/10 border-purple-500/30 text-purple-600 dark:text-purple-400 font-extrabold' 
+            : 'bg-blue-500/10 border-blue-500/30 text-blue-600 dark:text-blue-400 font-extrabold'
+        }`}>
+          ⚡ {preset?.fsrsEnabled ? 'Algoritmo FSRS v4' : 'Algoritmo SM-2 (Legado)'}
         </span>
       </div>
 

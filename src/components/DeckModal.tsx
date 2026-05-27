@@ -47,6 +47,7 @@ export const DeckModal: React.FC<DeckModalProps> = ({
   const [presetMaxReviewsPerDay, setPresetMaxReviewsPerDay] = useState(200);
   const [newCardsIgnoreReviewLimit, setNewCardsIgnoreReviewLimit] = useState(false);
   const [limitsStartFromParent, setLimitsStartFromParent] = useState(false);
+  const [fsrsEnabled, setFsrsEnabled] = useState(false);
 
   useEffect(() => {
     if (deckToEdit) {
@@ -82,6 +83,7 @@ export const DeckModal: React.FC<DeckModalProps> = ({
       setPresetMaxReviewsPerDay(activePreset.maxReviewsPerDay);
       setNewCardsIgnoreReviewLimit(activePreset.newCardsIgnoreReviewLimit);
       setLimitsStartFromParent(activePreset.limitsStartFromParent);
+      setFsrsEnabled(activePreset.fsrsEnabled || false);
     }
   }, [activePreset]);
 
@@ -108,6 +110,7 @@ export const DeckModal: React.FC<DeckModalProps> = ({
       maxReviewsPerDay: presetMaxReviewsPerDay,
       newCardsIgnoreReviewLimit,
       limitsStartFromParent,
+      fsrsEnabled,
     };
 
     onSave(name.trim(), description.trim(), presetId, overrides, presetUpdates);
@@ -359,6 +362,24 @@ export const DeckModal: React.FC<DeckModalProps> = ({
                       className="sr-only peer"
                       checked={limitsStartFromParent}
                       onChange={(e) => setLimitsStartFromParent(e.target.checked)}
+                    />
+                    <div className="w-9 h-5 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-between py-1 border-t border-border/40 pt-2.5">
+                  <div className="flex items-center gap-1.5 text-xs text-foreground font-semibold">
+                    <span>🧠 Habilitar Algoritmo FSRS</span>
+                    <span title="Opção global do preset">
+                      <Globe className="w-3.5 h-3.5 text-muted-foreground" />
+                    </span>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={fsrsEnabled}
+                      onChange={(e) => setFsrsEnabled(e.target.checked)}
                     />
                     <div className="w-9 h-5 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
                   </label>

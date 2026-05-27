@@ -98,7 +98,7 @@ function App() {
   };
   
   // --- ESTADO DE CONFIGURAÇÕES PERSISTIDAS ---
-  const [selectedAlgo, setSelectedAlgo] = useState<'SM-2' | 'FSRS'>(() => {
+  const [selectedAlgo] = useState<'SM-2' | 'FSRS'>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('memorize_algo');
       if (saved === 'SM-2' || saved === 'FSRS') return saved;
@@ -1404,16 +1404,12 @@ function App() {
               <SettingsPage
                 theme={theme}
                 setTheme={setTheme}
-                selectedAlgo={selectedAlgo}
-                setSelectedAlgo={setSelectedAlgo}
                 notificationsEnabled={notificationsEnabled}
                 setNotificationsEnabled={setNotificationsEnabled}
                 cards={cards}
                 handleExportFullBackup={handleExportFullBackup}
                 setIsImportModalOpen={setIsImportModalOpen}
                 handleResetAllData={handleResetAllData}
-                setActiveTab={handleSetActiveTab}
-                setCurrentView={setCurrentView}
                 deferredPrompt={deferredPrompt}
                 handleInstallApp={handleInstallApp}
                 ttsRate={ttsRate}

@@ -308,14 +308,22 @@ describe('FSRS v4: Primeira Revisão (cartão novo)', () => {
     expect(result.stability).toBeGreaterThan(0);
   });
 
-  it('rating "Fácil" (3) → repetitions=1, estabilidade inicial W[3]', () => {
+  it('rating "Bom" (3) → repetitions=1, estabilidade inicial W[2] (2.4)', () => {
     const card = newCard();
     const result = calculateFSRSReview(card, 3);
 
     expect(result.repetitions).toBe(1);
     expect(result.lapses).toBe(0);
-    // Rating 3 mapeia para g=4, então stability = W[3] = 5.8
-    expect(result.stability).toBeGreaterThan(1);
+    expect(result.stability).toBeCloseTo(2.4);
+  });
+
+  it('rating "Fácil" (4) → repetitions=1, estabilidade inicial W[3] (5.8)', () => {
+    const card = newCard();
+    const result = calculateFSRSReview(card, 4);
+
+    expect(result.repetitions).toBe(1);
+    expect(result.lapses).toBe(0);
+    expect(result.stability).toBeCloseTo(5.8);
   });
 
   it('estabilidade cresce com rating mais alto na primeira revisão', () => {
@@ -323,7 +331,9 @@ describe('FSRS v4: Primeira Revisão (cartão novo)', () => {
     const r1 = calculateFSRSReview(card, 1);
     const r2 = calculateFSRSReview(card, 2);
     const r3 = calculateFSRSReview(card, 3);
+    const r4 = calculateFSRSReview(card, 4);
 
+    expect(r4.stability).toBeGreaterThan(r3.stability);
     expect(r3.stability).toBeGreaterThan(r2.stability);
     expect(r2.stability).toBeGreaterThan(r1.stability);
   });
@@ -460,10 +470,23 @@ describe('getFriendlyInterval', () => {
   it('intervalo = 1 dia → "Amanhã"', () => {
     // Cartão novo + rating Fácil com graduatingInterval=1 → interval=1
     const card = newCard();
-    const preset = defaultPreset({ graduatingInterval: 1 });
+    const preset = defaultPreset({ graduatingInterval: 1, fsrsEnabled: false });
     const result = getFriendlyInterval(card, 3, preset);
 
     expect(result).toBe('Amanhã');
+  });
+
+  it('intervalo = 0 (intra-dia) → formato em minutos "1m", "15m"', () => {
+    const card = newCard();
+    const preset = defaultPreset({ learningSteps: '1m 15m 30m', graduatingInterval: 3, fsrsEnabled: false });
+    
+    // Rating 1 (Errei) -> volta pro passo 0 -> '1m'
+    const rAgain = getFriendlyInterval(card, 1, preset);
+    expect(rAgain).toBe('1m');
+
+    // Rating 3 (Bom) -> avança para o passo 1 -> '15m'
+    const rGood = getFriendlyInterval(card, 3, preset);
+    expect(rGood).toBe('15m');
   });
 
   it('intervalo < 30 dias → formato "Xd"', () => {
@@ -520,7 +543,7 @@ describe('Propriedades Gerais', () => {
 
   it('todos os resultados têm dueDate válido', () => {
     const card = studiedCard();
-    for (const rating of [1, 2, 3]) {
+    for (const rating of [1, 2, 3, 4]) {
       const result = calculateNextReview(card, rating);
       expect(result.dueDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(new Date(result.dueDate).toString()).not.toBe('Invalid Date');
@@ -529,7 +552,7 @@ describe('Propriedades Gerais', () => {
 
   it('todos os resultados têm lapses >= 0', () => {
     const card = newCard();
-    for (const rating of [1, 2, 3]) {
+    for (const rating of [1, 2, 3, 4]) {
       const result = calculateNextReview(card, rating);
       expect(result.lapses).toBeGreaterThanOrEqual(0);
     }

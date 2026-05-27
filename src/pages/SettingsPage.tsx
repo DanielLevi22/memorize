@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { HelpCircle, Download, Upload, Trash2, Volume2, Eye, EyeOff, Sparkles, Key, ArrowLeft, Plus, Settings, Edit, Save } from 'lucide-react';
+import { Download, Upload, Trash2, Volume2, Eye, EyeOff, Sparkles, Key, ArrowLeft, Plus, Settings, Edit, Save } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import type { Card, DeckPreset } from '../types';
 import { downloadPresetFile, openPresetFile, deserializePreset } from '../utils/presets';
@@ -8,16 +8,12 @@ import { createTestDeck } from '../db/db';
 interface SettingsPageProps {
   theme: 'light' | 'dark';
   setTheme: (theme: 'light' | 'dark') => void;
-  selectedAlgo: 'SM-2' | 'FSRS';
-  setSelectedAlgo: (algo: 'SM-2' | 'FSRS') => void;
   notificationsEnabled: boolean;
   setNotificationsEnabled: (enabled: boolean) => void;
   cards: Card[] | undefined;
   handleExportFullBackup: () => void;
   setIsImportModalOpen: (open: boolean) => void;
   handleResetAllData: () => void;
-  setActiveTab: (tab: "cards" | "stats" | "guide" | "dashboard" | "profile" | "settings", subTab?: "overview" | "shortcuts" | "reading" | "srs_presets" | "srs_math") => void;
-  setCurrentView: (view: "dashboard" | "study" | "congrats") => void;
   deferredPrompt: any;
   handleInstallApp: () => void;
   // TTS
@@ -45,16 +41,12 @@ interface SettingsPageProps {
 export const SettingsPage: React.FC<SettingsPageProps> = ({
   theme,
   setTheme,
-  selectedAlgo,
-  setSelectedAlgo,
   notificationsEnabled,
   setNotificationsEnabled,
   cards,
   handleExportFullBackup,
   setIsImportModalOpen,
   handleResetAllData,
-  setActiveTab,
-  setCurrentView,
   deferredPrompt,
   handleInstallApp,
   ttsRate,
@@ -880,35 +872,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
           </select>
         </div>
 
-        <div className="flex items-center justify-between p-4 bg-card">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-sm font-semibold text-foreground">Algoritmo Spaced Repetition</span>
-            <span className="text-[11px] text-muted-foreground">Escolha a fórmula do agendamento</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <select 
-              className="bg-muted border border-border text-foreground px-3 py-1.5 rounded-lg text-xs font-semibold outline-none cursor-pointer focus:border-muted-foreground/45 h-9"
-              value={selectedAlgo}
-              onChange={(e) => setSelectedAlgo(e.target.value as 'SM-2' | 'FSRS')}
-            >
-              <option value="SM-2">SM-2 (Clássico)</option>
-              <option value="FSRS">FSRS v4 (Moderno)</option>
-            </select>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className="h-9 w-9 rounded-lg border-border bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer flex items-center justify-center"
-              title="Como funcionam os algoritmos?"
-              onClick={() => {
-                setActiveTab('guide', 'srs_math');
-                setCurrentView('dashboard');
-              }}
-            >
-              <HelpCircle size={16} />
-            </Button>
-          </div>
-        </div>
+
 
         {/* Meta Diária */}
         <div className="flex items-center justify-between p-4 bg-card">
