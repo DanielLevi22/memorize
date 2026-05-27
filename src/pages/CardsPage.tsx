@@ -78,7 +78,12 @@ export const CardsPage: React.FC<CardsPageProps> = ({
                       {deck ? deck.name.replace(/[^a-zA-Z0-9\s]/g, '').trim() : 'Sem Deck'}
                     </span>
                     <div className="flex items-center gap-1.5">
-                      <span className="text-muted-foreground font-medium text-[10px]">
+                      {card.suspended && (
+                        <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 dark:text-amber-400 border border-amber-500/20 font-bold text-[9px] uppercase tracking-wide shrink-0">
+                          🔕 Suspenso
+                        </span>
+                      )}
+                      <span className="text-zinc-500 dark:text-zinc-400 font-bold text-[10px]">
                         {card.interval === 0 ? 'Novo' : `Int: ${card.interval}d`} (F.Fac: {card.ease.toFixed(1)})
                       </span>
                       <Button

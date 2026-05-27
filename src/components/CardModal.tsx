@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { Card } from '../types';
+import { db } from '../db/db';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -10,7 +11,13 @@ import { getTagColors } from '../utils/tagColors';
 interface CardModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (front: string, back: string, context: string, audioBlob: Blob | null, tags: string[]) => void;
+  onSave: (
+    type: 'basic' | 'reversed' | 'optional_reversed' | 'typing' | 'cloze',
+    fields: string[],
+    context: string,
+    audioBlob: Blob | null,
+    tags: string[]
+  ) => void;
   cardToEdit?: Card | null;
   deckName: string;
 }
@@ -22,8 +29,8 @@ export const CardModal: React.FC<CardModalProps> = ({
   cardToEdit,
   deckName
 }) => {
-  const [front, setFront] = useState('');
-  const [back, setBack] = useState('');
+  const [noteType, setNoteType] = useState<'basic' | 'reversed' | 'optional_reversed' | 'typing' | 'cloze'>('basic');
+  const [fields, setFields] = useState<string[]>(['', '', '']);
   const [context, setContext] = useState('');
   const [tagList, setTagList] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
@@ -31,6 +38,23 @@ export const CardModal: React.FC<CardModalProps> = ({
   const [audioFileName, setAudioFileName] = useState('');
   const [isPlayingPreview, setIsPlayingPreview] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Helper setters for fields
+  const setField0 = (valOrFn: string | ((prev: string) => string)) => {
+    setFields(prev => {
+      const next = [...prev];
+      next[0] = typeof valOrFn === 'function' ? valOrFn(next[0]) : valOrFn;
+      return next;
+    });
+  };
+
+  const setField1 = (valOrFn: string | ((prev: string) => string)) => {
+    setFields(prev => {
+      const next = [...prev];
+      next[1] = typeof valOrFn === 'function' ? valOrFn(next[1]) : valOrFn;
+      return next;
+    });
+  };
 
   // Speech to Text States
   const [isListeningFront, setIsListeningFront] = useState(false);
@@ -49,23 +73,39 @@ export const CardModal: React.FC<CardModalProps> = ({
   const [isGeneratingTts, setIsGeneratingTts] = useState(false);
 
   useEffect(() => {
-    if (cardToEdit) {
-      setFront(cardToEdit.front);
-      setBack(cardToEdit.back);
-      setContext(cardToEdit.context);
-      setAudioBlob(cardToEdit.audio || null);
-      setAudioFileName(cardToEdit.audio ? 'Áudio gravado' : '');
-      setTagList(cardToEdit.tags || []);
+    const loadNoteData = async () => {
+      if (cardToEdit && isOpen) {
+        const note = await db.notes.get(cardToEdit.noteId);
+        if (note) {
+          setNoteType(note.type);
+          const f = [...note.fields];
+          while (f.length < 3) f.push('');
+          setFields(f);
+          setContext(note.context || '');
+          setAudioBlob(note.audio || null);
+          setAudioFileName(note.audio ? 'Áudio gravado' : '');
+          setTagList(note.tags || []);
+        } else {
+          // Fallback if note not found
+          setNoteType('basic');
+          setFields([cardToEdit.front || '', cardToEdit.back || '', '']);
+          setContext(cardToEdit.context || '');
+          setAudioBlob(cardToEdit.audio || null);
+          setAudioFileName(cardToEdit.audio ? 'Áudio gravado' : '');
+          setTagList(cardToEdit.tags || []);
+        }
+      } else {
+        setNoteType('basic');
+        setFields(['', '', '']);
+        setContext('');
+        setAudioBlob(null);
+        setAudioFileName('');
+        setTagList([]);
+      }
       setTagInput('');
-    } else {
-      setFront('');
-      setBack('');
-      setContext('');
-      setAudioBlob(null);
-      setAudioFileName('');
-      setTagList([]);
-      setTagInput('');
-    }
+    };
+
+    loadNoteData();
   }, [cardToEdit, isOpen]);
 
   const stopSpeechRecognition = () => {
@@ -362,7 +402,7 @@ export const CardModal: React.FC<CardModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!front.trim() || !back.trim()) return;
+    if (!fields[0].trim() || (noteType !== 'cloze' && !fields[1].trim())) return;
     
     if (audioRef.current) {
       audioRef.current.pause();
@@ -373,7 +413,7 @@ export const CardModal: React.FC<CardModalProps> = ({
       .map(t => t.trim().toLowerCase())
       .filter(t => t.length > 0);
 
-    onSave(front.trim(), back.trim(), context.trim(), audioBlob, cleanTags);
+    onSave(noteType, fields, context.trim(), audioBlob, cleanTags);
     onClose();
   };
 
@@ -383,7 +423,7 @@ export const CardModal: React.FC<CardModalProps> = ({
         <DialogHeader>
           <div>
             <DialogTitle className="font-semibold text-lg text-foreground flex items-center gap-2">
-              {cardToEdit ? '✏️ Editar Cartão' : '📇 Novo Cartão'}
+              {cardToEdit ? '✏️ Editar Nota' : '📇 Nova Nota'}
             </DialogTitle>
             <span className="text-[10px] text-primary font-bold uppercase tracking-wider block mt-1">
               Deck: {deckName.replace(/[^a-zA-Z0-9\s]/g, '').trim()}
@@ -392,21 +432,53 @@ export const CardModal: React.FC<CardModalProps> = ({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-2">
+          {/* Seletor de Tipo de Nota */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-semibold text-muted-foreground" htmlFor="note-type">
+              Tipo de Nota (Note Type)
+            </label>
+            <select
+              id="note-type"
+              className="bg-background border border-border text-foreground px-3 py-2 rounded-xl text-xs font-bold outline-none cursor-pointer h-10 focus:border-primary focus:ring-2 focus:ring-primary/20"
+              value={noteType}
+              onChange={(e) => setNoteType(e.target.value as any)}
+            >
+              <option value="basic">Básico</option>
+              <option value="reversed">Básico (e cartão invertido)</option>
+              <option value="optional_reversed">Básico (cartão invertido opcional)</option>
+              <option value="typing">Básico (digite a resposta)</option>
+              <option value="cloze">Omissão de Palavras (Cloze)</option>
+            </select>
+          </div>
+
+          {/* Campo 1: Frente / Texto Cloze */}
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-semibold text-muted-foreground" htmlFor="card-front">
-              Frente (Termo em Inglês) *
+              {noteType === 'cloze' ? 'Texto (com clozes) *' : 'Frente (Termo em Inglês) *'}
             </label>
             <div className="flex gap-1.5 items-center">
-              <Input
-                id="card-front"
-                type="text"
-                className="bg-background border-border text-foreground focus-visible:ring-primary focus-visible:border-primary flex-1"
-                placeholder="Ex: Get over"
-                value={front}
-                onChange={(e) => setFront(e.target.value)}
-                required
-                autoFocus
-              />
+              {noteType === 'cloze' ? (
+                <Textarea
+                  id="card-front"
+                  className="bg-background border-border text-foreground focus-visible:ring-primary focus-visible:border-primary flex-1 min-h-[60px]"
+                  placeholder="Ex: The {{c1::apple::maçã}} is {{c2::red}}."
+                  value={fields[0]}
+                  onChange={(e) => setFields([e.target.value, fields[1], fields[2]])}
+                  required
+                  autoFocus
+                />
+              ) : (
+                <Input
+                  id="card-front"
+                  type="text"
+                  className="bg-background border-border text-foreground focus-visible:ring-primary focus-visible:border-primary flex-1"
+                  placeholder="Ex: Get over"
+                  value={fields[0]}
+                  onChange={(e) => setFields([e.target.value, fields[1], fields[2]])}
+                  required
+                  autoFocus
+                />
+              )}
               <Button
                 type="button"
                 variant="outline"
@@ -420,7 +492,7 @@ export const CardModal: React.FC<CardModalProps> = ({
                   if (isListeningFront) {
                     stopSpeechRecognition();
                   } else {
-                    startSpeechRecognition('en-US', setFront, setIsListeningFront);
+                    startSpeechRecognition('en-US', setField0, setIsListeningFront);
                   }
                 }}
                 title={isListeningFront ? 'Parar digitação' : 'Digitar por voz (Inglês)'}
@@ -430,20 +502,31 @@ export const CardModal: React.FC<CardModalProps> = ({
             </div>
           </div>
 
+          {/* Campo 2: Verso / Extra Cloze */}
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-semibold text-muted-foreground" htmlFor="card-back">
-              Verso (Tradução/Significado) *
+              {noteType === 'cloze' ? 'Texto Extra (Opcional)' : 'Verso (Tradução/Significado) *'}
             </label>
             <div className="flex gap-1.5 items-center">
-              <Input
-                id="card-back"
-                type="text"
-                className="bg-background border-border text-foreground focus-visible:ring-primary focus-visible:border-primary flex-1"
-                placeholder="Ex: Superar / Recuperar-se"
-                value={back}
-                onChange={(e) => setBack(e.target.value)}
-                required
-              />
+              {noteType === 'cloze' ? (
+                <Textarea
+                  id="card-back"
+                  className="bg-background border-border text-foreground focus-visible:ring-primary focus-visible:border-primary flex-1 min-h-[60px]"
+                  placeholder="Ex: Explicações ou contexto adicional revelado no verso."
+                  value={fields[1]}
+                  onChange={(e) => setFields([fields[0], e.target.value, fields[2]])}
+                />
+              ) : (
+                <Input
+                  id="card-back"
+                  type="text"
+                  className="bg-background border-border text-foreground focus-visible:ring-primary focus-visible:border-primary flex-1"
+                  placeholder="Ex: Superar / Recuperar-se"
+                  value={fields[1]}
+                  onChange={(e) => setFields([fields[0], e.target.value, fields[2]])}
+                  required
+                />
+              )}
               <Button
                 type="button"
                 variant="outline"
@@ -457,7 +540,7 @@ export const CardModal: React.FC<CardModalProps> = ({
                   if (isListeningBack) {
                     stopSpeechRecognition();
                   } else {
-                    startSpeechRecognition('pt-BR', setBack, setIsListeningBack);
+                    startSpeechRecognition('pt-BR', setField1, setIsListeningBack);
                   }
                 }}
                 title={isListeningBack ? 'Parar digitação' : 'Digitar por voz (Português)'}
@@ -466,6 +549,23 @@ export const CardModal: React.FC<CardModalProps> = ({
               </Button>
             </div>
           </div>
+
+          {/* Campo 3: Adicionar Invertido (apenas para optional_reversed) */}
+          {noteType === 'optional_reversed' && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-muted-foreground" htmlFor="card-reverse-trigger">
+                Adicionar Invertido (opcional)
+              </label>
+              <Input
+                id="card-reverse-trigger"
+                type="text"
+                className="bg-background border-border text-foreground focus-visible:ring-primary focus-visible:border-primary w-full"
+                placeholder="Ex: Digite algo (ex: 'y') para gerar o cartão invertido"
+                value={fields[2] || ''}
+                onChange={(e) => setFields([fields[0], fields[1], e.target.value])}
+              />
+            </div>
+          )}
 
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-semibold text-muted-foreground" htmlFor="card-context">
@@ -644,10 +744,10 @@ export const CardModal: React.FC<CardModalProps> = ({
 
                 <button 
                   type="button"
-                  onClick={() => generateTtsAudio(front)}
-                  disabled={isGeneratingTts || !front.trim()}
+                  onClick={() => generateTtsAudio(fields[0])}
+                  disabled={isGeneratingTts || !fields[0].trim()}
                   className="flex flex-col items-center justify-center p-3 border border-border border-dashed rounded-xl bg-muted/20 hover:bg-muted/40 cursor-pointer transition-colors text-muted-foreground hover:text-foreground text-center h-[90px] disabled:opacity-50 disabled:cursor-not-allowed"
-                  title={!front.trim() ? "Digite o termo na Frente primeiro" : "Gerar pronúncia automaticamente"}
+                  title={!fields[0].trim() ? "Digite o termo na Frente primeiro" : "Gerar pronúncia automaticamente"}
                 >
                   {isGeneratingTts ? (
                     <>
@@ -679,7 +779,7 @@ export const CardModal: React.FC<CardModalProps> = ({
             <Button 
               type="submit" 
               className="flex-1 sm:flex-initial bg-primary hover:bg-primary/90 text-primary-foreground cursor-pointer disabled:opacity-50"
-              disabled={!front.trim() || !back.trim() || isRecording || isListeningFront || isListeningBack || isListeningContext || isGeneratingTts}
+              disabled={!fields[0].trim() || (noteType !== 'cloze' && !fields[1].trim()) || isRecording || isListeningFront || isListeningBack || isListeningContext || isGeneratingTts}
             >
               {cardToEdit ? 'Salvar' : 'Criar Cartão'}
             </Button>

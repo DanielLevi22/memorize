@@ -9,11 +9,13 @@ import {
 
 // Banco de Dados e Types
 import { db, seedInitialData, ensureDefaultPreset, defaultPreset } from './db/db';
-import type { Deck, Card, DeckPreset } from './types';
+import type { Deck, Card, Note, DeckPreset } from './types';
 
 // Utilitários
 import { calculateNextReview } from './utils/srs';
 import { getStreak, recordStudy } from './utils/streak';
+import { getDeckStudyableCards as calculateDeckStudyableCards } from './utils/limits';
+import { syncNoteCards } from './utils/siblings';
 
 // Páginas do Projeto
 import { DashboardPage } from './pages/DashboardPage';
@@ -320,60 +322,13 @@ function App() {
   const getDeckStudyableCards = (deck: Deck, deckCards: Card[]) => {
     const preset = getDeckPreset(deck);
     const counts = getDeckStudyCountsToday(deck.id);
-    
-    // Sort reviews according to reviewSorting
-    let reviewCards = deckCards.filter(c => c.interval > 0 && c.repetitions > 1 && c.dueDate <= todayStr);
-    if (preset.reviewSorting === 'random') {
-      reviewCards = [...reviewCards].sort(() => Math.random() - 0.5);
-    } else {
-      // dateThenRandom
-      reviewCards = [...reviewCards].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-    }
-    
-    // Learning cards (not capped by review limit)
-    const learningCards = deckCards.filter(c => c.interval > 0 && c.repetitions <= 1 && c.dueDate <= todayStr);
-    
-    // Sort new cards according to insertionOrder
-    let newCards = deckCards.filter(c => c.interval === 0);
-    if (preset.insertionOrder === 'random') {
-      newCards = [...newCards].sort(() => Math.random() - 0.5);
-    } else {
-      newCards = [...newCards].sort((a, b) => a.createdAt - b.createdAt);
-    }
-    
-    const reviewsRemaining = Math.max(0, preset.maxReviewsPerDay - counts.reviewsStudied);
-    let newRemaining = Math.max(0, preset.newCardsPerDay - counts.newStudied);
-    
-    if (!preset.newCardsIgnoreReviewLimit && reviewsRemaining <= 0) {
-      newRemaining = 0;
-    }
-    
-    const cappedReviews = reviewCards.slice(0, reviewsRemaining);
-    const cappedNew = newCards.slice(0, newRemaining);
-    
-    // Mix or order them
-    let combined = [];
-    if (preset.newVsReviewOrder === 'newFirst') {
-      combined = [...cappedNew, ...learningCards, ...cappedReviews];
-    } else if (preset.newVsReviewOrder === 'reviewFirst') {
-      combined = [...learningCards, ...cappedReviews, ...cappedNew];
-    } else {
-      // 'mix'
-      const maxLen = Math.max(cappedNew.length, cappedReviews.length + learningCards.length);
-      const reviews = [...learningCards, ...cappedReviews];
-      for (let i = 0; i < maxLen; i++) {
-        if (i < cappedNew.length) combined.push(cappedNew[i]);
-        if (i < reviews.length) combined.push(reviews[i]);
-      }
-    }
-    
-    return {
-      cards: combined,
-      newCount: cappedNew.length,
-      learningCount: learningCards.length,
-      reviewCount: cappedReviews.length,
-      totalCount: cappedNew.length + learningCards.length + cappedReviews.length
-    };
+    const startOfTodayMs = new Date().setHours(0, 0, 0, 0);
+    const studiedCardIds = new Set(
+      revisions
+        ? revisions.filter(r => r.timestamp >= startOfTodayMs).map(r => r.cardId)
+        : []
+    );
+    return calculateDeckStudyableCards(deck, deckCards, preset, counts, todayStr, decks, studiedCardIds);
   };
 
   const getDeckStudyableCounts = (deck: Deck, deckCards: Card[]) => {
@@ -423,13 +378,20 @@ function App() {
     setIsDeckModalOpen(true);
   };
 
-  const handleSaveDeck = async (name: string, description: string, presetId: string) => {
+  const handleSaveDeck = async (
+    name: string,
+    description: string,
+    presetId: string,
+    overrides?: Partial<Deck>,
+    presetUpdates?: Partial<DeckPreset>
+  ) => {
     if (deckToEdit) {
       await db.decks.update(deckToEdit.id, {
         name,
         description,
         presetId,
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
+        ...overrides
       });
     } else {
       const newDeck: Deck = {
@@ -438,10 +400,17 @@ function App() {
         description,
         presetId,
         createdAt: Date.now(),
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
+        ...overrides
       };
       await db.decks.add(newDeck);
     }
+
+    // Persistir atualizações globais de preset se existirem
+    if (presetUpdates && presetId) {
+      await db.presets.update(presetId, presetUpdates);
+    }
+
     setIsDeckModalOpen(false);
     setDeckToEdit(null);
   };
@@ -485,44 +454,78 @@ function App() {
     setIsPreviewModalOpen(true);
   };
 
-  const handleSaveCard = async (front: string, back: string, context: string, audioBlob: Blob | null, tags: string[]) => {
+  const handleSaveCard = async (
+    type: 'basic' | 'reversed' | 'optional_reversed' | 'typing' | 'cloze',
+    fields: string[],
+    context: string,
+    audioBlob: Blob | null,
+    tags: string[]
+  ) => {
     if (cardToEdit) {
-      // Editar Cartão Existente
-      await db.cards.update(cardToEdit.id, {
-        front,
-        back,
-        context,
-        audio: audioBlob || undefined,
-        tags,
-        updatedAt: Date.now()
-      });
+      // 1. Editar Nota e Sincronizar Cartões
+      const note = await db.notes.get(cardToEdit.noteId);
+      if (note) {
+        const updatedNote: Note = {
+          ...note,
+          type,
+          fields,
+          context,
+          audio: audioBlob || undefined,
+          tags,
+          updatedAt: Date.now()
+        };
+        await db.notes.put(updatedNote);
+
+        const existingCards = await db.cards.where('noteId').equals(note.id).toArray();
+        const { toAdd, toUpdate, toDelete } = syncNoteCards(updatedNote, existingCards);
+
+        if (toAdd.length > 0) {
+          await db.cards.bulkAdd(toAdd);
+        }
+        for (const card of toUpdate) {
+          await db.cards.put(card);
+        }
+        if (toDelete.length > 0) {
+          await db.cards.bulkDelete(toDelete);
+        }
+      }
       setIsCardModalOpen(false);
       setCardToEdit(null);
     } else {
-      // Criar Novo Cartão
+      // 2. Criar Nova Nota e Gerar Cartões
       if (!deckForNewCard) return;
 
-      const newCard: Card = {
-        id: crypto.randomUUID(),
+      const noteId = crypto.randomUUID();
+      const newNote: Note = {
+        id: noteId,
         deckId: deckForNewCard.id,
-        front,
-        back,
+        type,
+        fields,
+        tags,
         context,
         audio: audioBlob || undefined,
-        tags,
-        interval: 0,
-        ease: 2.5,
-        repetitions: 0,
-        lapses: 0,
-        dueDate: todayStr,
         createdAt: Date.now(),
         updatedAt: Date.now()
       };
+      await db.notes.add(newNote);
 
-      await db.cards.add(newCard);
+      const { toAdd } = syncNoteCards(newNote, []);
+      if (toAdd.length > 0) {
+        await db.cards.bulkAdd(toAdd);
+      }
+
       setIsCardModalOpen(false);
       setDeckForNewCard(null);
     }
+  };
+
+  const handleToggleSuspendCard = async (card: Card) => {
+    const nextSuspended = !card.suspended;
+    await db.cards.update(card.id, {
+      suspended: nextSuspended,
+      updatedAt: Date.now()
+    });
+    setCardToPreview(prev => prev && prev.id === card.id ? { ...prev, suspended: nextSuspended } : prev);
   };
 
   // --- FLUXO DE ESTUDO ---
@@ -554,7 +557,7 @@ function App() {
     setIsStudyFilterModalOpen(true);
   };
 
-  const handleGradeCard = async (card: Card, rating: number) => {
+  const handleGradeCard = async (card: Card, rating: number, duration?: number) => {
     if (cramSessionCards) {
       // Sessão Cram não altera agendamento nem registra revisão
       // (cramSessionCards é uma lista temporária em memória, não salvamos no IndexedDB)
@@ -575,7 +578,8 @@ function App() {
       rating,
       ease: nextFields.ease,
       interval: nextFields.interval,
-      wasNew: card.interval === 0
+      wasNew: card.interval === 0,
+      duration
     });
   };
 
@@ -811,14 +815,18 @@ function App() {
     let totalSeconds = 0;
     
     for (let i = 0; i < sorted.length; i++) {
-      if (i === 0) {
-        totalSeconds += 10; // Default estimate
+      if (sorted[i].duration !== undefined) {
+        totalSeconds += sorted[i].duration!;
       } else {
-        const diff = (sorted[i].timestamp - sorted[i - 1].timestamp) / 1000;
-        if (diff < 60) {
-          totalSeconds += diff;
+        if (i === 0) {
+          totalSeconds += 10; // Default estimate
         } else {
-          totalSeconds += 10; // Cap
+          const diff = (sorted[i].timestamp - sorted[i - 1].timestamp) / 1000;
+          if (diff < 60) {
+            totalSeconds += diff;
+          } else {
+            totalSeconds += 10; // Cap
+          }
         }
       }
     }
@@ -1532,6 +1540,7 @@ function App() {
         }}
         card={cardToPreview}
         deckName={cardToPreview ? (decks?.find(d => d.id === cardToPreview.deckId)?.name || '') : ''}
+        onToggleSuspend={handleToggleSuspendCard}
       />
 
       {/* Dialog para Filtrar Estudo por Tags */}

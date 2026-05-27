@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Eye, AlertCircle, Volume2, Mic } from 'lucide-react';
 import type { Card, DeckPreset } from '../types';
-import { getFriendlyInterval } from '../utils/srs';
+import { getFriendlyInterval, calculateNextReview } from '../utils/srs';
+import { areCardSiblings } from '../utils/limits';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
 import { getTagColors } from '../utils/tagColors';
@@ -33,7 +34,7 @@ const cleanString = (str: string) => {
 interface StudyArenaProps {
   deckName: string;
   cardsToStudy: Card[];
-  onGradeCard: (card: Card, rating: number) => void;
+  onGradeCard: (card: Card, rating: number, duration?: number) => void;
   onCancel: () => void;
   onFinishSession: (studiedCount: number) => void;
   studyMode?: 'classic' | 'writing' | 'speaking';
@@ -55,6 +56,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
   autoPlayAudio = true,
   preset
 }) => {
+  const [sessionQueue, setSessionQueue] = useState<Card[]>(() => [...cardsToStudy]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [studiedCount, setStudiedCount] = useState(0);
@@ -63,8 +65,19 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  useEffect(() => {
+    setSessionQueue([...cardsToStudy]);
+    setCurrentIndex(0);
+    setStudiedCount(0);
+  }, [cardsToStudy]);
+
   // Timer State
   const [seconds, setSeconds] = useState(0);
+  // Auto-advance countdown progress (0-100)
+  const [autoAdvanceProgress, setAutoAdvanceProgress] = useState<number | null>(null);
+  const autoAdvanceStartRef = useRef<number | null>(null);
+  const autoAdvanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoAdvanceIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Interactive Modes States
   const [typedAnswer, setTypedAnswer] = useState('');
@@ -73,13 +86,15 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
   const [spokenText, setSpokenText] = useState('');
   const [isListeningSpeech, setIsListeningSpeech] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const cardStartTimeRef = useRef<number>(Date.now());
 
-  const totalCards = cardsToStudy.length;
-  const currentCard = cardsToStudy[currentIndex];
+  const totalCards = sessionQueue.length;
+  const currentCard = sessionQueue[currentIndex];
 
-  const speakText = (text: string, lang: 'en' | 'pt') => {
+  const speakText = (text: string, lang: 'en' | 'pt', onEnd?: () => void) => {
     if (typeof window === 'undefined' || !window.speechSynthesis) {
       console.warn("Speech Synthesis not supported in this browser");
+      if (onEnd) onEnd();
       return;
     }
     
@@ -91,7 +106,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
     utterance.rate = ttsRate;
 
     // Apply selected voice if configured
-    if (ttsVoice) {
+    if (ttsVoice && lang === 'en') {
       const voices = window.speechSynthesis.getVoices();
       const matched = voices.find(v => v.name === ttsVoice);
       if (matched) {
@@ -103,9 +118,11 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
     setIsPlaying(true);
     utterance.onend = () => {
       setIsPlaying(false);
+      if (onEnd) onEnd();
     };
     utterance.onerror = () => {
       setIsPlaying(false);
+      if (onEnd) onEnd();
     };
     
     window.speechSynthesis.speak(utterance);
@@ -113,6 +130,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
 
   useEffect(() => {
     // Reset states for the new card
+    cardStartTimeRef.current = Date.now();
     setIsAudioTextRevealed(false);
     setTypedAnswer('');
     setHasCheckedAnswer(false);
@@ -193,6 +211,54 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
     };
   }, [currentIndex, currentCard]);
 
+  // Autoplay ao revelar a resposta (verso)
+  useEffect(() => {
+    if (isFlipped && currentCard) {
+      const shouldAutoplay = preset ? !preset.disableAutoplay : autoPlayAudio;
+      if (shouldAutoplay) {
+        // Para parar qualquer áudio em andamento antes de iniciar a resposta
+        if (activeAudioRef.current) {
+          activeAudioRef.current.pause();
+          activeAudioRef.current = null;
+        }
+        if (typeof window !== 'undefined' && window.speechSynthesis) {
+          window.speechSynthesis.cancel();
+        }
+        setIsPlaying(false);
+
+        // Tocar a resposta sequencialmente ou apenas o verso
+        const shouldSkipQuestion = preset?.skipQuestionOnReplay;
+        if (shouldSkipQuestion) {
+          // Apenas o verso
+          speakText(currentCard.back, 'pt');
+        } else {
+          // Frente + Verso sequencial
+          if (currentCard.audio) {
+            if (audioUrl) {
+              try {
+                const audio = new Audio(audioUrl);
+                activeAudioRef.current = audio;
+                setIsPlaying(true);
+                audio.play().catch(() => setIsPlaying(false));
+                audio.onended = () => {
+                  activeAudioRef.current = null;
+                  speakText(currentCard.back, 'pt');
+                };
+              } catch (err) {
+                console.error(err);
+                setIsPlaying(false);
+              }
+            }
+          } else {
+            speakText(currentCard.front, 'en', () => {
+              speakText(currentCard.back, 'pt');
+            });
+          }
+        }
+      }
+    }
+  }, [isFlipped, currentCard, audioUrl, preset?.disableAutoplay, preset?.skipQuestionOnReplay, autoPlayAudio]);
+
   if (totalCards === 0) {
     return (
       <div className="flex flex-col items-center justify-center text-center p-10 gap-4 text-muted-foreground h-full">
@@ -210,42 +276,70 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
 
   const handlePlayAudio = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    
+    if (!currentCard) return;
+
+    // Se já estiver tocando, a gente interrompe a reprodução ativa
+    if (isPlaying) {
+      if (activeAudioRef.current) {
+        activeAudioRef.current.pause();
+        activeAudioRef.current = null;
+      }
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      setIsPlaying(false);
+      return;
+    }
+
     const shouldSkipQuestion = isFlipped && preset?.skipQuestionOnReplay;
 
-    if (currentCard.audio && !shouldSkipQuestion) {
-      if (!audioUrl) return;
-      try {
-        // Se já estiver tocando, pausa o áudio atual
-        if (isPlaying && activeAudioRef.current) {
-          activeAudioRef.current.pause();
-          setIsPlaying(false);
-          return;
+    if (!isFlipped || shouldSkipQuestion) {
+      // Frente, ou verso com skipQuestionOnReplay = true (toca apenas o respectivo lado)
+      if (!isFlipped) {
+        if (currentCard.audio) {
+          if (!audioUrl) return;
+          try {
+            const audio = new Audio(audioUrl);
+            activeAudioRef.current = audio;
+            setIsPlaying(true);
+            audio.play().catch(() => setIsPlaying(false));
+            audio.onended = () => {
+              setIsPlaying(false);
+              activeAudioRef.current = null;
+            };
+          } catch (err) {
+            console.error(err);
+            setIsPlaying(false);
+          }
+        } else {
+          speakText(currentCard.front, 'en');
         }
-
-        // Caso contrário, reinicia/toca o áudio
-        if (activeAudioRef.current) {
-          activeAudioRef.current.pause();
-          activeAudioRef.current = null;
-        }
-
-        const audio = new Audio(audioUrl);
-        activeAudioRef.current = audio;
-        setIsPlaying(true);
-        audio.play().catch(() => setIsPlaying(false));
-        audio.onended = () => {
-          setIsPlaying(false);
-          activeAudioRef.current = null;
-        };
-      } catch (err) {
-        console.error(err);
-        setIsPlaying(false);
+      } else {
+        // Verso com skipQuestionOnReplay = true (apenas o verso)
+        speakText(currentCard.back, 'pt');
       }
     } else {
-      // Usar TTS nativo
-      const textToPlay = shouldSkipQuestion ? currentCard.back : currentCard.front;
-      const langToPlay = shouldSkipQuestion ? 'pt' : 'en';
-      speakText(textToPlay, langToPlay);
+      // Verso com skipQuestionOnReplay = false (toca sequencialmente: frente e depois verso)
+      if (currentCard.audio) {
+        if (!audioUrl) return;
+        try {
+          const audio = new Audio(audioUrl);
+          activeAudioRef.current = audio;
+          setIsPlaying(true);
+          audio.play().catch(() => setIsPlaying(false));
+          audio.onended = () => {
+            activeAudioRef.current = null;
+            speakText(currentCard.back, 'pt');
+          };
+        } catch (err) {
+          console.error(err);
+          setIsPlaying(false);
+        }
+      } else {
+        speakText(currentCard.front, 'en', () => {
+          speakText(currentCard.back, 'pt');
+        });
+      }
     }
   };
 
@@ -331,13 +425,89 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
     setIsPlaying(false);
   };
 
+  const getInsertOffset = (stepDelay: string, remainingCards: number): number => {
+    const match = stepDelay.trim().match(/^(\d+)([smhd])$/);
+    if (!match) return Math.max(1, remainingCards);
+
+    const val = parseInt(match[1], 10);
+    const unit = match[2];
+
+    let minutes = val;
+    if (unit === 's') minutes = val / 60;
+    if (unit === 'h') minutes = val * 60;
+    if (unit === 'd') minutes = val * 24 * 60;
+
+    // 1 minuto = ~3 cards; 10 minutos = ~10 cards
+    const offset = Math.ceil(minutes * 3);
+    return Math.max(1, Math.min(offset, remainingCards));
+  };
+
   const handleGrade = (rating: number) => {
     stopActiveAudio();
-    onGradeCard(currentCard, rating);
+    const elapsedSeconds = (Date.now() - cardStartTimeRef.current) / 1000;
+    const maxSec = preset?.maxAnswerSeconds || 60;
+    const duration = Math.min(elapsedSeconds, maxSec);
+
+    onGradeCard(currentCard, rating, parseFloat(duration.toFixed(2)));
     setStudiedCount(prev => prev + 1);
 
+    const nextFields = calculateNextReview(currentCard, rating, preset);
+    let nextQueue = [...sessionQueue];
+
+    // Se o card continuar em aprendizado (interval === 0) no preset clássico
+    if (nextFields.interval === 0 && preset && !preset.fsrsEnabled) {
+      const stepsStr = nextFields.lapseInterval !== undefined
+        ? (preset.relearningSteps || '10m')
+        : (preset.learningSteps || '1m 10m');
+      
+      const steps = stepsStr.split(/\s+/).filter(Boolean);
+      const stepIdx = nextFields.learningStep ?? 0;
+      const stepDelay = steps[Math.min(stepIdx, steps.length - 1)] || '1m';
+
+      const updatedCard: Card = {
+        ...currentCard,
+        ...nextFields,
+      };
+
+      const nextIndex = currentIndex + 1;
+      const remainingCards = sessionQueue.length - nextIndex;
+      const offset = getInsertOffset(stepDelay, remainingCards);
+      
+      nextQueue.splice(nextIndex + offset, 0, updatedCard);
+    }
+
     const nextIndex = currentIndex + 1;
-    if (nextIndex < totalCards) {
+
+    // Filtro dinâmico de descarte de cartões irmãos (Bury Siblings)
+    if (preset && (preset.buryNewSiblings || preset.buryReviewSiblings || preset.buryLearningSiblings)) {
+      const isLearningCard = (c: Card) => (c.interval === 0 && c.learningStep !== undefined) || (c.interval > 0 && c.repetitions <= 1);
+      const isReviewCard = (c: Card) => c.interval > 0 && c.repetitions > 1;
+      const isNewCard = (c: Card) => c.interval === 0 && c.learningStep === undefined;
+
+      const finalQueue = nextQueue.slice(0, nextIndex);
+      const remainingQueue = nextQueue.slice(nextIndex);
+
+      const filteredRemaining = remainingQueue.filter(card => {
+        const isSib = areCardSiblings(currentCard, card);
+        if (isSib) {
+          let shouldBury = false;
+          if (isNewCard(card) && preset.buryNewSiblings) shouldBury = true;
+          if (isReviewCard(card) && preset.buryReviewSiblings) shouldBury = true;
+          if (isLearningCard(card) && preset.buryLearningSiblings) shouldBury = true;
+
+          if (shouldBury) {
+            return false; // Remove / enterra
+          }
+        }
+        return true;
+      });
+
+      nextQueue = [...finalQueue, ...filteredRemaining];
+    }
+
+    setSessionQueue(nextQueue);
+
+    if (nextIndex < nextQueue.length) {
       setIsFlipped(false);
       setIsAudioTextRevealed(false);
       setTimeout(() => {
@@ -375,35 +545,66 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
 
   // 2. Avanço Automático
   useEffect(() => {
+    // Limpa timers anteriores
+    if (autoAdvanceTimerRef.current) clearTimeout(autoAdvanceTimerRef.current);
+    if (autoAdvanceIntervalRef.current) clearInterval(autoAdvanceIntervalRef.current);
+    autoAdvanceTimerRef.current = null;
+    autoAdvanceIntervalRef.current = null;
+    setAutoAdvanceProgress(null);
+
     if (!currentCard) return;
-    
-    // Se estiver esperando pelo áudio terminar, não dispara o cronômetro de avanço
+    // Se waitForAudio estiver ativo e áudio ainda estiver tocando, aguardar
     if (preset?.waitForAudio && isPlaying) return;
 
+    const startCountdown = (delaySec: number, onExpire: () => void) => {
+      if (delaySec <= 0) return;
+      autoAdvanceStartRef.current = Date.now();
+      setAutoAdvanceProgress(100);
+
+      autoAdvanceIntervalRef.current = setInterval(() => {
+        const elapsed = (Date.now() - (autoAdvanceStartRef.current ?? Date.now())) / 1000;
+        const pct = Math.max(0, ((delaySec - elapsed) / delaySec) * 100);
+        setAutoAdvanceProgress(pct);
+      }, 50);
+
+      autoAdvanceTimerRef.current = setTimeout(() => {
+        if (autoAdvanceIntervalRef.current) clearInterval(autoAdvanceIntervalRef.current);
+        setAutoAdvanceProgress(null);
+        onExpire();
+      }, delaySec * 1000);
+    };
+
+    const executeAnswerAction = () => {
+      const action = preset?.answerAction ?? 'good';
+      if (action === 'again') handleGrade(1);
+      else if (action === 'hard') handleGrade(2);
+      else if (action === 'good') handleGrade(3);
+      else if (action === 'easy') handleGrade(4);
+      else if (action === 'bury') handleGrade(1); // bury: grade as again, sibling logic handles the rest
+      // 'skip': just call next without grading — advance index
+      else setCurrentIndex(prev => Math.min(prev + 1, sessionQueue.length - 1));
+    };
+
     if (!isFlipped) {
-      // Frente (Questão)
-      const showAnswerDelay = preset?.autoShowAnswerSeconds || 0;
-      if (showAnswerDelay > 0) {
-        const timer = setTimeout(() => {
-          if (preset?.questionAction === 'bury') {
-            handleGrade(1);
-          } else {
-            handleReveal();
-          }
-        }, showAnswerDelay * 1000);
-        return () => clearTimeout(timer);
-      }
+      const delay = preset?.autoShowAnswerSeconds ?? 0;
+      startCountdown(delay, () => {
+        if (preset?.questionAction === 'bury') {
+          handleGrade(1);
+        } else {
+          handleReveal();
+        }
+      });
     } else {
-      // Verso (Resposta)
-      const showQuestionDelay = preset?.autoShowQuestionSeconds || 0;
-      if (showQuestionDelay > 0) {
-        const timer = setTimeout(() => {
-          handleGrade(3);
-        }, showQuestionDelay * 1000);
-        return () => clearTimeout(timer);
-      }
+      const delay = preset?.autoShowQuestionSeconds ?? 0;
+      startCountdown(delay, executeAnswerAction);
     }
-  }, [currentIndex, isFlipped, isPlaying, preset?.autoShowAnswerSeconds, preset?.autoShowQuestionSeconds, preset?.waitForAudio, preset?.questionAction]);
+
+    return () => {
+      if (autoAdvanceTimerRef.current) clearTimeout(autoAdvanceTimerRef.current);
+      if (autoAdvanceIntervalRef.current) clearInterval(autoAdvanceIntervalRef.current);
+      setAutoAdvanceProgress(null);
+    };
+  }, [currentIndex, isFlipped, isPlaying, preset?.autoShowAnswerSeconds, preset?.autoShowQuestionSeconds, preset?.waitForAudio, preset?.questionAction, preset?.answerAction]);
 
   // ⌨️ Keyboard shortcuts (defined after handlers are ready)
   useEffect(() => {
@@ -422,6 +623,8 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
         e.preventDefault(); handleGrade(2);
       } else if (e.key === '3' && isFlipped) {
         e.preventDefault(); handleGrade(3);
+      } else if (e.key === '4' && isFlipped) {
+        e.preventDefault(); handleGrade(4);
       } else if (e.key === 'r' || e.key === 'R') {
         e.preventDefault();
         handlePlayAudio();
@@ -445,17 +648,47 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
           <ArrowLeft size={18} />
         </Button>
 
-        {preset?.showTimer && (
-          <div className="flex items-center gap-1 bg-muted/40 border border-border text-[10px] font-bold text-muted-foreground px-2 py-1 rounded-lg shrink-0">
-            ⏱️ {seconds}s
-          </div>
-        )}
+        {preset?.showTimer && (() => {
+          const maxSec = preset.maxAnswerSeconds || 60;
+          const isNearLimit = seconds >= maxSec * 0.8;
+          const isAtLimit = seconds >= maxSec;
+          const mins = Math.floor(seconds / 60);
+          const secs = seconds % 60;
+          const display = mins > 0
+            ? `${mins}:${String(secs).padStart(2, '0')}`
+            : `${secs}s`;
+          return (
+            <div className={`flex items-center gap-1 border text-[10px] font-bold px-2 py-1 rounded-lg shrink-0 transition-colors ${
+              isAtLimit
+                ? 'bg-red-500/20 border-red-500/50 text-red-400'
+                : isNearLimit
+                ? 'bg-amber-500/20 border-amber-500/50 text-amber-400'
+                : 'bg-muted/40 border-border text-muted-foreground'
+            }`}>
+              ⏱️ {display}
+            </div>
+          );
+        })()}
         
         <div className="flex-1 mx-4 space-y-1.5">
           <Progress value={progressPercent} className="h-1.5 bg-muted" />
           <div className="text-[10px] text-muted-foreground text-right font-bold">
             {currentIndex} / {totalCards} cartões
           </div>
+          {/* Barra de contagem regressiva do Auto Avanço */}
+          {autoAdvanceProgress !== null && (
+            <div className="relative w-full h-1 bg-muted rounded-full overflow-hidden">
+              <div
+                className="absolute left-0 top-0 h-full rounded-full transition-none"
+                style={{
+                  width: `${autoAdvanceProgress}%`,
+                  background: isFlipped
+                    ? 'linear-gradient(90deg, hsl(var(--primary)), hsl(260 80% 65%))'
+                    : 'linear-gradient(90deg, hsl(38 95% 55%), hsl(25 95% 55%))',
+                }}
+              />
+            </div>
+          )}
         </div>
       </div>
 
@@ -785,7 +1018,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
           </Button>
         ) : (
           <>
-            <div className="grid grid-cols-3 gap-2.5 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div className="grid grid-cols-4 gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
               <Button 
                 className="flex flex-col h-auto py-3 rounded-xl font-bold bg-red-500/10 border border-red-500/20 hover:bg-red-500 hover:text-zinc-50 text-red-500 dark:text-red-400 text-sm gap-0.5 cursor-pointer"
                 onClick={() => handleGrade(1)}
@@ -805,17 +1038,26 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                 </span>
               </Button>
               <Button 
-                className="flex flex-col h-auto py-3 rounded-xl font-bold bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500 hover:text-zinc-50 text-emerald-600 dark:text-emerald-400 text-sm gap-0.5 cursor-pointer"
+                className="flex flex-col h-auto py-3 rounded-xl font-bold bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500 hover:text-zinc-50 text-sky-600 dark:text-sky-400 text-sm gap-0.5 cursor-pointer"
                 onClick={() => handleGrade(3)}
               >
-                <span>Fácil</span>
+                <span>Bom</span>
                 <span className="text-[10px] font-medium opacity-70">
                   {getFriendlyInterval(currentCard, 3, preset)}
                 </span>
               </Button>
+              <Button 
+                className="flex flex-col h-auto py-3 rounded-xl font-bold bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500 hover:text-zinc-50 text-emerald-600 dark:text-emerald-400 text-sm gap-0.5 cursor-pointer"
+                onClick={() => handleGrade(4)}
+              >
+                <span>Fácil</span>
+                <span className="text-[10px] font-medium opacity-70">
+                  {getFriendlyInterval(currentCard, 4, preset)}
+                </span>
+              </Button>
             </div>
             {/* Shortcut hints */}
-            <div className="flex items-center justify-center gap-4 mt-2">
+            <div className="flex items-center justify-center gap-3 mt-2">
               <span className="text-[9px] text-muted-foreground/50 flex items-center gap-1">
                 <kbd className="bg-muted border border-border px-1 py-0.5 rounded text-[8px] font-bold">1</kbd> Errei
               </span>
@@ -823,7 +1065,10 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                 <kbd className="bg-muted border border-border px-1 py-0.5 rounded text-[8px] font-bold">2</kbd> Difícil
               </span>
               <span className="text-[9px] text-muted-foreground/50 flex items-center gap-1">
-                <kbd className="bg-muted border border-border px-1 py-0.5 rounded text-[8px] font-bold">3</kbd> Fácil
+                <kbd className="bg-muted border border-border px-1 py-0.5 rounded text-[8px] font-bold">3</kbd> Bom
+              </span>
+              <span className="text-[9px] text-muted-foreground/50 flex items-center gap-1">
+                <kbd className="bg-muted border border-border px-1 py-0.5 rounded text-[8px] font-bold">4</kbd> Fácil
               </span>
             </div>
           </>
@@ -843,7 +1088,8 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
           { keys: ['Espaço', 'Enter'], description: 'Revelar resposta' },
           { keys: ['1'], description: 'Avaliar como "Errei"' },
           { keys: ['2'], description: 'Avaliar como "Difícil"' },
-          { keys: ['3'], description: 'Avaliar como "Fácil"' },
+          { keys: ['3'], description: 'Avaliar como "Bom"' },
+          { keys: ['4'], description: 'Avaliar como "Fácil"' },
           { keys: ['R'], description: 'Repetir Áudio / TTS' },
           { keys: ['Esc'], description: 'Sair dos estudos' },
         ]}

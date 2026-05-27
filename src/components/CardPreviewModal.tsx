@@ -23,6 +23,7 @@ interface CardPreviewModalProps {
   onEdit: () => void;
   card: Card | null;
   deckName: string;
+  onToggleSuspend: (card: Card) => void;
 }
 
 export const CardPreviewModal: React.FC<CardPreviewModalProps> = ({
@@ -30,7 +31,8 @@ export const CardPreviewModal: React.FC<CardPreviewModalProps> = ({
   onClose,
   onEdit,
   card,
-  deckName
+  deckName,
+  onToggleSuspend
 }) => {
   const [isFlipped, setIsFlipped] = useState(false);
   const [isAudioTextRevealed, setIsAudioTextRevealed] = useState(false);
@@ -153,8 +155,13 @@ export const CardPreviewModal: React.FC<CardPreviewModalProps> = ({
       <DialogContent className="bg-card border-border text-foreground max-w-sm sm:max-w-lg rounded-lg p-5">
         <DialogHeader className="pb-2 border-b border-border">
           <div>
-            <DialogTitle className="font-semibold text-lg text-foreground">
-              🔍 Pré-visualização do Card
+            <DialogTitle className="font-semibold text-lg text-foreground flex items-center justify-between">
+              <span>🔍 Pré-visualização do Card</span>
+              {card.suspended && (
+                <span className="text-[9px] bg-amber-500/10 text-amber-500 border border-amber-500/20 font-bold px-2 py-0.5 rounded-full uppercase tracking-wide">
+                  🔕 Suspenso
+                </span>
+              )}
             </DialogTitle>
             <span className="text-[10px] text-primary font-bold uppercase tracking-wider block mt-0.5">
               Deck: {deckName.replace(/[^a-zA-Z0-9\s]/g, '').trim()}
@@ -288,7 +295,7 @@ export const CardPreviewModal: React.FC<CardPreviewModalProps> = ({
           </div>
         </div>
 
-        <DialogFooter className="flex flex-row gap-2 mt-2 sm:justify-end border-t border-border/50 pt-3">
+        <DialogFooter className="flex flex-row flex-wrap gap-2 mt-2 sm:justify-end border-t border-border/50 pt-3">
           <Button 
             type="button"
             variant="outline"
@@ -296,6 +303,18 @@ export const CardPreviewModal: React.FC<CardPreviewModalProps> = ({
             onClick={onEdit}
           >
             ✏️ Editar
+          </Button>
+          <Button 
+            type="button"
+            variant="outline"
+            className={`flex-1 sm:flex-initial border border-border cursor-pointer text-xs h-9 px-4 rounded-xl font-bold transition-all duration-200 ${
+              card.suspended 
+                ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' 
+                : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/20'
+            }`}
+            onClick={() => onToggleSuspend(card)}
+          >
+            {card.suspended ? '🔔 Reativar' : '🔕 Suspender'}
           </Button>
           <Button 
             type="button"

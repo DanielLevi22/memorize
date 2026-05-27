@@ -54,11 +54,11 @@ function defaultPreset(overrides: Partial<DeckPreset> = {}): DeckPreset {
     maxReviewsPerDay: 200,
     newCardsIgnoreReviewLimit: false,
     limitsStartFromParent: false,
-    learningSteps: '1m 10m',
+    learningSteps: '',
     graduatingInterval: 1,
     easyInterval: 4,
     insertionOrder: 'sequential',
-    relearningSteps: '10m',
+    relearningSteps: '',
     minimumInterval: 1,
     leechThreshold: 8,
     leechAction: 'tag',
@@ -148,9 +148,9 @@ describe('SM-2: Cartão com Histórico (repetitions >= 3)', () => {
     expect(result.interval).toBe(12);
   });
 
-  it('rating "Fácil" (3) → repetitions cresce, intervalo cresce bastante', () => {
+  it('rating "Fácil" (4) → repetitions cresce, intervalo cresce bastante com easyBonus', () => {
     const card = studiedCard({ interval: 10, repetitions: 3 });
-    const result = calculateNextReview(card, 3);
+    const result = calculateNextReview(card, 4);
 
     expect(result.repetitions).toBe(4);
     expect(result.ease).toBe(2.5 + 0.15);
@@ -231,10 +231,10 @@ describe('SM-2: Aplicação de Preset', () => {
     expect(result.interval).toBe(15); // 10 * 1.5
   });
 
-  it('easyBonus customizado escala corretamente no rating "Fácil"', () => {
+  it('easyBonus customizado escala corretamente no rating "Fácil" (4)', () => {
     const card = studiedCard({ interval: 10, repetitions: 3 });
     const preset = defaultPreset({ easyBonus: 2.0 });
-    const result = calculateNextReview(card, 3, preset);
+    const result = calculateNextReview(card, 4, preset);
 
     // interval = round(10 * (2.5 + 0.15) * 2.0) = round(53) = 53
     expect(result.interval).toBe(53);
@@ -256,10 +256,10 @@ describe('SM-2: Aplicação de Preset', () => {
     expect(result.interval).toBe(10);
   });
 
-  it('intervalModifier escala o intervalo final', () => {
+  it('intervalModifier escala o intervalo final (rating Fácil/4)', () => {
     const card = studiedCard({ interval: 10, repetitions: 3 });
     const preset = defaultPreset({ intervalModifier: 1.5, easyBonus: 1.3 });
-    const result = calculateNextReview(card, 3, preset);
+    const result = calculateNextReview(card, 4, preset);
 
     // Base interval = round(10 * 2.65 * 1.3) = round(34.45) = 34
     // Após modifier: round(34 * 1.5) = 51
@@ -542,5 +542,101 @@ describe('Propriedades Gerais', () => {
       const result = calculateNextReview(card, rating);
       expect(result.repetitions).toBeGreaterThanOrEqual(0);
     }
+  });
+
+  describe('SM-2: Etapas de Aprendizagem (Anki Style)', () => {
+    it('card novo com rating 2 (Difícil) avança para o passo 1 se learningSteps = "1m 10m"', () => {
+      const card = newCard({ interval: 0, repetitions: 0, learningStep: undefined });
+      const preset = defaultPreset({ learningSteps: '1m 10m', graduatingInterval: 3 });
+      const result = calculateNextReview(card, 2, preset);
+
+      expect(result.learningStep).toBe(1);
+      expect(result.interval).toBe(0);
+      expect(result.repetitions).toBe(0);
+    });
+
+    it('card no passo final com rating 2 (Difícil) gradua e vira revisão', () => {
+      const card = newCard({ interval: 0, repetitions: 0, learningStep: 1 });
+      const preset = defaultPreset({ learningSteps: '1m 10m', graduatingInterval: 3 });
+      const result = calculateNextReview(card, 2, preset);
+
+      expect(result.learningStep).toBeUndefined();
+      expect(result.interval).toBe(3);
+      expect(result.repetitions).toBe(1);
+    });
+
+    it('card novo com rating 3 (Fácil) gradua instantaneamente', () => {
+      const card = newCard({ interval: 0, repetitions: 0, learningStep: undefined });
+      const preset = defaultPreset({ learningSteps: '1m 10m', easyInterval: 8 });
+      const result = calculateNextReview(card, 3, preset);
+
+      expect(result.learningStep).toBeUndefined();
+      expect(result.interval).toBe(8);
+      expect(result.repetitions).toBe(1);
+    });
+
+    it('card no passo 1 com rating 1 (Errei) volta para o passo 0', () => {
+      const card = newCard({ interval: 0, repetitions: 0, learningStep: 1 });
+      const preset = defaultPreset({ learningSteps: '1m 10m' });
+      const result = calculateNextReview(card, 1, preset);
+
+      expect(result.learningStep).toBe(0);
+      expect(result.interval).toBe(0);
+      expect(result.lapses).toBe(1);
+    });
+
+    it('card de revisão que erra (1) entra em reaprendizagem se relearningSteps = "10m"', () => {
+      const card = studiedCard({ interval: 10, repetitions: 3, lapses: 0 });
+      const preset = defaultPreset({ relearningSteps: '10m', lapseMultiplier: 0.5 });
+      const result = calculateNextReview(card, 1, preset);
+
+      expect(result.learningStep).toBe(0);
+      expect(result.interval).toBe(0);
+      expect(result.lapseInterval).toBe(5);
+      expect(result.lapses).toBe(1);
+    });
+
+    it('card de revisão em reaprendizagem no passo final com rating 2 (Difícil) gradua com o intervalo de lapso calculado', () => {
+      const card = studiedCard({ interval: 0, repetitions: 0, learningStep: 0, lapseInterval: 5 });
+      const preset = defaultPreset({ relearningSteps: '10m', graduatingInterval: 1 });
+      const result = calculateNextReview(card, 2, preset);
+
+      expect(result.learningStep).toBeUndefined();
+      expect(result.interval).toBe(5);
+      expect(result.repetitions).toBe(1);
+      expect(result.lapseInterval).toBeUndefined();
+    });
+  });
+
+  describe('SM-2: Sanguessugas (Leeches)', () => {
+    it('REQ-3.3 & REQ-3.4: adquire tag "leech" ao atingir o limite de lapses se leechAction = "tag"', () => {
+      const card = studiedCard({ interval: 10, repetitions: 3, lapses: 7 }); // lapses + 1 vai dar 8
+      const preset = defaultPreset({ leechThreshold: 8, leechAction: 'tag' });
+      const result = calculateNextReview(card, 1, preset);
+
+      expect(result.lapses).toBe(8);
+      expect(result.tags).toContain('leech');
+      expect(result.suspended).toBeUndefined();
+    });
+
+    it('REQ-3.4: adquire tag "leech" e fica suspenso ao atingir o limite de lapses se leechAction = "suspend"', () => {
+      const card = studiedCard({ interval: 10, repetitions: 3, lapses: 7 }); // lapses + 1 vai dar 8
+      const preset = defaultPreset({ leechThreshold: 8, leechAction: 'suspend' });
+      const result = calculateNextReview(card, 1, preset);
+
+      expect(result.lapses).toBe(8);
+      expect(result.tags).toContain('leech');
+      expect(result.suspended).toBe(true);
+    });
+
+    it('não adquire tag leech ou suspensão se estiver abaixo do threshold', () => {
+      const card = studiedCard({ interval: 10, repetitions: 3, lapses: 5 }); // lapses + 1 vai dar 6 < 8
+      const preset = defaultPreset({ leechThreshold: 8, leechAction: 'suspend' });
+      const result = calculateNextReview(card, 1, preset);
+
+      expect(result.lapses).toBe(6);
+      expect(result.tags).toBeUndefined();
+      expect(result.suspended).toBeUndefined();
+    });
   });
 });

@@ -1,9 +1,10 @@
 import Dexie, { type Table } from 'dexie';
-import type { Deck, Card, Revision, DeckPreset, ReadingText, ReadingSession, ReadingCollection } from '../types';
+import type { Deck, Card, Note, Revision, DeckPreset, ReadingText, ReadingSession, ReadingCollection } from '../types';
 
 class MemorizeDatabase extends Dexie {
   decks!: Table<Deck>;
   cards!: Table<Card>;
+  notes!: Table<Note>;
   revisions!: Table<Revision>;
   presets!: Table<DeckPreset>;
   readings!: Table<ReadingText>;
@@ -54,6 +55,51 @@ class MemorizeDatabase extends Dexie {
       readings: 'id, title, createdAt, collectionId',
       readingSessions: 'id, readingId, timestamp',
       readingCollections: 'id, title, createdAt'
+    });
+
+    this.version(6).stores({
+      decks: 'id, name, createdAt, updatedAt, presetId',
+      cards: 'id, deckId, dueDate, [deckId+dueDate], noteId, createdAt, updatedAt',
+      revisions: 'id, cardId, timestamp',
+      presets: 'id, name',
+      readings: 'id, title, createdAt, collectionId',
+      readingSessions: 'id, readingId, timestamp',
+      readingCollections: 'id, title, createdAt',
+      notes: 'id, deckId, createdAt'
+    }).upgrade(async tx => {
+      const cards = await tx.table('cards').toArray();
+      const notesToInsert: any[] = [];
+      const cardsToUpdate: any[] = [];
+
+      for (const card of cards) {
+        if (!card.noteId) {
+          const noteId = typeof crypto !== 'undefined' && crypto.randomUUID 
+            ? crypto.randomUUID() 
+            : Math.random().toString(36).substring(2, 15);
+          
+          notesToInsert.push({
+            id: noteId,
+            deckId: card.deckId,
+            type: 'basic',
+            fields: [card.front || '', card.back || ''],
+            tags: card.tags || [],
+            audio: card.audio,
+            context: card.context || '',
+            createdAt: card.createdAt || Date.now(),
+            updatedAt: card.updatedAt || Date.now()
+          });
+
+          card.noteId = noteId;
+          cardsToUpdate.push(card);
+        }
+      }
+
+      if (notesToInsert.length > 0) {
+        await tx.table('notes').bulkAdd(notesToInsert);
+      }
+      for (const card of cardsToUpdate) {
+        await tx.table('cards').put(card);
+      }
     });
   }
 }
@@ -176,7 +222,7 @@ export const defaultPreset: DeckPreset = {
   autoShowQuestionSeconds: 0,
   waitForAudio: true,
   questionAction: 'showAnswer',
-  answerAction: 'skip',
+  answerAction: 'good',
   daysOffMultiplier: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
   fsrsEnabled: false,
   maxInterval: 36500,

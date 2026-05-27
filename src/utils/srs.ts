@@ -122,16 +122,164 @@ export function calculateNextReview(card: Card, rating: number, preset?: DeckPre
   difficulty?: number;
   stability?: number;
   lastReview?: number;
+  learningStep?: number;
+  lapseInterval?: number;
+  suspended?: boolean;
+  tags?: string[];
 } {
   const selectedAlgo = preset 
     ? (preset.fsrsEnabled ? 'FSRS' : 'SM-2')
     : (typeof window !== 'undefined' ? (localStorage.getItem('memorize_algo') || 'SM-2') : 'SM-2');
     
   if (selectedAlgo === 'FSRS') {
-    return calculateFSRSReview(card, rating, preset);
+    const fsrsResult = calculateFSRSReview(card, rating, preset);
+    if (preset && rating === 1 && card.interval > 0) {
+      const nextLapses = card.lapses + 1;
+      if (nextLapses >= preset.leechThreshold) {
+        const currentTags = card.tags || [];
+        const nextTags = currentTags.includes('leech') ? undefined : [...currentTags, 'leech'];
+        const nextSuspended = preset.leechAction === 'suspend' ? true : undefined;
+        return {
+          ...fsrsResult,
+          ...(nextTags !== undefined ? { tags: nextTags } : {}),
+          ...(nextSuspended !== undefined ? { suspended: nextSuspended } : {})
+        };
+      }
+    }
+    return fsrsResult;
   }
 
-  // --- ALGORITMO SM-2 CLÁSSICO ---
+  // --- INICIALIZAÇÃO DE VARIÁVEIS DE SANGUESSUGA ---
+  let nextTags: string[] | undefined = undefined;
+  let nextSuspended: boolean | undefined = undefined;
+
+  if (preset && rating === 1 && card.interval > 0) {
+    const nextLapses = card.lapses + 1;
+    if (nextLapses >= preset.leechThreshold) {
+      const currentTags = card.tags || [];
+      if (!currentTags.includes('leech')) {
+        nextTags = [...currentTags, 'leech'];
+      }
+      if (preset.leechAction === 'suspend') {
+        nextSuspended = true;
+      }
+    }
+  }
+
+  // --- CONTROLE DE PASSOS DE APRENDIZADO INTRA-DIA (ANKI STYLE) ---
+  const isLearning = card.interval === 0 || card.learningStep !== undefined;
+
+  if (isLearning && preset) {
+    const isRelearning = card.lapseInterval !== undefined;
+    const stepsStr = isRelearning
+      ? (preset.relearningSteps !== undefined ? preset.relearningSteps.trim() : '10m')
+      : (preset.learningSteps !== undefined ? preset.learningSteps.trim() : '1m 10m');
+    const steps = stepsStr.split(/\s+/).filter(Boolean);
+
+    if (steps.length > 0) {
+      const currentStep = card.learningStep !== undefined ? card.learningStep : 0;
+      let nextLearningStep: number | undefined = currentStep;
+      let nextInterval = 0;
+      let nextRepetitions = card.repetitions;
+      let nextLapses = card.lapses;
+      let nextLapseInterval = card.lapseInterval;
+
+      if (rating === 1) {
+        // Errei (Again): Volta para o primeiro passo
+        nextLearningStep = 0;
+        nextInterval = 0;
+        nextRepetitions = 0;
+        nextLapses += 1;
+      } else if (rating === 2) {
+        // Difícil (Good / Avançar): Avança de passo
+        const nextStep = currentStep + 1;
+        if (nextStep < steps.length) {
+          nextLearningStep = nextStep;
+          nextInterval = 0;
+          nextRepetitions = 0;
+        } else {
+          // Gradua!
+          nextLearningStep = undefined;
+          if (card.lapseInterval !== undefined) {
+            nextInterval = card.lapseInterval;
+          } else {
+            nextInterval = preset.graduatingInterval;
+          }
+          nextRepetitions = 1;
+          nextLapseInterval = undefined;
+        }
+      } else {
+        // Fácil (3): Gradua imediatamente
+        nextLearningStep = undefined;
+        nextInterval = preset.easyInterval;
+        nextRepetitions = 1;
+        nextLapseInterval = undefined;
+      }
+
+      const nextDueDate = new Date();
+      if (nextInterval > 0) {
+        nextDueDate.setDate(nextDueDate.getDate() + nextInterval);
+      }
+      const dueDateStr = nextDueDate.toISOString().split('T')[0];
+
+      return {
+        interval: nextInterval,
+        ease: card.ease || preset.startingEase || 2.5,
+        repetitions: nextRepetitions,
+        lapses: nextLapses,
+        dueDate: dueDateStr,
+        learningStep: nextLearningStep,
+        lapseInterval: nextLapseInterval,
+        ...(nextTags !== undefined ? { tags: nextTags } : {}),
+        ...(nextSuspended !== undefined ? { suspended: nextSuspended } : {})
+      };
+    }
+  }
+
+  // --- RECONTAGEM DE FALHAS DE CARTÕES DE REVISÃO (RELEARNING) ---
+  if (rating === 1 && preset && card.interval > 0) {
+    const relearningStepsStr = preset.relearningSteps !== undefined ? preset.relearningSteps.trim() : '10m';
+    const relearningSteps = relearningStepsStr.split(/\s+/).filter(Boolean);
+
+    const lapseMult = preset.lapseMultiplier;
+    const minInt = preset.minimumInterval;
+    const nextLapseInt = Math.max(minInt, Math.round(card.interval * lapseMult));
+
+    if (relearningSteps.length > 0) {
+      // Entra em reaprendizagem
+      const nextDueDate = new Date();
+      const dueDateStr = nextDueDate.toISOString().split('T')[0];
+      return {
+        interval: 0,
+        ease: Math.max(1.3, (card.ease || preset.startingEase || 2.5) - 0.2),
+        repetitions: 0,
+        lapses: card.lapses + 1,
+        dueDate: dueDateStr,
+        learningStep: 0, // Primeiro passo
+        lapseInterval: nextLapseInt,
+        ...(nextTags !== undefined ? { tags: nextTags } : {}),
+        ...(nextSuspended !== undefined ? { suspended: nextSuspended } : {})
+      };
+    } else {
+      // Sem passos de reaprendizagem, agenda direto para os dias calculados
+      const nextDueDate = new Date();
+      nextDueDate.setDate(nextDueDate.getDate() + nextLapseInt);
+      const dueDateStr = nextDueDate.toISOString().split('T')[0];
+      return {
+        interval: nextLapseInt,
+        ease: Math.max(1.3, (card.ease || preset.startingEase || 2.5) - 0.2),
+        repetitions: 0,
+        lapses: card.lapses + 1,
+        dueDate: dueDateStr,
+        learningStep: undefined,
+        lapseInterval: undefined,
+        ...(nextTags !== undefined ? { tags: nextTags } : {}),
+        ...(nextSuspended !== undefined ? { suspended: nextSuspended } : {})
+      };
+    }
+  }
+
+  // --- ALGORITMO SM-2 CLÁSSICO PARA REVISÃO GERAL ---
   let { interval, ease, repetitions, lapses } = card;
   const minEase = 1.3;
   const startingEase = preset ? preset.startingEase : 2.5;
@@ -145,7 +293,6 @@ export function calculateNextReview(card: Card, rating: number, preset?: DeckPre
     lapses += 1;
     ease = Math.max(minEase, ease - 0.2);
     
-    // Aplica lapseMultiplier e mínimo de relearning/intervalo mínimo
     const lapseMult = preset ? preset.lapseMultiplier : 0.5;
     const minInt = preset ? preset.minimumInterval : 1;
     interval = Math.max(minInt, Math.round(interval * lapseMult));
@@ -153,6 +300,7 @@ export function calculateNextReview(card: Card, rating: number, preset?: DeckPre
       interval = minInt;
     }
   } else if (rating === 2) {
+    // Difícil (Hard)
     repetitions = repetitions === 0 ? 1 : repetitions;
     ease = Math.max(minEase, ease - 0.15);
     if (repetitions === 1) {
@@ -163,13 +311,22 @@ export function calculateNextReview(card: Card, rating: number, preset?: DeckPre
       const hardMultiplier = preset ? preset.hardInterval : 1.2;
       interval = Math.max(2, Math.round(interval * hardMultiplier));
     }
-  } else {
-    // rating === 3 (Fácil)
+  } else if (rating === 3) {
+    // Bom (Good)
     repetitions += 1;
     ease = ease + 0.15;
     if (repetitions === 1) {
       interval = preset ? preset.graduatingInterval : 1;
     } else if (repetitions === 2) {
+      interval = preset ? preset.easyInterval : 4;
+    } else {
+      interval = Math.max(6, Math.round(interval * ease));
+    }
+  } else {
+    // Fácil (Easy) — rating 4
+    repetitions += 1;
+    ease = ease + 0.15;
+    if (repetitions <= 2) {
       interval = preset ? preset.easyInterval : 4;
     } else {
       const easyBonus = preset ? preset.easyBonus : 1.3;
@@ -198,7 +355,9 @@ export function calculateNextReview(card: Card, rating: number, preset?: DeckPre
     ease,
     repetitions,
     lapses,
-    dueDate: dueDateStr
+    dueDate: dueDateStr,
+    ...(nextTags !== undefined ? { tags: nextTags } : {}),
+    ...(nextSuspended !== undefined ? { suspended: nextSuspended } : {})
   };
 }
 

@@ -5,6 +5,30 @@ export interface Deck {
   presetId?: string; // ID do preset de configurações associado
   createdAt: number; // timestamp MS
   updatedAt: number; // timestamp MS
+
+  // Overrides de Novos Cartões
+  newCardsLimitType?: 'preset' | 'deck' | 'today';
+  newCardsLimitValue?: number; // Usado quando limitType === 'deck'
+  newCardsLimitToday?: number; // Usado quando limitType === 'today'
+  newCardsLimitTodayDate?: string; // YYYY-MM-DD em que o limite de hoje foi definido
+
+  // Overrides de Revisões Máximas
+  reviewsLimitType?: 'preset' | 'deck' | 'today';
+  reviewsLimitValue?: number; // Usado quando limitType === 'deck'
+  reviewsLimitToday?: number; // Usado quando limitType === 'today'
+  reviewsLimitTodayDate?: string; // YYYY-MM-DD em que o limite de hoje foi definido
+}
+
+export interface Note {
+  id: string; // UUID
+  deckId: string;
+  type: 'basic' | 'reversed' | 'optional_reversed' | 'typing' | 'cloze';
+  fields: string[]; // [0] = Frente/Texto, [1] = Verso/Extra, [2] = Adicionar Invertido (se optional_reversed)
+  tags: string[];
+  audio?: Blob; // Áudio de pronúncia opcional da nota
+  context: string; // Exemplo em contexto
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface Card {
@@ -29,7 +53,16 @@ export interface Card {
   
   // Organização e Categorização
   tags?: string[]; // Etiquetas/Tags do cartão
+  suspended?: boolean; // Status de suspensão do cartão
   
+  // Controle de passos de aprendizado (Anki)
+  learningStep?: number; // Índice do passo de aprendizado atual (0-indexed)
+  lapseInterval?: number; // Intervalo de lapso pré-calculado
+
+  noteId?: string; // ID da Nota de origem
+  clozeIndex?: number; // Índice c1, c2, etc (se Cloze)
+  cardType?: 'forward' | 'reversed'; // Identificador de direção
+
   createdAt: number;
   updatedAt: number;
 }
@@ -42,6 +75,7 @@ export interface Revision {
   ease: number; // Fator de facilidade do cartão após essa revisão
   interval: number; // Novo intervalo do cartão após essa revisão
   wasNew?: boolean; // Se o cartão era novo antes desta revisão
+  duration?: number; // tempo gasto em segundos para responder
 }
 
 export interface Streak {
@@ -73,11 +107,11 @@ export interface DeckPreset {
   leechAction: 'tag' | 'suspend';
 
   // Ordem de Exibição
-  newCardGrouping: 'deck' | 'cardType';
-  newCardSorting: 'template' | 'random';
+  newCardGrouping: 'deck' | 'deckThenRandom' | 'ascending' | 'descending' | 'randomNote' | 'randomCard';
+  newCardSorting: 'template' | 'gather' | 'templateThenRandom' | 'randomNoteThenTemplate' | 'random';
   newVsReviewOrder: 'mix' | 'newFirst' | 'reviewFirst';
   interdayLearningVsReviewOrder: 'mix' | 'learningFirst' | 'reviewFirst';
-  reviewSorting: 'dateThenRandom' | 'random';
+  reviewSorting: 'dateThenRandom' | 'dateThenDeck' | 'deckThenDate' | 'intervalsAscending' | 'intervalsDescending' | 'easeAscending' | 'easeDescending' | 'retrievabilityAscending' | 'retrievabilityDescending' | 'random' | 'oldest' | 'newest';
 
   // Ocultar
   buryNewSiblings: boolean;
@@ -98,7 +132,7 @@ export interface DeckPreset {
   autoShowQuestionSeconds: number; // 0 = desabilitado
   waitForAudio: boolean;
   questionAction: 'showAnswer' | 'bury';
-  answerAction: 'bury' | 'skip';
+  answerAction: 'again' | 'hard' | 'good' | 'easy' | 'bury' | 'skip';
 
   // Dias de Descanso
   daysOffMultiplier: number[]; // 7 multiplicadores (seg a dom) entre 0.0 e 1.0

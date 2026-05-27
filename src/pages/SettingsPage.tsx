@@ -113,7 +113,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       autoShowQuestionSeconds: 0,
       waitForAudio: true,
       questionAction: 'showAnswer',
-      answerAction: 'skip',
+      answerAction: 'good',
       daysOffMultiplier: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
       fsrsEnabled: false,
       maxInterval: 36500,
@@ -251,6 +251,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             <div className="text-[10px] text-primary font-bold uppercase tracking-wider px-4 pt-4 pb-2 bg-muted/20">
               📅 Limites Diários
             </div>
+            <div className="px-4 py-2.5 bg-muted/5 border-b border-border/40 text-[10px] text-muted-foreground leading-relaxed flex gap-2">
+              <span>💡</span>
+              <span>Aqui você edita as regras globais deste Preset. Para configurar limites específicos ou temporários de um baralho (<strong>Esse baralho</strong> ou <strong>Somente hoje</strong>), acesse o menu ⚙️ no card do baralho no Painel e selecione ✏️ <strong>Editar Deck</strong>.</span>
+            </div>
             <div className="flex items-center justify-between p-4 bg-card">
               <div className="flex flex-col gap-0.5 max-w-[70%]">
                 <span className="text-xs font-bold text-foreground">Novos cartões/dia</span>
@@ -289,6 +293,18 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                 className="w-4 h-4 accent-primary cursor-pointer"
                 checked={activePresetToEdit.newCardsIgnoreReviewLimit}
                 onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, newCardsIgnoreReviewLimit: e.target.checked })}
+              />
+            </div>
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5 max-w-[80%]">
+                <span className="text-xs font-bold text-foreground">Os limites começam do deck superior</span>
+                <span className="text-[10px] text-muted-foreground">Faz com que os limites diários comecem a partir do baralho pai ao invés do sub-baralho selecionado.</span>
+              </div>
+              <input
+                type="checkbox"
+                className="w-4 h-4 accent-primary cursor-pointer"
+                checked={activePresetToEdit.limitsStartFromParent}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, limitsStartFromParent: e.target.checked })}
               />
             </div>
           </div>
@@ -416,45 +432,98 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             <div className="text-[10px] text-primary font-bold uppercase tracking-wider px-4 pt-4 pb-2 bg-muted/20">
               🔀 Ordem de Exibição
             </div>
+            
+            {/* Agrupamento de cartões novos */}
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs font-bold text-foreground">Agrupamento de cartões novos</span>
+              </div>
+              <select
+                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer max-w-[220px]"
+                value={activePresetToEdit.newCardGrouping}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, newCardGrouping: e.target.value as any })}
+              >
+                <option value="deck">Baralho</option>
+                <option value="deckThenRandom">Baralho, em seguida, notas aleatórias</option>
+                <option value="ascending">Posição ascendente</option>
+                <option value="descending">Posição descendente</option>
+                <option value="randomNote">Notas Aleatórias</option>
+                <option value="randomCard">Cartões Aleatórios</option>
+              </select>
+            </div>
+
+            {/* Classificação de cartões novos */}
+            <div className="flex items-center justify-between p-4 bg-card">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs font-bold text-foreground">Classificação de cartões novos</span>
+              </div>
+              <select
+                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer max-w-[220px]"
+                value={activePresetToEdit.newCardSorting}
+                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, newCardSorting: e.target.value as any })}
+              >
+                <option value="template">Modelo do cartão</option>
+                <option value="gather">Ordem de agrupamento</option>
+                <option value="templateThenRandom">Modelo do cartão, depois aleatório</option>
+                <option value="randomNoteThenTemplate">Nota aleatória e, em seguida, modelo do cartão</option>
+                <option value="random">Aleatório</option>
+              </select>
+            </div>
+
+            {/* Ordem de novos vs revisão */}
             <div className="flex items-center justify-between p-4 bg-card">
               <div className="flex flex-col gap-0.5">
                 <span className="text-xs font-bold text-foreground">Ordem de novos vs revisão</span>
               </div>
               <select
-                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer"
+                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer max-w-[220px]"
                 value={activePresetToEdit.newVsReviewOrder}
                 onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, newVsReviewOrder: e.target.value as any })}
               >
                 <option value="mix">Misturar com revisões</option>
-                <option value="newFirst">Mostrar novos primeiro</option>
-                <option value="reviewFirst">Mostrar revisões primeiro</option>
+                <option value="reviewFirst">Mostrar depois de revisões</option>
+                <option value="newFirst">Mostrar antes de revisões</option>
               </select>
             </div>
+
+            {/* Ordem de aprendizado vs revisão entre dias */}
             <div className="flex items-center justify-between p-4 bg-card">
               <div className="flex flex-col gap-0.5">
-                <span className="text-xs font-bold text-foreground">Ordem de aprendizado vs revisões</span>
+                <span className="text-xs font-bold text-foreground">Ordem de aprendizado vs revisão entre dias.</span>
               </div>
               <select
-                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer"
+                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer max-w-[220px]"
                 value={activePresetToEdit.interdayLearningVsReviewOrder}
                 onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, interdayLearningVsReviewOrder: e.target.value as any })}
               >
                 <option value="mix">Misturar com revisões</option>
-                <option value="learningFirst">Mostrar aprendizado primeiro</option>
-                <option value="reviewFirst">Mostrar revisões primeiro</option>
+                <option value="reviewFirst">Mostrar depois de revisões</option>
+                <option value="learningFirst">Mostrar antes de revisões</option>
               </select>
             </div>
+
+            {/* Ordem de classificação de revisões */}
             <div className="flex items-center justify-between p-4 bg-card">
               <div className="flex flex-col gap-0.5">
                 <span className="text-xs font-bold text-foreground">Ordem de classificação de revisões</span>
               </div>
               <select
-                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer"
+                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer max-w-[220px]"
                 value={activePresetToEdit.reviewSorting}
                 onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, reviewSorting: e.target.value as any })}
               >
                 <option value="dateThenRandom">Data de revisão, depois aleatório</option>
-                <option value="random">Totalmente aleatório</option>
+                <option value="dateThenDeck">Data de revisão, depois baralho</option>
+                <option value="deckThenDate">Baralho, depois data de revisão</option>
+                <option value="intervalsAscending">Intervalos ascendentes</option>
+                <option value="intervalsDescending">Intervalos descendentes</option>
+                <option value="easeAscending">Facilidade ascendente</option>
+                <option value="easeDescending">Facilidade descendente</option>
+                <option value="retrievabilityAscending">Mais prováveis de esquecer</option>
+                <option value="retrievabilityDescending">Mais prováveis de lembrar</option>
+                <option value="random">Aleatório</option>
+                <option value="oldest">Criados há mais tempo</option>
+                <option value="newest">Criados há menos tempo</option>
               </select>
             </div>
           </div>
@@ -642,8 +711,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                 value={activePresetToEdit.answerAction}
                 onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, answerAction: e.target.value as any })}
               >
-                <option value="skip">Próximo Cartão (Pular)</option>
-                <option value="bury">Ocultar Cartão</option>
+                <option value="good">Bom (Good)</option>
+                <option value="easy">Fácil (Easy)</option>
+                <option value="again">Errei (Again)</option>
+                <option value="hard">Difícil (Hard)</option>
+                <option value="skip">Pular Cartão</option>
+                <option value="bury">Ocultar até Amanhã</option>
               </select>
             </div>
           </div>
