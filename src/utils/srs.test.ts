@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { calculateNextReview, calculateFSRSReview, getFriendlyInterval } from './srs';
+import { 
+  calculateNextReview, 
+  calculateFSRSReview, 
+  getFriendlyInterval,
+  getLevenshteinDistance,
+  getWordLevenshteinDistance,
+  diffStrings,
+  diffWords
+} from './srs';
 import type { Card, DeckPreset } from '../types';
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -669,6 +677,79 @@ describe('Propriedades Gerais', () => {
       expect(result.lapses).toBe(6);
       expect(result.tags).toBeUndefined();
       expect(result.suspended).toBeUndefined();
+    });
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════
+// Testes de Distância e Diff de Texto (Levenshtein & LCS)
+// ═════════════════════════════════════════════════════════════════════
+
+describe('Distância de Texto e LCS Diff', () => {
+  describe('getLevenshteinDistance', () => {
+    it('retorna 0 para strings idênticas', () => {
+      expect(getLevenshteinDistance('apple', 'apple')).toBe(0);
+    });
+
+    it('detecta substituição de 1 caractere', () => {
+      expect(getLevenshteinDistance('apple', 'aple')).toBe(1); // remoção
+      expect(getLevenshteinDistance('apple', 'apPle')).toBe(1); // substituição case-sensitive ou insertion/deletion
+      expect(getLevenshteinDistance('table', 'tabel')).toBe(2); // duas substituições/transposições
+    });
+
+    it('detecta inserções e deleções', () => {
+      expect(getLevenshteinDistance('cat', 'cats')).toBe(1);
+      expect(getLevenshteinDistance('cats', 'cat')).toBe(1);
+    });
+  });
+
+  describe('getWordLevenshteinDistance', () => {
+    it('retorna 0 para listas de palavras idênticas', () => {
+      expect(getWordLevenshteinDistance(['how', 'are', 'you'], ['how', 'are', 'you'])).toBe(0);
+    });
+
+    it('detecta substituição de palavra', () => {
+      expect(getWordLevenshteinDistance(['how', 'are', 'you'], ['how', 'old', 'you'])).toBe(1);
+    });
+
+    it('detecta inserção/deleção de palavra', () => {
+      expect(getWordLevenshteinDistance(['how', 'are', 'you'], ['how', 'old', 'are', 'you'])).toBe(1);
+    });
+  });
+
+  describe('diffStrings', () => {
+    it('alinha strings com letras corretas, incorretas e faltantes', () => {
+      const result = diffStrings('aple', 'apple');
+      // Esperado:
+      // a (correct), p (missing), p (correct), l (correct), e (correct) ou similar dependendo do dp
+      expect(result).toHaveLength(5);
+      expect(result.filter(r => r.type === 'correct')).toHaveLength(4);
+      expect(result.filter(r => r.type === 'missing')).toHaveLength(1);
+    });
+
+    it('alinha strings com letras extras', () => {
+      const result = diffStrings('appple', 'apple');
+      expect(result).toHaveLength(6);
+      expect(result.filter(r => r.type === 'correct')).toHaveLength(5);
+      expect(result.filter(r => r.type === 'incorrect')).toHaveLength(1);
+    });
+  });
+
+  describe('diffWords', () => {
+    it('alinha frases com palavras corretas, extras e faltantes', () => {
+      const result = diffWords('how you today', 'how are you today');
+      expect(result).toHaveLength(4);
+      expect(result.filter(r => r.type === 'correct')).toHaveLength(3);
+      expect(result.filter(r => r.type === 'missing')).toHaveLength(1);
+      expect(result.find(r => r.type === 'missing')?.word).toBe('are');
+    });
+
+    it('alinha frases com palavras a mais', () => {
+      const result = diffWords('how old are you today', 'how are you today');
+      expect(result).toHaveLength(5);
+      expect(result.filter(r => r.type === 'correct')).toHaveLength(4);
+      expect(result.filter(r => r.type === 'incorrect')).toHaveLength(1);
+      expect(result.find(r => r.type === 'incorrect')?.word).toBe('old');
     });
   });
 });

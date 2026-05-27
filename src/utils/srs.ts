@@ -393,3 +393,158 @@ export function getFriendlyInterval(card: Card, rating: number, preset?: DeckPre
   const months = Math.round(days / 30);
   return `${months}m`;
 }
+
+export interface DiffChar {
+  char: string;
+  type: 'correct' | 'incorrect' | 'missing';
+}
+
+export interface DiffWord {
+  word: string;
+  type: 'correct' | 'incorrect' | 'missing';
+}
+
+/**
+ * Calcula a distância de Levenshtein entre duas strings de caracteres.
+ */
+export function getLevenshteinDistance(a: string, b: string): number {
+  const matrix = [];
+
+  for (let i = 0; i <= b.length; i++) {
+    matrix[i] = [i];
+  }
+
+  for (let j = 0; j <= a.length; j++) {
+    matrix[0][j] = j;
+  }
+
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b[i - 1] === a[j - 1]) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1, // substituição
+          matrix[i][j - 1] + 1,     // inserção
+          matrix[i - 1][j] + 1      // deleção
+        );
+      }
+    }
+  }
+
+  return matrix[b.length][a.length];
+}
+
+/**
+ * Calcula a distância de Levenshtein entre duas listas de palavras.
+ */
+export function getWordLevenshteinDistance(a: string[], b: string[]): number {
+  const clean = (s: string) => s.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, "").toLowerCase().trim();
+  const matrix = [];
+
+  for (let i = 0; i <= b.length; i++) {
+    matrix[i] = [i];
+  }
+
+  for (let j = 0; j <= a.length; j++) {
+    matrix[0][j] = j;
+  }
+
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (clean(b[i - 1]) === clean(a[j - 1])) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1, // substituição
+          matrix[i][j - 1] + 1,     // inserção
+          matrix[i - 1][j] + 1      // deleção
+        );
+      }
+    }
+  }
+
+  return matrix[b.length][a.length];
+}
+
+/**
+ * Realiza um diff de caracteres usando Longest Common Subsequence (LCS).
+ */
+export function diffStrings(typed: string, expected: string): DiffChar[] {
+  const m = typed.length;
+  const n = expected.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (typed[i - 1].toLowerCase() === expected[j - 1].toLowerCase()) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
+  const diff: DiffChar[] = [];
+  let i = m;
+  let j = n;
+
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && typed[i - 1].toLowerCase() === expected[j - 1].toLowerCase()) {
+      diff.unshift({ char: expected[j - 1], type: 'correct' });
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      diff.unshift({ char: expected[j - 1], type: 'missing' });
+      j--;
+    } else {
+      diff.unshift({ char: typed[i - 1], type: 'incorrect' });
+      i--;
+    }
+  }
+
+  return diff;
+}
+
+/**
+ * Realiza um diff de palavras usando Longest Common Subsequence (LCS).
+ */
+export function diffWords(spoken: string, expected: string): DiffWord[] {
+  const clean = (s: string) => s.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?]/g, "").toLowerCase().trim();
+  const spokenWords = spoken.split(/\s+/).filter(Boolean);
+  const expectedWords = expected.split(/\s+/).filter(Boolean);
+
+  const m = spokenWords.length;
+  const n = expectedWords.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (clean(spokenWords[i - 1]) === clean(expectedWords[j - 1])) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
+  const diff: DiffWord[] = [];
+  let i = m;
+  let j = n;
+
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && clean(spokenWords[i - 1]) === clean(expectedWords[j - 1])) {
+      diff.unshift({ word: expectedWords[j - 1], type: 'correct' });
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      diff.unshift({ word: expectedWords[j - 1], type: 'missing' });
+      j--;
+    } else {
+      diff.unshift({ word: spokenWords[i - 1], type: 'incorrect' });
+      i--;
+    }
+  }
+
+  return diff;
+}

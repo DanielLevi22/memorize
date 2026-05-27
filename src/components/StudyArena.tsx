@@ -1,7 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Eye, AlertCircle, Volume2, Mic } from 'lucide-react';
 import type { Card, DeckPreset } from '../types';
-import { getFriendlyInterval, calculateNextReview } from '../utils/srs';
+import { 
+  getFriendlyInterval, 
+  calculateNextReview,
+  getLevenshteinDistance,
+  getWordLevenshteinDistance,
+  diffStrings,
+  diffWords,
+  type DiffChar,
+  type DiffWord
+} from '../utils/srs';
 import { areCardSiblings } from '../utils/limits';
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
@@ -85,7 +94,9 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
   const [typedAnswer, setTypedAnswer] = useState('');
   const [hasCheckedAnswer, setHasCheckedAnswer] = useState(false);
   const [isAnswerCorrect, setIsAnswerCorrect] = useState<boolean | null>(null);
-  const [spokenText, setSpokenText] = useState('');
+  const [isAlmostCorrect, setIsAlmostCorrect] = useState(false);
+  const [charDiffs, setCharDiffs] = useState<DiffChar[]>([]);
+  const [wordDiffs, setWordDiffs] = useState<DiffWord[]>([]);
   const [isListeningSpeech, setIsListeningSpeech] = useState(false);
   const recognitionRef = useRef<any>(null);
   const cardStartTimeRef = useRef<number>(Date.now());
@@ -137,7 +148,9 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
     setTypedAnswer('');
     setHasCheckedAnswer(false);
     setIsAnswerCorrect(null);
-    setSpokenText('');
+    setIsAlmostCorrect(false);
+    setCharDiffs([]);
+    setWordDiffs([]);
     setIsListeningSpeech(false);
     if (recognitionRef.current) {
       try {
@@ -348,8 +361,29 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
   const handleCheckWritingAnswer = () => {
     if (!typedAnswer.trim()) return;
     const expected = stripHtmlTags(currentCard.front);
-    const correct = cleanString(typedAnswer) === cleanString(expected);
+    
+    const cleanTyped = cleanString(typedAnswer);
+    const cleanExpected = cleanString(expected);
+
+    const isExact = cleanTyped === cleanExpected;
+    let correct = isExact;
+    let almost = false;
+
+    if (!isExact) {
+      const dist = getLevenshteinDistance(cleanTyped, cleanExpected);
+      const threshold = cleanExpected.length <= 5 ? 1 : 2;
+      
+      if (dist <= threshold) {
+        correct = true;
+        almost = true;
+      }
+    }
+
+    const diff = diffStrings(typedAnswer, expected);
+    setCharDiffs(diff);
+
     setIsAnswerCorrect(correct);
+    setIsAlmostCorrect(almost);
     setHasCheckedAnswer(true);
     setIsFlipped(true);
   };
@@ -368,7 +402,6 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
       return;
     }
 
-    setSpokenText('');
     setIsListeningSpeech(true);
 
     try {
@@ -379,10 +412,28 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
 
       recognition.onresult = (event: any) => {
         const resultText = event.results[0][0].transcript;
-        setSpokenText(resultText);
         
         const expected = stripHtmlTags(currentCard.front);
-        const correct = cleanString(resultText) === cleanString(expected);
+        
+        const cleanTyped = cleanString(resultText);
+        const cleanExpected = cleanString(expected);
+        
+        const spokenWords = cleanTyped.split(/\s+/).filter(Boolean);
+        const expectedWords = cleanExpected.split(/\s+/).filter(Boolean);
+        
+        let correct = false;
+        if (spokenWords.length > 0 && expectedWords.length > 0) {
+          const wordDist = getWordLevenshteinDistance(spokenWords, expectedWords);
+          const maxWords = Math.max(spokenWords.length, expectedWords.length);
+          const similarity = Math.max(0, 1 - wordDist / maxWords) * 100;
+          correct = similarity >= 80;
+        } else {
+          correct = cleanTyped === cleanExpected;
+        }
+
+        const diff = diffWords(resultText, expected);
+        setWordDiffs(diff);
+
         setIsAnswerCorrect(correct);
         setHasCheckedAnswer(true);
         setIsFlipped(true);
@@ -778,28 +829,49 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                 </div>
 
                 {hasCheckedAnswer && (
-                  <div className="w-full p-2.5 rounded-xl border mt-2 text-left text-xs space-y-1 bg-muted/40 border-border">
+                  <div className="w-full p-2.5 rounded-xl border mt-2 text-left text-xs space-y-2 bg-muted/40 border-border">
                     {isAnswerCorrect ? (
-                      <span className="font-bold text-emerald-600 dark:text-emerald-400 block text-center">
-                        🎉 Resposta Correta!
-                      </span>
-                    ) : (
-                      <>
-                        <span className="font-bold text-red-500 block text-center mb-1">
-                          ❌ Ortografia Incorreta
+                      isAlmostCorrect ? (
+                        <span className="font-bold text-amber-500 dark:text-amber-400 block text-center">
+                          ⚠️ Quase Correto! (Erro de digitação leve)
                         </span>
-                        <div className="grid grid-cols-2 gap-2 text-[10px]">
-                          <div>
-                            <span className="text-zinc-400 block">Você digitou:</span>
-                            <span className="font-bold text-foreground line-through decoration-red-500/50">{typedAnswer || '(Vazio)'}</span>
-                          </div>
-                          <div>
-                            <span className="text-zinc-400 block">Esperado:</span>
-                            <span className="font-bold text-emerald-600 dark:text-emerald-400">{stripHtmlTags(currentCard.front)}</span>
-                          </div>
-                        </div>
-                      </>
+                      ) : (
+                        <span className="font-bold text-emerald-600 dark:text-emerald-400 block text-center">
+                          🎉 Resposta Correta!
+                        </span>
+                      )
+                    ) : (
+                      <span className="font-bold text-red-500 block text-center">
+                        ❌ Ortografia Incorreta
+                      </span>
                     )}
+
+                    <div className="border-t border-border/40 pt-2 space-y-1">
+                      <span className="text-[10px] text-zinc-400 block text-center">Comparação:</span>
+                      <div className="text-center font-bold text-[13px] tracking-wide py-1.5 flex flex-wrap justify-center gap-px font-mono">
+                        {charDiffs.map((token, idx) => {
+                          if (token.type === 'correct') {
+                            return (
+                              <span key={idx} className="text-emerald-600 dark:text-emerald-400">
+                                {token.char}
+                              </span>
+                            );
+                          } else if (token.type === 'incorrect') {
+                            return (
+                              <span key={idx} className="text-red-500 line-through bg-red-500/10 px-0.5 rounded" title="Caractere extra">
+                                {token.char}
+                              </span>
+                            );
+                          } else {
+                            return (
+                              <span key={idx} className="text-zinc-400 dark:text-zinc-500 border-b-2 border-dashed border-zinc-400 px-0.5" title="Caractere faltante">
+                                {token.char}
+                              </span>
+                            );
+                          }
+                        })}
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -860,28 +932,43 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                 </div>
 
                 {hasCheckedAnswer && (
-                  <div className="w-full p-2.5 rounded-xl border mt-2 text-left text-xs space-y-1 bg-muted/40 border-border">
+                  <div className="w-full p-2.5 rounded-xl border mt-2 text-left text-xs space-y-2 bg-muted/40 border-border">
                     {isAnswerCorrect ? (
                       <span className="font-bold text-emerald-600 dark:text-emerald-400 block text-center">
                         ✨ Excelente Pronúncia!
                       </span>
                     ) : (
-                      <>
-                        <span className="font-bold text-red-500 block text-center mb-1">
-                          ❌ Pronúncia incorreta
-                        </span>
-                        <div className="grid grid-cols-2 gap-2 text-[10px]">
-                          <div>
-                            <span className="text-zinc-400 block">Robô ouviu:</span>
-                            <span className="font-bold text-foreground italic">"{spokenText || '(Silêncio)'}"</span>
-                          </div>
-                          <div>
-                            <span className="text-zinc-400 block">Esperado:</span>
-                            <span className="font-bold text-emerald-600 dark:text-emerald-400">"{stripHtmlTags(currentCard.front)}"</span>
-                          </div>
-                        </div>
-                      </>
+                      <span className="font-bold text-red-500 block text-center">
+                        ❌ Pronúncia incorreta
+                      </span>
                     )}
+
+                    <div className="border-t border-border/40 pt-2 space-y-1">
+                      <span className="text-[10px] text-zinc-400 block text-center">Alinhamento de palavras:</span>
+                      <div className="text-center font-semibold text-sm tracking-wide py-1.5 flex flex-wrap justify-center gap-x-1.5 gap-y-1 leading-relaxed">
+                        {wordDiffs.map((token, idx) => {
+                          if (token.type === 'correct') {
+                            return (
+                              <span key={idx} className="text-emerald-600 dark:text-emerald-400 font-bold">
+                                {token.word}
+                              </span>
+                            );
+                          } else if (token.type === 'incorrect') {
+                            return (
+                              <span key={idx} className="text-red-500 line-through bg-red-500/10 px-1 rounded font-bold" title="Palavra extra ou incorreta na pronúncia">
+                                {token.word}
+                              </span>
+                            );
+                          } else {
+                            return (
+                              <span key={idx} className="text-zinc-400 dark:text-zinc-500 border-b border-dashed border-zinc-400 px-0.5" title="Palavra faltante na pronúncia">
+                                {token.word}
+                              </span>
+                            );
+                          }
+                        })}
+                      </div>
+                    </div>
                   </div>
                 )}
 
