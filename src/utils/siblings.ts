@@ -53,7 +53,7 @@ export function formatClozeAnswer(text: string, activeIndex: number, extraText: 
 }
 
 interface RequiredCardDef {
-  cardType: 'forward' | 'reversed';
+  cardType: 'forward' | 'reversed' | 'listening';
   clozeIndex?: number;
   front: string;
   back: string;
@@ -72,6 +72,12 @@ export function syncNoteCards(
   if (note.type === 'basic' || note.type === 'typing') {
     reqDefs.push({
       cardType: 'forward',
+      front: note.fields[0] || '',
+      back: note.fields[1] || '',
+    });
+  } else if (note.type === 'listening') {
+    reqDefs.push({
+      cardType: 'listening',
       front: note.fields[0] || '',
       back: note.fields[1] || '',
     });

@@ -29,7 +29,7 @@ export interface Deck {
 export interface Note {
   id: string; // UUID
   deckId: string;
-  type: 'basic' | 'reversed' | 'optional_reversed' | 'typing' | 'cloze';
+  type: 'basic' | 'reversed' | 'optional_reversed' | 'typing' | 'cloze' | 'listening';
   fields: string[]; // [0] = Frente/Texto, [1] = Verso/Extra, [2] = Adicionar Invertido (se optional_reversed)
   tags: string[];
   audio?: Blob; // Áudio de pronúncia opcional da nota
@@ -67,7 +67,7 @@ export interface Card {
 
   noteId?: string; // ID da Nota de origem
   clozeIndex?: number; // Índice c1, c2, etc (se Cloze)
-  cardType?: 'forward' | 'reversed'; // Identificador de direção
+  cardType?: 'forward' | 'reversed' | 'listening'; // Identificador de direção
 
   createdAt: number;
   updatedAt: number;

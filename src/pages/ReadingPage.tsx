@@ -7,8 +7,17 @@ import {
   Mic, Keyboard
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { db } from '../db/db';
-import type { ReadingText, ReadingCollection } from '../types';
+import type { ReadingText, ReadingCollection, Note, Card } from '../types';
+
+interface DraftCard {
+  id: string; // Temporary UI id
+  originalLineIdx: number;
+  field0: string; // Frente ou Cloze
+  field1: string; // Verso ou Extra
+  field2: string; // Gatilho Inverso (para optional_reversed)
+}
 import { ReadingImportModal } from '../components/ReadingImportModal';
 import { KeyboardShortcutCheatsheet } from '../components/KeyboardShortcutCheatsheet';
 import {
@@ -21,6 +30,7 @@ import {
 import { extractTextFromPdf, processTextWithAI, segmentTextManually, segmentAndTranslateWithFreeAPI, translateWithMyMemory } from '../utils/readingProcessor';
 import { motion } from 'framer-motion';
 import { getWordLevenshteinDistance, diffWords, type DiffWord, getLevenshteinDistance, diffStrings, type DiffChar } from '../utils/srs';
+import { syncNoteCards } from '../utils/siblings';
 
 const stripHtmlTags = (str: string) => {
   if (!str) return '';
@@ -120,7 +130,9 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   // Add to deck
   const [isAddToDeckOpen, setIsAddToDeckOpen] = useState(false);
   const [addToDeckId, setAddToDeckId] = useState('');
+  const [addToDeckNoteType, setAddToDeckNoteType] = useState<'basic' | 'reversed' | 'optional_reversed' | 'typing' | 'cloze' | 'listening'>('basic');
   const [selectedLineIdxs, setSelectedLineIdxs] = useState<Set<number>>(new Set());
+  const [draftCards, setDraftCards] = useState<Record<number, DraftCard>>({});
   const [isAddingToDeck, setIsAddingToDeck] = useState(false);
   const [addToDeckSuccess, setAddToDeckSuccess] = useState('');
 
@@ -1332,6 +1344,19 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
     setSelectedLineIdxs(allIdxs);
     setAddToDeckId(decks[0]?.id || '');
     setAddToDeckSuccess('');
+
+    const initialDrafts: Record<number, DraftCard> = {};
+    selectedText.lines.forEach((line, idx) => {
+      initialDrafts[idx] = {
+        id: `draft_${idx}_${Date.now()}`,
+        originalLineIdx: idx,
+        field0: line.original,
+        field1: line.translated,
+        field2: ''
+      };
+    });
+    setDraftCards(initialDrafts);
+
     setIsAddToDeckOpen(true);
   };
 
@@ -1348,25 +1373,34 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
     if (!selectedText || !addToDeckId || selectedLineIdxs.size === 0) return;
     setIsAddingToDeck(true);
     try {
-      const todayStr = new Date().toISOString().split('T')[0];
-      const newCards = [...selectedLineIdxs].map(idx => {
-        const line = selectedText.lines[idx];
-        return {
-          id: crypto.randomUUID(),
+      const newNotes: Note[] = [];
+      const newCards: Card[] = [];
+
+      for (const idx of selectedLineIdxs) {
+        const draft = draftCards[idx];
+        if (!draft) continue;
+
+        const noteId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
+        
+        const newNote: Note = {
+          id: noteId,
           deckId: addToDeckId,
-          front: line.original,
-          back: line.translated,
+          type: addToDeckNoteType,
+          fields: [draft.field0, draft.field1, draft.field2],
+          tags: ['reading'],
           context: selectedText.title,
-          interval: 0,
-          ease: 2.5,
-          repetitions: 0,
-          lapses: 0,
-          dueDate: todayStr,
           createdAt: Date.now(),
-          updatedAt: Date.now(),
+          updatedAt: Date.now()
         };
-      });
+        newNotes.push(newNote);
+
+        const { toAdd } = syncNoteCards(newNote, []);
+        newCards.push(...toAdd);
+      }
+
+      await db.notes.bulkAdd(newNotes);
       await db.cards.bulkAdd(newCards);
+
       setAddToDeckSuccess(`${newCards.length} card${newCards.length !== 1 ? 's' : ''} adicionado${newCards.length !== 1 ? 's' : ''} ao baralho!`);
       setTimeout(() => {
         setIsAddToDeckOpen(false);
@@ -2843,7 +2877,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
         {/* Add to Deck Dialog */}
         <Dialog open={isAddToDeckOpen} onOpenChange={(open) => !open && setIsAddToDeckOpen(false)}>
 
-          <DialogContent className="bg-card border-border max-w-2xl flex flex-col max-h-[90vh] overflow-hidden p-0">
+          <DialogContent className="bg-card border-border sm:max-w-4xl w-full flex flex-col max-h-[90vh] overflow-hidden p-0">
             <DialogHeader className="p-6 pb-4 border-b border-border/40">
               <DialogTitle className="flex items-center gap-2 text-foreground font-black">
                 <BookOpen className="text-violet-500" size={18} />
@@ -2862,20 +2896,52 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
               <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
                 {/* Scrollable body content */}
                 <div className="flex-1 overflow-y-auto p-6 space-y-4 max-h-[60vh]">
-                  {/* Deck selector */}
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                      Baralho de destino
-                    </label>
-                    <select
-                      className="w-full bg-muted border border-border text-foreground px-4 py-2.5 rounded-xl text-sm outline-none focus:border-primary/50 font-semibold cursor-pointer"
-                      value={addToDeckId}
-                      onChange={e => setAddToDeckId(e.target.value)}
-                    >
-                      {decks.map(d => (
-                        <option key={d.id} value={d.id}>{d.name}</option>
-                      ))}
-                    </select>
+                  {/* Deck and Type selectors */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                        Baralho de destino
+                      </label>
+                      <Select value={addToDeckId} onValueChange={setAddToDeckId}>
+                        <SelectTrigger className="w-full bg-muted border border-border text-foreground px-4 py-2.5 rounded-xl text-sm font-semibold h-11 focus:border-primary/50">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {decks.map(d => (
+                            <SelectItem key={d.id} value={d.id} className="text-sm font-semibold cursor-pointer">
+                              {d.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                        Modelo de Cartão
+                      </label>
+                      <Select value={addToDeckNoteType} onValueChange={(val: any) => setAddToDeckNoteType(val)}>
+                        <SelectTrigger className="w-full bg-muted border border-border text-foreground px-4 py-2.5 rounded-xl text-sm font-semibold h-11 focus:border-primary/50">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="basic" className="text-sm font-semibold cursor-pointer">Básico</SelectItem>
+                          <SelectItem value="reversed" className="text-sm font-semibold cursor-pointer">Básico + Reverso</SelectItem>
+                          <SelectItem value="optional_reversed" className="text-sm font-semibold cursor-pointer">Básico (Invertido Opcional)</SelectItem>
+                          <SelectItem value="typing" className="text-sm font-semibold cursor-pointer">Básico (Digite a Resposta)</SelectItem>
+                          <SelectItem value="cloze" className="text-sm font-semibold cursor-pointer">Omissão de Palavras (Cloze)</SelectItem>
+                          <SelectItem value="listening" className="text-sm font-semibold cursor-pointer">Prática de Audição (Listening)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[10px] text-muted-foreground pt-1 leading-relaxed">
+                        {addToDeckNoteType === 'basic' && "Cartão simples. Você vê a frente e tenta lembrar o verso."}
+                        {addToDeckNoteType === 'reversed' && "Cria 2 cartões. Um normal (Frente ➔ Verso) e outro invertido (Verso ➔ Frente)."}
+                        {addToDeckNoteType === 'optional_reversed' && "Cria um cartão normal, e permite criar um reverso apenas se preencher o 3º campo."}
+                        {addToDeckNoteType === 'typing' && "Você vê a frente e precisa digitar exatamente o texto do verso."}
+                        {addToDeckNoteType === 'cloze' && "Oculta partes do texto marcadas com {{c1::palavra}} para você adivinhar."}
+                        {addToDeckNoteType === 'listening' && "Oculta o texto inicial, toca o áudio, e revela a resposta só após você responder."}
+                      </p>
+                    </div>
                   </div>
 
                   {/* Select all / Deselect all */}
@@ -2901,30 +2967,79 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                   </div>
 
                   {/* Lines list */}
-                  <div className="space-y-2">
-                    {selectedText?.lines.map((line, idx) => (
-                      <label
-                        key={idx}
-                        className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
-                          selectedLineIdxs.has(idx)
-                            ? 'border-violet-500/40 bg-violet-500/5'
-                            : 'border-border hover:border-border/80 hover:bg-muted/30'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          className="mt-0.5 w-4 h-4 accent-violet-500 cursor-pointer flex-shrink-0"
-                          checked={selectedLineIdxs.has(idx)}
-                          onChange={() => handleToggleLineIdx(idx)}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-semibold text-foreground leading-relaxed break-words">{line.original}</p>
-                          {line.translated && (
-                            <p className="text-[10px] text-muted-foreground break-words mt-1 border-t border-border/20 pt-1">{line.translated}</p>
+                  <div className="space-y-4">
+                    {selectedText?.lines.map((line, idx) => {
+                      const isSelected = selectedLineIdxs.has(idx);
+                      const draft = draftCards[idx];
+                      if (!draft) return null;
+
+                      return (
+                        <div
+                          key={idx}
+                          className={`flex flex-col gap-3 p-4 rounded-xl border transition-all ${
+                            isSelected
+                              ? 'border-violet-500/40 bg-violet-500/5'
+                              : 'border-border hover:border-border/80 hover:bg-muted/30 opacity-60'
+                          }`}
+                        >
+                          <label className="flex items-start gap-3 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="mt-0.5 w-4 h-4 accent-violet-500 cursor-pointer flex-shrink-0"
+                              checked={isSelected}
+                              onChange={() => handleToggleLineIdx(idx)}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-semibold text-foreground leading-relaxed break-words line-clamp-1">{line.original}</p>
+                            </div>
+                          </label>
+
+                          {isSelected && (
+                            <div className="pl-7 grid gap-3 md:grid-cols-2">
+                              {/* Campo 0: Frente / Cloze */}
+                              <div className="space-y-1 col-span-1 md:col-span-2">
+                                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                                  {addToDeckNoteType === 'cloze' ? 'Texto com Omissão (use {{c1::palavra}})' : 'Frente (Idioma de Estudo)'}
+                                </label>
+                                <textarea
+                                  className="w-full bg-background border border-border text-foreground px-3 py-2 rounded-lg text-xs outline-none focus:border-violet-500 resize-y min-h-[60px]"
+                                  value={draft.field0}
+                                  onChange={(e) => setDraftCards(prev => ({ ...prev, [idx]: { ...prev[idx], field0: e.target.value } }))}
+                                />
+                              </div>
+
+                              {/* Campo 1: Verso / Extra */}
+                              <div className={`space-y-1 ${addToDeckNoteType === 'optional_reversed' ? 'col-span-1' : 'col-span-1 md:col-span-2'}`}>
+                                <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                                  {addToDeckNoteType === 'cloze' ? 'Texto Extra (Opcional)' : 'Verso (Tradução/Significado)'}
+                                </label>
+                                <textarea
+                                  className="w-full bg-background border border-border text-foreground px-3 py-2 rounded-lg text-xs outline-none focus:border-violet-500 resize-y min-h-[60px]"
+                                  value={draft.field1}
+                                  onChange={(e) => setDraftCards(prev => ({ ...prev, [idx]: { ...prev[idx], field1: e.target.value } }))}
+                                />
+                              </div>
+
+                              {/* Campo 2: Gatilho Inverso (apenas optional_reversed) */}
+                              {addToDeckNoteType === 'optional_reversed' && (
+                                <div className="space-y-1 col-span-1">
+                                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                                    Adicionar Reverso? (Digite "y" p/ criar)
+                                  </label>
+                                  <input
+                                    type="text"
+                                    className="w-full bg-background border border-border text-foreground px-3 py-2 rounded-lg text-xs outline-none focus:border-violet-500 h-[60px]"
+                                    value={draft.field2}
+                                    placeholder='Ex: "y"'
+                                    onChange={(e) => setDraftCards(prev => ({ ...prev, [idx]: { ...prev[idx], field2: e.target.value } }))}
+                                  />
+                                </div>
+                              )}
+                            </div>
                           )}
                         </div>
-                      </label>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -2976,7 +3091,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
         {/* Append Block Dialog */}
         <Dialog open={isAppendBlockModalOpen} onOpenChange={(open) => !open && closeAppendBlockModal()}>
 
-          <DialogContent className="bg-card border-border max-w-lg overflow-y-auto max-h-[90vh]">
+          <DialogContent className="bg-card border-border sm:max-w-5xl w-full max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-foreground font-black">
                 <Upload className="text-primary" size={18} />
@@ -2989,177 +3104,186 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                 As frases extraídas abaixo serão anexadas ao final do texto atual: <strong className="text-foreground">{selectedText.title}</strong>.
               </span>
 
-              {/* Texto Original */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                  Texto Original (Idioma de estudo)
-                </label>
-                <textarea
-                  placeholder="Cole aqui o texto em inglês, espanhol, etc..."
-                  className="w-full bg-muted border border-border text-foreground p-3.5 rounded-xl text-xs outline-none focus:border-primary/50 min-h-[120px] resize-y font-mono leading-relaxed transition-colors"
-                  value={appendBlockOriginalText}
-                  onChange={(e) => setAppendBlockOriginalText(e.target.value)}
-                  disabled={appendBlockIsProcessing}
-                />
-              </div>
-
-              {/* Tradução */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                    Tradução (Seu idioma nativo)
-                  </label>
-                  {appendBlockMode !== 'manual' && (
-                    <span className="text-[10px] font-bold text-violet-500 bg-violet-500/10 px-2 py-0.5 rounded-full border border-violet-500/20 animate-fadeIn">
-                      {appendBlockMode === 'gemini' ? 'Preenchida pela IA ✨' : 'Traduzido gratuitamente 🌐'}
-                    </span>
-                  )}
-                </div>
-                <textarea
-                  placeholder="Cole aqui a tradução (ou deixe vazio se usar IA/MyMemory)..."
-                  className="w-full bg-muted border border-border text-foreground p-3.5 rounded-xl text-xs outline-none focus:border-primary/50 min-h-[120px] resize-y font-mono leading-relaxed transition-colors disabled:opacity-50"
-                  value={appendBlockTranslatedText}
-                  onChange={(e) => setAppendBlockTranslatedText(e.target.value)}
-                  disabled={appendBlockIsProcessing || appendBlockMode !== 'manual'}
-                />
-              </div>
-
-              {/* PDF Divisor */}
-              <div className="relative flex items-center justify-center py-1">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-border/60" />
-                </div>
-                <span className="relative bg-card px-4 text-[9px] font-bold text-muted-foreground uppercase tracking-widest">
-                  ou extraia de um PDF
-                </span>
-              </div>
-
-              {/* PDF Dropzone */}
-              <div
-                className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all duration-200 ${
-                  appendBlockIsPdfLoading
-                    ? 'border-primary/50 bg-primary/5'
-                    : 'border-border/60 hover:border-primary/40 hover:bg-muted/30'
-                }`}
-                onClick={() => !appendBlockIsPdfLoading && !appendBlockIsProcessing && document.getElementById('append-pdf-file-input')?.click()}
-              >
-                {appendBlockIsPdfLoading ? (
-                  <div className="flex flex-col items-center gap-2">
-                    <Loader2 size={24} className="text-primary animate-spin" />
-                    <span className="text-xs font-bold text-primary">Extraindo texto do PDF...</span>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center gap-1.5">
-                    <Upload size={24} className="text-muted-foreground" />
-                    <span className="text-xs font-semibold text-muted-foreground">
-                      {appendBlockPdfBlob ? `PDF Selecionado: ${(appendBlockPdfBlob as File).name}` : 'Arraste um PDF aqui ou clique para selecionar'}
-                    </span>
-                    <span className="text-[9px] text-muted-foreground/60">
-                      O texto extraído preencherá o campo "Texto Original"
-                    </span>
-                  </div>
-                )}
-                <input
-                  id="append-pdf-file-input"
-                  type="file"
-                  accept=".pdf"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleAppendBlockPdfUpload(file);
-                    e.target.value = '';
-                  }}
-                />
-              </div>
-
-              {/* Método de Processamento / Tradução */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                  Método de Tradução e Segmentação
-                </label>
-                <div className="grid grid-cols-1 gap-2.5">
-                  {/* Gemini Option */}
-                  <label className={`flex items-start gap-3 p-3 border rounded-xl cursor-pointer transition-all duration-200 ${
-                    appendBlockMode === 'gemini'
-                      ? 'border-violet-500 bg-violet-500/5 dark:bg-violet-500/10'
-                      : 'border-border/60 hover:bg-muted/30'
-                  }`}>
-                    <input
-                      type="radio"
-                      name="appendBlockMode"
-                      value="gemini"
-                      checked={appendBlockMode === 'gemini'}
-                      onChange={() => setAppendBlockMode('gemini')}
-                      disabled={appendBlockIsProcessing || !geminiApiKey.trim()}
-                      className="mt-1.5 w-4 h-4 text-violet-600 border-zinc-300 dark:border-zinc-700 bg-background focus:ring-violet-500 cursor-pointer"
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Left Column: Texto Original e Tradução */}
+                <div className="space-y-4 flex flex-col">
+                  {/* Texto Original */}
+                  <div className="space-y-1.5 flex-1 flex flex-col">
+                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                      Texto Original (Idioma de estudo)
+                    </label>
+                    <textarea
+                      placeholder="Cole aqui o texto em inglês, espanhol, etc..."
+                      className="w-full bg-muted border border-border text-foreground p-3.5 rounded-xl text-xs outline-none focus:border-primary/50 flex-1 min-h-[150px] resize-y font-mono leading-relaxed transition-colors"
+                      value={appendBlockOriginalText}
+                      onChange={(e) => setAppendBlockOriginalText(e.target.value)}
+                      disabled={appendBlockIsProcessing}
                     />
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                        <Sparkles size={12} className="text-violet-500" />
-                        Segmentação e Tradução por IA (Gemini)
-                      </span>
-                      {!geminiApiKey.trim() ? (
-                        <span className="text-[9px] text-destructive font-semibold">
-                          Requer chave de API nas Configurações (Permite destacar palavras-chave)
-                        </span>
-                      ) : (
-                        <span className="text-[9px] text-muted-foreground">
-                          A IA segmenta por frases de forma contextualizada, traduz e destaca palavras difíceis
+                  </div>
+
+                  {/* Tradução */}
+                  <div className="space-y-1.5 flex-1 flex flex-col">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                        Tradução (Seu idioma nativo)
+                      </label>
+                      {appendBlockMode !== 'manual' && (
+                        <span className="text-[10px] font-bold text-violet-500 bg-violet-500/10 px-2 py-0.5 rounded-full border border-violet-500/20 animate-fadeIn">
+                          {appendBlockMode === 'gemini' ? 'Preenchida pela IA ✨' : 'Traduzido gratuitamente 🌐'}
                         </span>
                       )}
                     </div>
-                  </label>
-
-                  {/* MyMemory Option */}
-                  <label className={`flex items-start gap-3 p-3 border rounded-xl cursor-pointer transition-all duration-200 ${
-                    appendBlockMode === 'mymemory'
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border/60 hover:bg-muted/30'
-                  }`}>
-                    <input
-                      type="radio"
-                      name="appendBlockMode"
-                      value="mymemory"
-                      checked={appendBlockMode === 'mymemory'}
-                      onChange={() => setAppendBlockMode('mymemory')}
-                      disabled={appendBlockIsProcessing}
-                      className="mt-1.5 w-4 h-4 text-primary border-zinc-300 dark:border-zinc-700 bg-background focus:ring-primary cursor-pointer"
+                    <textarea
+                      placeholder="Cole aqui a tradução (ou deixe vazio se usar IA/MyMemory)..."
+                      className="w-full bg-muted border border-border text-foreground p-3.5 rounded-xl text-xs outline-none focus:border-primary/50 flex-1 min-h-[150px] resize-y font-mono leading-relaxed transition-colors disabled:opacity-50"
+                      value={appendBlockTranslatedText}
+                      onChange={(e) => setAppendBlockTranslatedText(e.target.value)}
+                      disabled={appendBlockIsProcessing || appendBlockMode !== 'manual'}
                     />
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                        <Upload size={12} className="text-primary" />
-                        Tradução Automática Gratuita (MyMemory API)
-                      </span>
-                      <span className="text-[9px] text-muted-foreground">
-                        Gratuito, sem necessidade de chave de API. Divide o texto em frases e traduz de forma independente
+                  </div>
+                </div>
+
+                {/* Right Column: PDF e Métodos */}
+                <div className="space-y-6 flex flex-col">
+                  {/* PDF Dropzone */}
+                  <div className="space-y-1.5">
+                    <div className="relative flex items-center justify-center py-1 mb-2">
+                      <div className="absolute inset-0 flex items-center">
+                        <div className="w-full border-t border-border/60" />
+                      </div>
+                      <span className="relative bg-card px-4 text-[9px] font-bold text-muted-foreground uppercase tracking-widest">
+                        Extraia de um PDF
                       </span>
                     </div>
-                  </label>
 
-                  {/* Manual Option */}
-                  <label className={`flex items-start gap-3 p-3 border rounded-xl cursor-pointer transition-all duration-200 ${
-                    appendBlockMode === 'manual'
-                      ? 'border-border bg-muted/40'
-                      : 'border-border/60 hover:bg-muted/30'
-                  }`}>
-                    <input
-                      type="radio"
-                      name="appendBlockMode"
-                      value="manual"
-                      checked={appendBlockMode === 'manual'}
-                      onChange={() => setAppendBlockMode('manual')}
-                      disabled={appendBlockIsProcessing}
-                      className="mt-1.5 w-4 h-4 text-zinc-500 border-zinc-300 dark:border-zinc-700 bg-background focus:ring-zinc-400 cursor-pointer"
-                    />
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-xs font-bold text-foreground">
-                        Manual (Segmentar por linha original ↔ tradução)
-                      </span>
-                      <span className="text-[9px] text-muted-foreground">
-                        Crie cartões alinhando as linhas digitadas no campo original com as linhas do campo de tradução
-                      </span>
+                    <div
+                      className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all duration-200 ${
+                        appendBlockIsPdfLoading
+                          ? 'border-primary/50 bg-primary/5'
+                          : 'border-border/60 hover:border-primary/40 hover:bg-muted/30'
+                      }`}
+                      onClick={() => !appendBlockIsPdfLoading && !appendBlockIsProcessing && document.getElementById('append-pdf-file-input')?.click()}
+                    >
+                      {appendBlockIsPdfLoading ? (
+                        <div className="flex flex-col items-center gap-2">
+                          <Loader2 size={24} className="text-primary animate-spin" />
+                          <span className="text-xs font-bold text-primary">Extraindo texto do PDF...</span>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center gap-1.5">
+                          <Upload size={24} className="text-muted-foreground" />
+                          <span className="text-xs font-semibold text-muted-foreground">
+                            {appendBlockPdfBlob ? `PDF Selecionado: ${(appendBlockPdfBlob as File).name}` : 'Arraste um PDF aqui ou clique para selecionar'}
+                          </span>
+                          <span className="text-[9px] text-muted-foreground/60">
+                            O texto extraído preencherá o campo "Texto Original"
+                          </span>
+                        </div>
+                      )}
+                      <input
+                        id="append-pdf-file-input"
+                        type="file"
+                        accept=".pdf"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleAppendBlockPdfUpload(file);
+                          e.target.value = '';
+                        }}
+                      />
                     </div>
-                  </label>
+                  </div>
+
+                  {/* Método de Processamento / Tradução */}
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                      Método de Tradução e Segmentação
+                    </label>
+                    <div className="grid grid-cols-1 gap-2.5">
+                      {/* Gemini Option */}
+                      <label className={`flex items-start gap-3 p-3 border rounded-xl cursor-pointer transition-all duration-200 ${
+                        appendBlockMode === 'gemini'
+                          ? 'border-violet-500 bg-violet-500/5 dark:bg-violet-500/10'
+                          : 'border-border/60 hover:bg-muted/30'
+                      }`}>
+                        <input
+                          type="radio"
+                          name="appendBlockMode"
+                          value="gemini"
+                          checked={appendBlockMode === 'gemini'}
+                          onChange={() => setAppendBlockMode('gemini')}
+                          disabled={appendBlockIsProcessing || !geminiApiKey.trim()}
+                          className="mt-1.5 w-4 h-4 text-violet-600 border-zinc-300 dark:border-zinc-700 bg-background focus:ring-violet-500 cursor-pointer"
+                        />
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                            <Sparkles size={12} className="text-violet-500" />
+                            Segmentação e Tradução por IA (Gemini)
+                          </span>
+                          {!geminiApiKey.trim() ? (
+                            <span className="text-[9px] text-destructive font-semibold">
+                              Requer chave de API nas Configurações (Permite destacar palavras-chave)
+                            </span>
+                          ) : (
+                            <span className="text-[9px] text-muted-foreground">
+                              A IA segmenta por frases de forma contextualizada, traduz e destaca palavras difíceis
+                            </span>
+                          )}
+                        </div>
+                      </label>
+
+                      {/* MyMemory Option */}
+                      <label className={`flex items-start gap-3 p-3 border rounded-xl cursor-pointer transition-all duration-200 ${
+                        appendBlockMode === 'mymemory'
+                          ? 'border-primary bg-primary/5'
+                          : 'border-border/60 hover:bg-muted/30'
+                      }`}>
+                        <input
+                          type="radio"
+                          name="appendBlockMode"
+                          value="mymemory"
+                          checked={appendBlockMode === 'mymemory'}
+                          onChange={() => setAppendBlockMode('mymemory')}
+                          disabled={appendBlockIsProcessing}
+                          className="mt-1.5 w-4 h-4 text-primary border-zinc-300 dark:border-zinc-700 bg-background focus:ring-primary cursor-pointer"
+                        />
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                            <Upload size={12} className="text-primary" />
+                            Tradução Automática Gratuita (MyMemory API)
+                          </span>
+                          <span className="text-[9px] text-muted-foreground">
+                            Gratuito, sem necessidade de chave de API. Divide o texto em frases e traduz de forma independente
+                          </span>
+                        </div>
+                      </label>
+
+                      {/* Manual Option */}
+                      <label className={`flex items-start gap-3 p-3 border rounded-xl cursor-pointer transition-all duration-200 ${
+                        appendBlockMode === 'manual'
+                          ? 'border-border bg-muted/40'
+                          : 'border-border/60 hover:bg-muted/30'
+                      }`}>
+                        <input
+                          type="radio"
+                          name="appendBlockMode"
+                          value="manual"
+                          checked={appendBlockMode === 'manual'}
+                          onChange={() => setAppendBlockMode('manual')}
+                          disabled={appendBlockIsProcessing}
+                          className="mt-1.5 w-4 h-4 text-zinc-500 border-zinc-300 dark:border-zinc-700 bg-background focus:ring-zinc-400 cursor-pointer"
+                        />
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-xs font-bold text-foreground">
+                            Manual (Segmentar por linha original ↔ tradução)
+                          </span>
+                          <span className="text-[9px] text-muted-foreground">
+                            Crie cartões alinhando as linhas digitadas no campo original com as linhas do campo de tradução
+                          </span>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
                 </div>
               </div>
 

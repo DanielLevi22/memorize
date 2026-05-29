@@ -477,7 +477,7 @@ function App() {
   };
 
   const handleSaveCard = async (
-    type: 'basic' | 'reversed' | 'optional_reversed' | 'typing' | 'cloze',
+    type: 'basic' | 'reversed' | 'optional_reversed' | 'typing' | 'cloze' | 'listening',
     fields: string[],
     context: string,
     audioBlob: Blob | null,
@@ -938,10 +938,10 @@ function App() {
           <nav className="flex flex-col gap-2">
             <Button 
               variant="ghost"
-              className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+              className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                 activeTab === 'dashboard' 
-                  ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                  ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
               }`}
               onClick={() => {
                 setActiveTab('dashboard');
@@ -953,7 +953,7 @@ function App() {
                 <span>Dashboard</span>
               </div>
               {totalDue > 0 && (
-                <span className="text-[10px] font-bold bg-destructive text-destructive-foreground px-2 py-0.5 rounded-full">
+                <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full shadow-sm ${activeTab === 'dashboard' ? 'bg-background text-primary' : 'bg-rose-500 text-white shadow-rose-500/20'}`}>
                   {totalDue}
                 </span>
               )}
@@ -961,10 +961,10 @@ function App() {
 
             <Button 
               variant="ghost"
-              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                 activeTab === 'reading' 
-                  ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                  ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
               }`}
               onClick={() => {
                 setActiveTab('reading');
@@ -979,10 +979,10 @@ function App() {
 
             <Button 
               variant="ghost"
-              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                 activeTab === 'conversation' 
-                  ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                  ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
               }`}
               onClick={() => {
                 setActiveTab('conversation');
@@ -997,10 +997,10 @@ function App() {
 
             <Button 
               variant="ghost"
-              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                 activeTab === 'stats' 
-                  ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                  ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
               }`}
               onClick={() => {
                 setActiveTab('stats');
@@ -1015,10 +1015,10 @@ function App() {
 
             <Button 
               variant="ghost"
-              className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+              className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                 activeTab === 'cards' 
-                  ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                  ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
               }`}
               onClick={() => {
                 setActiveTab('cards');
@@ -1030,7 +1030,7 @@ function App() {
                 <span>Banco de Cards</span>
               </div>
               {cards && (
-                <span className="text-[10px] font-bold bg-muted text-muted-foreground px-2 py-0.5 rounded-full border border-border">
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${activeTab === 'cards' ? 'bg-background/20 text-primary-foreground' : 'bg-muted border border-border text-muted-foreground'}`}>
                   {cards.length}
                 </span>
               )}
@@ -1038,10 +1038,10 @@ function App() {
 
             <Button 
               variant="ghost"
-              className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+              className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                 activeTab === 'profile' 
-                  ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                  ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
               }`}
               onClick={() => {
                 setActiveTab('profile');
@@ -1061,10 +1061,10 @@ function App() {
 
             <Button 
               variant="ghost"
-              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                 activeTab === 'settings' 
-                  ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                  ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
               }`}
               onClick={() => {
                 setActiveTab('settings');
@@ -1079,10 +1079,10 @@ function App() {
 
             <Button 
               variant="ghost"
-              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                 activeTab === 'history' 
-                  ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                  ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
               }`}
               onClick={() => {
                 setActiveTab('history');
@@ -1098,10 +1098,10 @@ function App() {
 
             <Button 
               variant="ghost"
-              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                 activeTab === 'guide' 
-                  ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                  ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
               }`}
               onClick={() => {
                 handleSetActiveTab('guide', 'overview');
@@ -1145,10 +1145,10 @@ function App() {
                 <nav className="flex flex-col gap-2">
                   <Button 
                     variant="ghost"
-                    className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+                    className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                       activeTab === 'dashboard' 
-                        ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                        ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
                     }`}
                     onClick={() => handleNavigateFromSidebar('dashboard')}
                   >
@@ -1157,7 +1157,7 @@ function App() {
                       <span>Dashboard</span>
                     </div>
                     {totalDue > 0 && (
-                      <span className="text-[10px] font-bold bg-destructive text-destructive-foreground px-2 py-0.5 rounded-full">
+                      <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full shadow-sm ${activeTab === 'dashboard' ? 'bg-background text-primary' : 'bg-rose-500 text-white shadow-rose-500/20'}`}>
                         {totalDue}
                       </span>
                     )}
@@ -1165,10 +1165,10 @@ function App() {
 
                   <Button 
                     variant="ghost"
-                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                       activeTab === 'reading' 
-                        ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                        ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
                     }`}
                     onClick={() => handleNavigateFromSidebar('reading')}
                   >
@@ -1180,10 +1180,10 @@ function App() {
 
                   <Button 
                     variant="ghost"
-                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                       activeTab === 'conversation' 
-                        ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                        ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
                     }`}
                     onClick={() => handleNavigateFromSidebar('conversation')}
                   >
@@ -1195,10 +1195,10 @@ function App() {
 
                   <Button 
                     variant="ghost"
-                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                       activeTab === 'stats' 
-                        ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                        ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
                     }`}
                     onClick={() => handleNavigateFromSidebar('stats')}
                   >
@@ -1210,10 +1210,10 @@ function App() {
 
                   <Button 
                     variant="ghost"
-                    className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+                    className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                       activeTab === 'cards' 
-                        ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                        ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
                     }`}
                     onClick={() => handleNavigateFromSidebar('cards')}
                   >
@@ -1222,7 +1222,7 @@ function App() {
                       <span>Banco de Cards</span>
                     </div>
                     {cards && (
-                      <span className="text-[10px] font-bold bg-muted text-muted-foreground px-2 py-0.5 rounded-full border border-border">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${activeTab === 'cards' ? 'bg-background/20 text-primary-foreground' : 'bg-muted border border-border text-muted-foreground'}`}>
                         {cards.length}
                       </span>
                     )}
@@ -1230,10 +1230,10 @@ function App() {
 
                   <Button 
                     variant="ghost"
-                    className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+                    className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                       activeTab === 'profile' 
-                        ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                        ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
                     }`}
                     onClick={() => handleNavigateFromSidebar('profile')}
                   >
@@ -1250,10 +1250,10 @@ function App() {
 
                   <Button 
                     variant="ghost"
-                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                       activeTab === 'settings' 
-                        ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                        ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
                     }`}
                     onClick={() => handleNavigateFromSidebar('settings')}
                   >
@@ -1265,10 +1265,10 @@ function App() {
 
                   <Button 
                     variant="ghost"
-                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                       activeTab === 'history' 
-                        ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                        ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
                     }`}
                     onClick={() => handleNavigateFromSidebar('history')}
                   >
@@ -1281,10 +1281,10 @@ function App() {
 
                   <Button 
                     variant="ghost"
-                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer ${
+                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                       activeTab === 'guide' 
-                        ? 'bg-primary/10 text-primary border-l-2 border-primary hover:bg-primary/10 hover:text-primary' 
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                        ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
                     }`}
                     onClick={() => handleNavigateFromSidebar('guide')}
                   >

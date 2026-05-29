@@ -5,7 +5,8 @@ import { parseCSV } from '../utils/csv';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { Upload, AlertTriangle, Plus, Layers } from 'lucide-react';
+import { Upload, Plus, Layers, AlertTriangle } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import JSZip from 'jszip';
 
 interface ImportModalProps {
@@ -717,16 +718,16 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   ) : (
                     <div className="flex flex-col gap-1.5 pt-1 animate-in fade-in slide-in-from-top-1 duration-200">
                       <label className="text-xs font-bold text-muted-foreground">Selecionar Baralho Existente *</label>
-                      <select
-                        className="bg-background border border-border text-foreground px-3 py-1.5 rounded-lg text-xs font-semibold outline-none cursor-pointer focus:border-primary w-full h-9"
-                        value={selectedDeckId}
-                        onChange={(e) => setSelectedDeckId(e.target.value)}
-                        required
-                      >
-                        {decks.map(deck => (
-                          <option key={deck.id} value={deck.id}>{deck.name}</option>
-                        ))}
-                      </select>
+                      <Select value={selectedDeckId} onValueChange={setSelectedDeckId}>
+                        <SelectTrigger className="bg-background border-border text-foreground px-3 py-1.5 rounded-lg text-xs font-semibold focus:border-primary w-full h-9">
+                          <SelectValue placeholder="Selecione um baralho..." />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-xl border-border/50 shadow-xl max-h-[200px]">
+                          {decks.map(deck => (
+                            <SelectItem key={deck.id} value={deck.id} className="rounded-lg cursor-pointer font-medium focus:bg-primary/10 focus:text-primary">{deck.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   )}
                 </div>
@@ -741,42 +742,45 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     <div className="flex flex-col gap-1">
                       <span className="text-[10px] font-bold text-muted-foreground">Frente (Inglês) *</span>
-                      <select
-                        className="bg-background border border-border text-foreground px-2 py-1 rounded text-[10px] outline-none cursor-pointer focus:border-primary"
-                        value={colMappings.front}
-                        onChange={(e) => setColMappings(prev => ({ ...prev, front: parseInt(e.target.value, 10) }))}
-                      >
-                        {parsedData[0].map((_, idx) => (
-                          <option key={idx} value={idx}>Coluna {idx}</option>
-                        ))}
-                      </select>
+                      <Select value={colMappings.front.toString()} onValueChange={(val: any) => setColMappings(prev => ({ ...prev, front: parseInt(val, 10) }))}>
+                        <SelectTrigger className="bg-background border-border text-foreground px-2 py-1 rounded text-[10px] focus:border-primary h-7">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-[200px]">
+                          {parsedData[0].map((_, idx) => (
+                            <SelectItem key={idx} value={idx.toString()} className="text-[10px]">Coluna {idx}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
 
                     <div className="flex flex-col gap-1">
                       <span className="text-[10px] font-bold text-muted-foreground">Verso (Tradução) *</span>
-                      <select
-                        className="bg-background border border-border text-foreground px-2 py-1 rounded text-[10px] outline-none cursor-pointer focus:border-primary"
-                        value={colMappings.back}
-                        onChange={(e) => setColMappings(prev => ({ ...prev, back: parseInt(e.target.value, 10) }))}
-                      >
-                        {parsedData[0].map((_, idx) => (
-                          <option key={idx} value={idx}>Coluna {idx}</option>
-                        ))}
-                      </select>
+                      <Select value={colMappings.back.toString()} onValueChange={(val: any) => setColMappings(prev => ({ ...prev, back: parseInt(val, 10) }))}>
+                        <SelectTrigger className="bg-background border-border text-foreground px-2 py-1 rounded text-[10px] focus:border-primary h-7">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-[200px]">
+                          {parsedData[0].map((_, idx) => (
+                            <SelectItem key={idx} value={idx.toString()} className="text-[10px]">Coluna {idx}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
 
                     <div className="flex flex-col gap-1">
                       <span className="text-[10px] font-bold text-muted-foreground">Contexto/Exemplo</span>
-                      <select
-                        className="bg-background border border-border text-foreground px-2 py-1 rounded text-[10px] outline-none cursor-pointer focus:border-primary"
-                        value={colMappings.context}
-                        onChange={(e) => setColMappings(prev => ({ ...prev, context: parseInt(e.target.value, 10) }))}
-                      >
-                        <option value="-1">[Nenhuma / Em Branco]</option>
-                        {parsedData[0].map((_, idx) => (
-                          <option key={idx} value={idx}>Coluna {idx}</option>
-                        ))}
-                      </select>
+                      <Select value={colMappings.context.toString()} onValueChange={(val: any) => setColMappings(prev => ({ ...prev, context: parseInt(val, 10) }))}>
+                        <SelectTrigger className="bg-background border-border text-foreground px-2 py-1 rounded text-[10px] focus:border-primary h-7">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-[200px]">
+                          <SelectItem value="-1" className="text-[10px]">[Nenhuma / Em Branco]</SelectItem>
+                          {parsedData[0].map((_, idx) => (
+                            <SelectItem key={idx} value={idx.toString()} className="text-[10px]">Coluna {idx}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
 
@@ -788,58 +792,62 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       <div className="flex flex-col gap-0.5">
                         <span className="text-[9px] text-muted-foreground">Intervalo</span>
-                        <select
-                          className="bg-background border border-border text-foreground px-1.5 py-0.5 rounded text-[9px] outline-none cursor-pointer"
-                          value={colMappings.interval}
-                          onChange={(e) => setColMappings(prev => ({ ...prev, interval: parseInt(e.target.value, 10) }))}
-                        >
-                          <option value="-1">[Padrão (Novo)]</option>
-                          {parsedData[0].map((_, idx) => (
-                            <option key={idx} value={idx}>Coluna {idx}</option>
-                          ))}
-                        </select>
+                        <Select value={colMappings.interval.toString()} onValueChange={(val: any) => setColMappings(prev => ({ ...prev, interval: parseInt(val, 10) }))}>
+                          <SelectTrigger className="bg-background border-border text-foreground px-1.5 py-0.5 rounded text-[9px] h-6">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-[200px]">
+                            <SelectItem value="-1" className="text-[9px]">[Padrão (Novo)]</SelectItem>
+                            {parsedData[0].map((_, idx) => (
+                              <SelectItem key={idx} value={idx.toString()} className="text-[9px]">Coluna {idx}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
 
                       <div className="flex flex-col gap-0.5">
                         <span className="text-[9px] text-muted-foreground">Facilidade (Ease)</span>
-                        <select
-                          className="bg-background border border-border text-foreground px-1.5 py-0.5 rounded text-[9px] outline-none cursor-pointer"
-                          value={colMappings.ease}
-                          onChange={(e) => setColMappings(prev => ({ ...prev, ease: parseInt(e.target.value, 10) }))}
-                        >
-                          <option value="-1">[Padrão (2.5)]</option>
-                          {parsedData[0].map((_, idx) => (
-                            <option key={idx} value={idx}>Coluna {idx}</option>
-                          ))}
-                        </select>
+                        <Select value={colMappings.ease.toString()} onValueChange={(val: any) => setColMappings(prev => ({ ...prev, ease: parseInt(val, 10) }))}>
+                          <SelectTrigger className="bg-background border-border text-foreground px-1.5 py-0.5 rounded text-[9px] h-6">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-[200px]">
+                            <SelectItem value="-1" className="text-[9px]">[Padrão (2.5)]</SelectItem>
+                            {parsedData[0].map((_, idx) => (
+                              <SelectItem key={idx} value={idx.toString()} className="text-[9px]">Coluna {idx}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
 
                       <div className="flex flex-col gap-0.5">
                         <span className="text-[9px] text-muted-foreground">Repetições</span>
-                        <select
-                          className="bg-background border border-border text-foreground px-1.5 py-0.5 rounded text-[9px] outline-none cursor-pointer"
-                          value={colMappings.repetitions}
-                          onChange={(e) => setColMappings(prev => ({ ...prev, repetitions: parseInt(e.target.value, 10) }))}
-                        >
-                          <option value="-1">[Padrão (0)]</option>
-                          {parsedData[0].map((_, idx) => (
-                            <option key={idx} value={idx}>Coluna {idx}</option>
-                          ))}
-                        </select>
+                        <Select value={colMappings.repetitions.toString()} onValueChange={(val: any) => setColMappings(prev => ({ ...prev, repetitions: parseInt(val, 10) }))}>
+                          <SelectTrigger className="bg-background border-border text-foreground px-1.5 py-0.5 rounded text-[9px] h-6">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-[200px]">
+                            <SelectItem value="-1" className="text-[9px]">[Padrão (0)]</SelectItem>
+                            {parsedData[0].map((_, idx) => (
+                              <SelectItem key={idx} value={idx.toString()} className="text-[9px]">Coluna {idx}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
 
                       <div className="flex flex-col gap-0.5">
                         <span className="text-[9px] text-muted-foreground">Vencimento (Due)</span>
-                        <select
-                          className="bg-background border border-border text-foreground px-1.5 py-0.5 rounded text-[9px] outline-none cursor-pointer"
-                          value={colMappings.dueDate}
-                          onChange={(e) => setColMappings(prev => ({ ...prev, dueDate: parseInt(e.target.value, 10) }))}
-                        >
-                          <option value="-1">[Padrão (Hoje)]</option>
-                          {parsedData[0].map((_, idx) => (
-                            <option key={idx} value={idx}>Coluna {idx}</option>
-                          ))}
-                        </select>
+                        <Select value={colMappings.dueDate.toString()} onValueChange={(val: any) => setColMappings(prev => ({ ...prev, dueDate: parseInt(val, 10) }))}>
+                          <SelectTrigger className="bg-background border-border text-foreground px-1.5 py-0.5 rounded text-[9px] h-6">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-[200px]">
+                            <SelectItem value="-1" className="text-[9px]">[Padrão (Hoje)]</SelectItem>
+                            {parsedData[0].map((_, idx) => (
+                              <SelectItem key={idx} value={idx.toString()} className="text-[9px]">Coluna {idx}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
                   </div>

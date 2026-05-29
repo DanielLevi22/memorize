@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Download, Upload, Trash2, Volume2, Eye, EyeOff, Sparkles, Key, ArrowLeft, Plus, Settings, Edit, Save } from 'lucide-react';
 import { Button } from '../components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import type { Card, DeckPreset } from '../types';
 import { downloadPresetFile, openPresetFile, deserializePreset } from '../utils/presets';
 import { createTestDeck } from '../db/db';
@@ -352,14 +353,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                 <span className="text-xs font-bold text-foreground">Ordem de inserção</span>
                 <span className="text-[10px] text-muted-foreground">Sequencial ou aleatória.</span>
               </div>
-              <select
-                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer"
-                value={activePresetToEdit.insertionOrder}
-                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, insertionOrder: e.target.value as any })}
-              >
-                <option value="sequential">Sequencial (Antigos primeiro)</option>
-                <option value="random">Aleatório</option>
-              </select>
+              <Select value={activePresetToEdit.insertionOrder} onValueChange={(val: any) => setActivePresetToEdit({ ...activePresetToEdit, insertionOrder: val })}>
+                <SelectTrigger className="bg-muted border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold w-[220px] h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sequential" className="text-xs font-bold cursor-pointer">Sequencial (Antigos primeiro)</SelectItem>
+                  <SelectItem value="random" className="text-xs font-bold cursor-pointer">Aleatório</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
@@ -411,14 +413,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                 <span className="text-xs font-bold text-foreground">Ação de sanguessuga</span>
                 <span className="text-[10px] text-muted-foreground">O que fazer com o card problemático.</span>
               </div>
-              <select
-                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer"
-                value={activePresetToEdit.leechAction}
-                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, leechAction: e.target.value as any })}
-              >
-                <option value="tag">Somente Etiqueta (tag leech)</option>
-                <option value="suspend">Suspender Cartão</option>
-              </select>
+              <Select value={activePresetToEdit.leechAction} onValueChange={(val: any) => setActivePresetToEdit({ ...activePresetToEdit, leechAction: val })}>
+                <SelectTrigger className="bg-muted border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold w-[220px] h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="tag" className="text-xs font-bold cursor-pointer">Somente Etiqueta (tag leech)</SelectItem>
+                  <SelectItem value="suspend" className="text-xs font-bold cursor-pointer">Suspender Cartão</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
@@ -433,18 +436,19 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               <div className="flex flex-col gap-0.5">
                 <span className="text-xs font-bold text-foreground">Agrupamento de cartões novos</span>
               </div>
-              <select
-                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer max-w-[220px]"
-                value={activePresetToEdit.newCardGrouping}
-                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, newCardGrouping: e.target.value as any })}
-              >
-                <option value="deck">Baralho</option>
-                <option value="deckThenRandom">Baralho, em seguida, notas aleatórias</option>
-                <option value="ascending">Posição ascendente</option>
-                <option value="descending">Posição descendente</option>
-                <option value="randomNote">Notas Aleatórias</option>
-                <option value="randomCard">Cartões Aleatórios</option>
-              </select>
+              <Select value={activePresetToEdit.newCardGrouping} onValueChange={(val: any) => setActivePresetToEdit({ ...activePresetToEdit, newCardGrouping: val })}>
+                <SelectTrigger className="bg-muted border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold max-w-[220px] h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="deck" className="text-xs font-bold cursor-pointer">Baralho</SelectItem>
+                  <SelectItem value="deckThenRandom" className="text-xs font-bold cursor-pointer">Baralho, em seguida, notas aleatórias</SelectItem>
+                  <SelectItem value="ascending" className="text-xs font-bold cursor-pointer">Posição ascendente</SelectItem>
+                  <SelectItem value="descending" className="text-xs font-bold cursor-pointer">Posição descendente</SelectItem>
+                  <SelectItem value="randomNote" className="text-xs font-bold cursor-pointer">Notas Aleatórias</SelectItem>
+                  <SelectItem value="randomCard" className="text-xs font-bold cursor-pointer">Cartões Aleatórios</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Classificação de cartões novos */}
@@ -452,17 +456,18 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               <div className="flex flex-col gap-0.5">
                 <span className="text-xs font-bold text-foreground">Classificação de cartões novos</span>
               </div>
-              <select
-                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer max-w-[220px]"
-                value={activePresetToEdit.newCardSorting}
-                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, newCardSorting: e.target.value as any })}
-              >
-                <option value="template">Modelo do cartão</option>
-                <option value="gather">Ordem de agrupamento</option>
-                <option value="templateThenRandom">Modelo do cartão, depois aleatório</option>
-                <option value="randomNoteThenTemplate">Nota aleatória e, em seguida, modelo do cartão</option>
-                <option value="random">Aleatório</option>
-              </select>
+              <Select value={activePresetToEdit.newCardSorting} onValueChange={(val: any) => setActivePresetToEdit({ ...activePresetToEdit, newCardSorting: val })}>
+                <SelectTrigger className="bg-muted border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold max-w-[220px] h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="template" className="text-xs font-bold cursor-pointer">Modelo do cartão</SelectItem>
+                  <SelectItem value="gather" className="text-xs font-bold cursor-pointer">Ordem de agrupamento</SelectItem>
+                  <SelectItem value="templateThenRandom" className="text-xs font-bold cursor-pointer">Modelo do cartão, depois aleatório</SelectItem>
+                  <SelectItem value="randomNoteThenTemplate" className="text-xs font-bold cursor-pointer">Nota aleatória e, em seguida, modelo do cartão</SelectItem>
+                  <SelectItem value="random" className="text-xs font-bold cursor-pointer">Aleatório</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Ordem de novos vs revisão */}
@@ -470,15 +475,16 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               <div className="flex flex-col gap-0.5">
                 <span className="text-xs font-bold text-foreground">Ordem de novos vs revisão</span>
               </div>
-              <select
-                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer max-w-[220px]"
-                value={activePresetToEdit.newVsReviewOrder}
-                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, newVsReviewOrder: e.target.value as any })}
-              >
-                <option value="mix">Misturar com revisões</option>
-                <option value="reviewFirst">Mostrar depois de revisões</option>
-                <option value="newFirst">Mostrar antes de revisões</option>
-              </select>
+              <Select value={activePresetToEdit.newVsReviewOrder} onValueChange={(val: any) => setActivePresetToEdit({ ...activePresetToEdit, newVsReviewOrder: val })}>
+                <SelectTrigger className="bg-muted border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold max-w-[220px] h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="mix" className="text-xs font-bold cursor-pointer">Misturar com revisões</SelectItem>
+                  <SelectItem value="reviewFirst" className="text-xs font-bold cursor-pointer">Mostrar depois de revisões</SelectItem>
+                  <SelectItem value="newFirst" className="text-xs font-bold cursor-pointer">Mostrar antes de revisões</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Ordem de aprendizado vs revisão entre dias */}
@@ -486,15 +492,16 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               <div className="flex flex-col gap-0.5">
                 <span className="text-xs font-bold text-foreground">Ordem de aprendizado vs revisão entre dias.</span>
               </div>
-              <select
-                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer max-w-[220px]"
-                value={activePresetToEdit.interdayLearningVsReviewOrder}
-                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, interdayLearningVsReviewOrder: e.target.value as any })}
-              >
-                <option value="mix">Misturar com revisões</option>
-                <option value="reviewFirst">Mostrar depois de revisões</option>
-                <option value="learningFirst">Mostrar antes de revisões</option>
-              </select>
+              <Select value={activePresetToEdit.interdayLearningVsReviewOrder} onValueChange={(val: any) => setActivePresetToEdit({ ...activePresetToEdit, interdayLearningVsReviewOrder: val })}>
+                <SelectTrigger className="bg-muted border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold max-w-[220px] h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="mix" className="text-xs font-bold cursor-pointer">Misturar com revisões</SelectItem>
+                  <SelectItem value="reviewFirst" className="text-xs font-bold cursor-pointer">Mostrar depois de revisões</SelectItem>
+                  <SelectItem value="learningFirst" className="text-xs font-bold cursor-pointer">Mostrar antes de revisões</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Ordem de classificação de revisões */}
@@ -502,24 +509,25 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               <div className="flex flex-col gap-0.5">
                 <span className="text-xs font-bold text-foreground">Ordem de classificação de revisões</span>
               </div>
-              <select
-                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer max-w-[220px]"
-                value={activePresetToEdit.reviewSorting}
-                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, reviewSorting: e.target.value as any })}
-              >
-                <option value="dateThenRandom">Data de revisão, depois aleatório</option>
-                <option value="dateThenDeck">Data de revisão, depois baralho</option>
-                <option value="deckThenDate">Baralho, depois data de revisão</option>
-                <option value="intervalsAscending">Intervalos ascendentes</option>
-                <option value="intervalsDescending">Intervalos descendentes</option>
-                <option value="easeAscending">Facilidade ascendente</option>
-                <option value="easeDescending">Facilidade descendente</option>
-                <option value="retrievabilityAscending">Mais prováveis de esquecer</option>
-                <option value="retrievabilityDescending">Mais prováveis de lembrar</option>
-                <option value="random">Aleatório</option>
-                <option value="oldest">Criados há mais tempo</option>
-                <option value="newest">Criados há menos tempo</option>
-              </select>
+              <Select value={activePresetToEdit.reviewSorting} onValueChange={(val: any) => setActivePresetToEdit({ ...activePresetToEdit, reviewSorting: val })}>
+                <SelectTrigger className="bg-muted border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold max-w-[220px] h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="dateThenRandom" className="text-xs font-bold cursor-pointer">Data de revisão, depois aleatório</SelectItem>
+                  <SelectItem value="dateThenDeck" className="text-xs font-bold cursor-pointer">Data de revisão, depois baralho</SelectItem>
+                  <SelectItem value="deckThenDate" className="text-xs font-bold cursor-pointer">Baralho, depois data de revisão</SelectItem>
+                  <SelectItem value="intervalsAscending" className="text-xs font-bold cursor-pointer">Intervalos ascendentes</SelectItem>
+                  <SelectItem value="intervalsDescending" className="text-xs font-bold cursor-pointer">Intervalos descendentes</SelectItem>
+                  <SelectItem value="easeAscending" className="text-xs font-bold cursor-pointer">Facilidade ascendente</SelectItem>
+                  <SelectItem value="easeDescending" className="text-xs font-bold cursor-pointer">Facilidade descendente</SelectItem>
+                  <SelectItem value="retrievabilityAscending" className="text-xs font-bold cursor-pointer">Mais prováveis de esquecer</SelectItem>
+                  <SelectItem value="retrievabilityDescending" className="text-xs font-bold cursor-pointer">Mais prováveis de lembrar</SelectItem>
+                  <SelectItem value="random" className="text-xs font-bold cursor-pointer">Aleatório</SelectItem>
+                  <SelectItem value="oldest" className="text-xs font-bold cursor-pointer">Criados há mais tempo</SelectItem>
+                  <SelectItem value="newest" className="text-xs font-bold cursor-pointer">Criados há menos tempo</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
@@ -688,31 +696,33 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               <div className="flex flex-col gap-0.5">
                 <span className="text-xs font-bold text-foreground">Ação da Questão</span>
               </div>
-              <select
-                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer"
-                value={activePresetToEdit.questionAction}
-                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, questionAction: e.target.value as any })}
-              >
-                <option value="showAnswer">Mostrar Resposta</option>
-                <option value="bury">Ocultar Cartão</option>
-              </select>
+              <Select value={activePresetToEdit.questionAction} onValueChange={(val: any) => setActivePresetToEdit({ ...activePresetToEdit, questionAction: val })}>
+                <SelectTrigger className="bg-muted border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold w-[220px] h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="showAnswer" className="text-xs font-bold cursor-pointer">Mostrar Resposta</SelectItem>
+                  <SelectItem value="bury" className="text-xs font-bold cursor-pointer">Ocultar Cartão</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex items-center justify-between p-4 bg-card">
               <div className="flex flex-col gap-0.5">
                 <span className="text-xs font-bold text-foreground">Ação de Resposta</span>
               </div>
-              <select
-                className="bg-muted border border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold outline-none h-8 cursor-pointer"
-                value={activePresetToEdit.answerAction}
-                onChange={(e) => setActivePresetToEdit({ ...activePresetToEdit, answerAction: e.target.value as any })}
-              >
-                <option value="good">Bom (Good)</option>
-                <option value="easy">Fácil (Easy)</option>
-                <option value="again">Errei (Again)</option>
-                <option value="hard">Difícil (Hard)</option>
-                <option value="skip">Pular Cartão</option>
-                <option value="bury">Ocultar até Amanhã</option>
-              </select>
+              <Select value={activePresetToEdit.answerAction} onValueChange={(val: any) => setActivePresetToEdit({ ...activePresetToEdit, answerAction: val })}>
+                <SelectTrigger className="bg-muted border-border text-foreground px-3 py-1 rounded-lg text-xs font-bold w-[220px] h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="good" className="text-xs font-bold cursor-pointer">Bom (Good)</SelectItem>
+                  <SelectItem value="easy" className="text-xs font-bold cursor-pointer">Fácil (Easy)</SelectItem>
+                  <SelectItem value="again" className="text-xs font-bold cursor-pointer">Errei (Again)</SelectItem>
+                  <SelectItem value="hard" className="text-xs font-bold cursor-pointer">Difícil (Hard)</SelectItem>
+                  <SelectItem value="skip" className="text-xs font-bold cursor-pointer">Pular Cartão</SelectItem>
+                  <SelectItem value="bury" className="text-xs font-bold cursor-pointer">Ocultar até Amanhã</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
@@ -865,14 +875,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             <span className="text-sm font-semibold text-foreground">Tema do Aplicativo</span>
             <span className="text-[11px] text-muted-foreground">Alternar entre claro e escuro</span>
           </div>
-          <select 
-            className="bg-muted border border-border text-foreground px-3 py-1.5 rounded-lg text-xs font-semibold outline-none cursor-pointer focus:border-muted-foreground/45"
-            value={theme}
-            onChange={(e) => setTheme(e.target.value as 'light' | 'dark')}
-          >
-            <option value="light">Claro ☀️</option>
-            <option value="dark">Escuro 🌙</option>
-          </select>
+          <Select value={theme} onValueChange={(val: any) => setTheme(val as 'light' | 'dark')}>
+            <SelectTrigger className="bg-muted border-border text-foreground px-3 py-1.5 rounded-lg text-xs font-semibold w-auto h-9 focus:border-muted-foreground/45">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="light" className="text-xs font-bold cursor-pointer">Claro ☀️</SelectItem>
+              <SelectItem value="dark" className="text-xs font-bold cursor-pointer">Escuro 🌙</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
 
@@ -984,18 +995,19 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             <span className="text-sm font-semibold text-foreground">Voz / Sotaque</span>
             <span className="text-[11px] text-muted-foreground">Escolha entre as vozes do seu dispositivo</span>
           </div>
-          <select
-            className="bg-muted border border-border text-foreground px-3 py-1.5 rounded-lg text-xs font-semibold outline-none cursor-pointer focus:border-muted-foreground/45 max-w-[200px]"
-            value={ttsVoice}
-            onChange={e => setTtsVoice(e.target.value)}
-          >
-            <option value="">Padrão do navegador</option>
-            {voices.map(v => (
-              <option key={v.name} value={v.name}>
-                {v.name} ({v.lang})
-              </option>
-            ))}
-          </select>
+          <Select value={ttsVoice || "default"} onValueChange={(v) => setTtsVoice(v === "default" ? "" : v)}>
+            <SelectTrigger className="bg-muted border-border text-foreground px-3 py-1.5 rounded-lg text-xs font-semibold w-[200px] h-9 focus:border-muted-foreground/45">
+              <SelectValue placeholder="Padrão do navegador" />
+            </SelectTrigger>
+            <SelectContent className="max-h-[250px]">
+              <SelectItem value="default" className="text-xs font-bold cursor-pointer">Padrão do navegador</SelectItem>
+              {voices.map(v => (
+                <SelectItem key={v.name} value={v.name} className="text-[10px] font-bold cursor-pointer">
+                  {v.name} ({v.lang})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Autoplay toggle */}

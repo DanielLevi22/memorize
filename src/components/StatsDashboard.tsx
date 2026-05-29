@@ -7,6 +7,7 @@ import {
 import { Card as ShadcnCard } from './ui/card';
 import { Button } from './ui/button';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from './ui/chart';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import type { Deck, Card, Revision } from '../types';
 import { Sparkles } from 'lucide-react';
 
@@ -693,16 +694,17 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
 
         <div className="flex flex-row items-center gap-3 w-full md:w-auto justify-end">
           {/* Dropdown de Baralho */}
-          <select
-            className="bg-muted border border-border text-foreground px-3 py-1.5 rounded-lg text-xs font-semibold outline-none cursor-pointer focus:border-muted-foreground/45"
-            value={selectedScope}
-            onChange={(e) => setSelectedScope(e.target.value)}
-          >
-            <option value="collection">Coleção Inteira</option>
-            {decks.map(d => (
-              <option key={d.id} value={d.id}>{d.name}</option>
-            ))}
-          </select>
+          <Select value={selectedScope} onValueChange={setSelectedScope}>
+            <SelectTrigger className="bg-muted border-border text-foreground px-3 py-1.5 rounded-lg text-xs font-semibold w-auto h-8 focus:border-muted-foreground/45">
+              <SelectValue placeholder="Coleção Inteira" />
+            </SelectTrigger>
+            <SelectContent className="rounded-xl border-border/50 shadow-xl max-h-[250px]">
+              <SelectItem value="collection" className="rounded-lg cursor-pointer font-bold focus:bg-primary/10 focus:text-primary">Coleção Inteira</SelectItem>
+              {decks.map(d => (
+                <SelectItem key={d.id} value={d.id} className="rounded-lg cursor-pointer font-medium focus:bg-primary/10 focus:text-primary">{d.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
           {/* Seletor de Período Geral */}
           <div className="flex border border-border rounded-lg overflow-hidden bg-muted/30">
@@ -806,16 +808,17 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
               Acumulado
             </label>
 
-            <select
-              className="bg-muted border border-border text-foreground px-2 py-1 rounded text-[11px] font-bold outline-none cursor-pointer"
-              value={forecastHorizon}
-              onChange={(e) => setForecastHorizon(e.target.value as any)}
-            >
-              <option value="1m">1 Mês</option>
-              <option value="3m">3 Meses</option>
-              <option value="1y">1 Ano</option>
-              <option value="all">Sempre</option>
-            </select>
+            <Select value={forecastHorizon} onValueChange={(val: any) => setForecastHorizon(val)}>
+              <SelectTrigger className="bg-muted border-border text-foreground px-2 py-1 rounded text-[11px] font-bold w-[100px] h-7">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1m" className="text-[11px] font-bold cursor-pointer">1 Mês</SelectItem>
+                <SelectItem value="3m" className="text-[11px] font-bold cursor-pointer">3 Meses</SelectItem>
+                <SelectItem value="1y" className="text-[11px] font-bold cursor-pointer">1 Ano</SelectItem>
+                <SelectItem value="all" className="text-[11px] font-bold cursor-pointer">Sempre</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -940,16 +943,17 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
               </Button>
             </div>
 
-            <select
-              className="bg-muted border border-border text-foreground px-2 py-1 rounded text-[11px] font-bold outline-none cursor-pointer"
-              value={reviewsPeriod}
-              onChange={(e) => setReviewsPeriod(e.target.value as any)}
-            >
-              <option value="7d">7 Dias</option>
-              <option value="1m">30 Dias</option>
-              <option value="3m">90 Dias</option>
-              <option value="1y">1 Ano</option>
-            </select>
+            <Select value={reviewsPeriod} onValueChange={(val: any) => setReviewsPeriod(val)}>
+              <SelectTrigger className="bg-muted border-border text-foreground px-2 py-1 rounded text-[11px] font-bold w-[100px] h-7">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="7d" className="text-[11px] font-bold cursor-pointer">7 Dias</SelectItem>
+                <SelectItem value="1m" className="text-[11px] font-bold cursor-pointer">30 Dias</SelectItem>
+                <SelectItem value="3m" className="text-[11px] font-bold cursor-pointer">90 Dias</SelectItem>
+                <SelectItem value="1y" className="text-[11px] font-bold cursor-pointer">1 Ano</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -1217,15 +1221,16 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
             <span className="text-[10px] text-muted-foreground font-medium">Rever a taxa de sucesso para cada hora do dia.</span>
           </div>
 
-          <select
-            className="bg-muted border border-border text-foreground px-2 py-1 rounded text-[11px] font-bold outline-none cursor-pointer"
-            value={hourlyPeriod}
-            onChange={(e) => setHourlyPeriod(e.target.value as any)}
-          >
-            <option value="1m">1 Mês</option>
-            <option value="3m">3 Meses</option>
-            <option value="1y">1 Ano</option>
-          </select>
+          <Select value={hourlyPeriod} onValueChange={(val: any) => setHourlyPeriod(val)}>
+            <SelectTrigger className="bg-muted border-border text-foreground px-2 py-1 rounded text-[11px] font-bold w-[90px] h-7">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="1m" className="text-[11px] font-bold cursor-pointer">1 Mês</SelectItem>
+              <SelectItem value="3m" className="text-[11px] font-bold cursor-pointer">3 Meses</SelectItem>
+              <SelectItem value="1y" className="text-[11px] font-bold cursor-pointer">1 Ano</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="h-64 w-full">
@@ -1251,15 +1256,16 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
             <span className="text-[10px] text-muted-foreground font-medium">O número de vezes que você escolheu cada botão.</span>
           </div>
 
-          <select
-            className="bg-muted border border-border text-foreground px-2 py-1 rounded text-[11px] font-bold outline-none cursor-pointer"
-            value={buttonsPeriod}
-            onChange={(e) => setButtonsPeriod(e.target.value as any)}
-          >
-            <option value="1m">1 Mês</option>
-            <option value="3m">3 Meses</option>
-            <option value="1y">1 Ano</option>
-          </select>
+          <Select value={buttonsPeriod} onValueChange={(val: any) => setButtonsPeriod(val)}>
+            <SelectTrigger className="bg-muted border-border text-foreground px-2 py-1 rounded text-[11px] font-bold w-[90px] h-7">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="1m" className="text-[11px] font-bold cursor-pointer">1 Mês</SelectItem>
+              <SelectItem value="3m" className="text-[11px] font-bold cursor-pointer">3 Meses</SelectItem>
+              <SelectItem value="1y" className="text-[11px] font-bold cursor-pointer">1 Ano</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="h-64 w-full">
@@ -1289,16 +1295,17 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
             <span className="text-[10px] text-muted-foreground font-medium">O número de novos cartões que você adicionou.</span>
           </div>
 
-          <select
-            className="bg-muted border border-border text-foreground px-2 py-1 rounded text-[11px] font-bold outline-none cursor-pointer"
-            value={addedPeriod}
-            onChange={(e) => setAddedPeriod(e.target.value as any)}
-          >
-            <option value="1m">1 Mês</option>
-            <option value="3m">3 Meses</option>
-            <option value="1y">1 Ano</option>
-            <option value="all">Sempre</option>
-          </select>
+          <Select value={addedPeriod} onValueChange={(val: any) => setAddedPeriod(val)}>
+            <SelectTrigger className="bg-muted border-border text-foreground px-2 py-1 rounded text-[11px] font-bold w-[90px] h-7">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="1m" className="text-[11px] font-bold cursor-pointer">1 Mês</SelectItem>
+              <SelectItem value="3m" className="text-[11px] font-bold cursor-pointer">3 Meses</SelectItem>
+              <SelectItem value="1y" className="text-[11px] font-bold cursor-pointer">1 Ano</SelectItem>
+              <SelectItem value="all" className="text-[11px] font-bold cursor-pointer">Sempre</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="h-64 w-full">

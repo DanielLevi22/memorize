@@ -215,126 +215,142 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         </div>
 
         {decks && decks.length > 0 ? (
-          <div className="w-full max-w-4xl mx-auto space-y-3">
-            {/* Table Header */}
-            <div className="grid grid-cols-12 px-4 py-2 text-xs font-bold text-muted-foreground uppercase tracking-wider items-center text-center">
-              <div className="col-span-5 sm:col-span-6 text-left pl-2">Baralho</div>
-              <div className="col-span-2">Novo</div>
-              <div className="col-span-2">Aprender</div>
-              <div className="col-span-2 sm:col-span-1">Revisar</div>
-              <div className="col-span-1"></div>
-            </div>
-
-            {/* Decks Cards List */}
+          <div className="w-full max-w-4xl mx-auto space-y-4">
             {decks.map(deck => {
               const deckCards = cards ? cards.filter(c => c.deckId === deck.id) : [];
               const { newCount, learningCount, reviewCount, totalCount: totalStudyable } = getDeckStudyableCounts(deck, deckCards);
+              const learnedCount = deckCards.length - totalStudyable;
+              const progressPercent = deckCards.length > 0 ? (learnedCount / deckCards.length) * 100 : 0;
 
               return (
                 <div 
                   key={deck.id}
-                  className="grid grid-cols-12 p-4 bg-card border border-border rounded-xl shadow-sm hover:border-muted-foreground/25 hover:shadow-md transition-all hover:bg-muted/5 items-center text-center relative text-sm font-semibold"
+                  className={`relative flex flex-col bg-card border border-border/50 rounded-2xl shadow-sm hover:shadow-lg hover:border-primary/40 transition-all duration-300 group cursor-pointer ${activeDeckMenuId === deck.id ? 'z-50' : 'z-0'}`}
+                  onClick={() => handleStartStudy(deck.id)}
                 >
-                  {/* Deck Name */}
-                  <div className="col-span-5 sm:col-span-6 text-left pl-2 flex items-center gap-2">
-                    <button
-                      className="font-bold text-foreground hover:text-primary transition-colors text-left cursor-pointer truncate max-w-full"
-                      onClick={() => handleStartStudy(deck.id)}
-                      title="Estudar este deck"
-                    >
-                      {deck.name}
-                    </button>
-                  </div>
+                  {/* Fundo sutil de gradiente ao passar o mouse */}
+                  <div className="absolute inset-0 bg-gradient-to-r from-primary/0 via-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none rounded-2xl overflow-hidden" />
 
-                  {/* Novo Count */}
-                  <div className="col-span-2">
-                    <span className={newCount > 0 ? "text-blue-500 font-bold" : "text-muted-foreground/40 font-medium"}>
-                      {newCount}
-                    </span>
-                  </div>
-
-                  {/* Aprender Count */}
-                  <div className="col-span-2">
-                    <span className={learningCount > 0 ? "text-red-500 font-bold" : "text-muted-foreground/40 font-medium"}>
-                      {learningCount}
-                    </span>
-                  </div>
-
-                  {/* Revisar Count */}
-                  <div className="col-span-2 sm:col-span-1">
-                    <span className={reviewCount > 0 ? "text-emerald-500 font-bold" : "text-muted-foreground/40 font-medium"}>
-                      {reviewCount}
-                    </span>
-                  </div>
-
-                  {/* Actions Gear */}
-                  <div className="col-span-1 flex justify-end pr-2 relative">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-muted-foreground hover:text-foreground cursor-pointer rounded-lg hover:bg-muted"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setActiveDeckMenuId(activeDeckMenuId === deck.id ? null : deck.id);
-                      }}
-                      title="Opções do deck"
-                    >
-                      ⚙️
-                    </Button>
-
-                    {/* Dropdown Popover */}
-                    {activeDeckMenuId === deck.id && (
-                      <div className="absolute right-2 top-9 w-44 bg-card border border-border rounded-xl shadow-lg z-20 py-1 text-left text-xs font-bold text-foreground">
-                        <button 
-                          type="button"
-                          className="w-full text-left px-3 py-2 hover:bg-muted cursor-pointer flex items-center gap-2"
-                          onClick={() => { handleStartStudy(deck.id); setActiveDeckMenuId(null); }}
-                        >
-                          📖 Estudar ({totalStudyable})
-                        </button>
-                        <button 
-                          type="button"
-                          className="w-full text-left px-3 py-2 hover:bg-muted cursor-pointer flex items-center gap-2"
-                          onClick={() => { handleOpenAddCardModal(deck.id); setActiveDeckMenuId(null); }}
-                        >
-                          ➕ Adicionar Cartão
-                        </button>
-                        <button 
-                          type="button"
-                          className="w-full text-left px-3 py-2 hover:bg-muted cursor-pointer flex items-center gap-2"
-                          onClick={() => { handleOpenDeckOptionsModal(deck); setActiveDeckMenuId(null); }}
-                        >
-                          ⚙️ Opções
-                        </button>
-                        <button 
-                          type="button"
-                          className="w-full text-left px-3 py-2 hover:bg-muted cursor-pointer flex items-center gap-2"
-                          onClick={() => { handleOpenEditDeckModal(deck); setActiveDeckMenuId(null); }}
-                        >
-                          ✏️ Editar Deck
-                        </button>
-                        <button 
-                          type="button"
-                          className="w-full text-left px-3 py-2 hover:bg-muted cursor-pointer flex items-center gap-2"
-                          onClick={() => { handleExportDeck(deck.id); setActiveDeckMenuId(null); }}
-                        >
-                          📥 Exportar Deck
-                        </button>
-                        <hr className="border-border my-1" />
-                        <button 
-                          type="button"
-                          className="w-full text-left px-3 py-2 hover:bg-muted text-red-500 hover:text-red-600 cursor-pointer flex items-center gap-2"
-                          onClick={() => { 
-                            setActiveDeckMenuId(null);
-                            if (window.confirm(`Tem certeza que deseja excluir o deck "${deck.name}"? Todos os cartões associados serão apagados permanentemente.`)) {
-                              handleDeleteDeck(deck.id); 
-                            }
-                          }}
-                        >
-                          🗑️ Excluir Deck
-                        </button>
+                  <div className="p-5 flex flex-col gap-4 relative z-10">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex flex-col min-w-0">
+                        <h3 className="font-extrabold text-lg text-foreground truncate group-hover:text-primary transition-colors">
+                          {deck.name}
+                        </h3>
+                        <p className="text-xs text-muted-foreground font-semibold mt-0.5">
+                          {deckCards.length} cartões totais
+                        </p>
                       </div>
-                    )}
+
+                      <div className="flex items-center gap-4 shrink-0">
+                        {/* Estatísticas de Estudo do Dia */}
+                        <div className="hidden sm:flex items-center gap-3 bg-background border border-border/50 px-3 py-1.5 rounded-xl">
+                          <div className="flex items-center gap-1.5" title="Cartões Novos">
+                            <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                            <span className={`text-xs font-bold ${newCount > 0 ? 'text-foreground' : 'text-muted-foreground/50'}`}>{newCount} <span className="font-semibold text-muted-foreground ml-0.5 hidden md:inline">Novos</span></span>
+                          </div>
+                          <div className="flex items-center gap-1.5" title="Cartões em Aprendizado">
+                            <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                            <span className={`text-xs font-bold ${learningCount > 0 ? 'text-foreground' : 'text-muted-foreground/50'}`}>{learningCount} <span className="font-semibold text-muted-foreground ml-0.5 hidden md:inline">Aprender</span></span>
+                          </div>
+                          <div className="flex items-center gap-1.5" title="Cartões para Revisar">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                            <span className={`text-xs font-bold ${reviewCount > 0 ? 'text-foreground' : 'text-muted-foreground/50'}`}>{reviewCount} <span className="font-semibold text-muted-foreground ml-0.5 hidden md:inline">Revisar</span></span>
+                          </div>
+                        </div>
+
+                        {/* Botão de Estudar (Mobile) */}
+                        <div className="sm:hidden flex items-center bg-primary/10 text-primary px-3 py-1.5 rounded-xl font-bold text-xs">
+                          {totalStudyable} pendentes
+                        </div>
+
+                        {/* Engrenagem de Opções */}
+                        <div className="relative">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-9 w-9 text-muted-foreground hover:text-foreground cursor-pointer rounded-xl hover:bg-muted border border-transparent group-hover:border-border/50 transition-all z-20"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveDeckMenuId(activeDeckMenuId === deck.id ? null : deck.id);
+                            }}
+                            title="Opções do deck"
+                          >
+                            ⚙️
+                          </Button>
+
+                          {/* Menu Suspenso */}
+                          {activeDeckMenuId === deck.id && (
+                            <div 
+                              className="absolute right-0 top-11 w-48 bg-card border border-border/80 rounded-xl shadow-xl z-30 py-1.5 text-left text-xs font-bold text-foreground animate-in fade-in slide-in-from-top-2"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <button 
+                                type="button"
+                                className="w-full text-left px-4 py-2 hover:bg-muted cursor-pointer flex items-center gap-2.5 transition-colors"
+                                onClick={() => { handleStartStudy(deck.id); setActiveDeckMenuId(null); }}
+                              >
+                                📖 Estudar ({totalStudyable})
+                              </button>
+                              <button 
+                                type="button"
+                                className="w-full text-left px-4 py-2 hover:bg-muted cursor-pointer flex items-center gap-2.5 transition-colors"
+                                onClick={() => { handleOpenAddCardModal(deck.id); setActiveDeckMenuId(null); }}
+                              >
+                                ➕ Adicionar Cartão
+                              </button>
+                              <button 
+                                type="button"
+                                className="w-full text-left px-4 py-2 hover:bg-muted cursor-pointer flex items-center gap-2.5 transition-colors"
+                                onClick={() => { handleOpenDeckOptionsModal(deck); setActiveDeckMenuId(null); }}
+                              >
+                                ⚙️ Opções do Baralho
+                              </button>
+                              <button 
+                                type="button"
+                                className="w-full text-left px-4 py-2 hover:bg-muted cursor-pointer flex items-center gap-2.5 transition-colors"
+                                onClick={() => { handleOpenEditDeckModal(deck); setActiveDeckMenuId(null); }}
+                              >
+                                ✏️ Renomear
+                              </button>
+                              <button 
+                                type="button"
+                                className="w-full text-left px-4 py-2 hover:bg-muted cursor-pointer flex items-center gap-2.5 transition-colors"
+                                onClick={() => { handleExportDeck(deck.id); setActiveDeckMenuId(null); }}
+                              >
+                                📥 Exportar Backup
+                              </button>
+                              <hr className="border-border/60 my-1" />
+                              <button 
+                                type="button"
+                                className="w-full text-left px-4 py-2 hover:bg-destructive/10 text-red-500 hover:text-red-600 cursor-pointer flex items-center gap-2.5 transition-colors"
+                                onClick={() => { 
+                                  setActiveDeckMenuId(null);
+                                  if (window.confirm(`Tem certeza que deseja excluir o deck "${deck.name}"? Todos os cartões associados serão apagados permanentemente.`)) {
+                                    handleDeleteDeck(deck.id); 
+                                  }
+                                }}
+                              >
+                                🗑️ Excluir Baralho
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Barra de Progresso Master (Visual) */}
+                    <div className="w-full flex items-center gap-3">
+                      <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden flex">
+                        <div 
+                          className="h-full bg-emerald-500 transition-all duration-1000 ease-out"
+                          style={{ width: `${progressPercent}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] text-muted-foreground font-bold shrink-0 min-w-[32px] text-right">
+                        {Math.round(progressPercent)}%
+                      </span>
+                    </div>
                   </div>
                 </div>
               );

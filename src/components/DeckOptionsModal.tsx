@@ -3,6 +3,7 @@ import type { Deck, DeckPreset } from '../types';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { Button } from './ui/button';
 import { RotateCcw, Globe, HelpCircle, Settings } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 
 interface DeckOptionsModalProps {
   isOpen: boolean;
@@ -139,18 +140,21 @@ export const DeckOptionsModal: React.FC<DeckOptionsModalProps> = ({
               <label className="text-xs font-semibold text-muted-foreground" htmlFor="deck-preset">
                 Preset de Estudo (Opções do Anki)
               </label>
-              <select
-                id="deck-preset"
-                className="w-full bg-background border border-border text-foreground px-3 py-2 rounded-xl text-xs font-bold outline-none cursor-pointer focus:border-primary/50"
-                value={presetId}
-                onChange={(e) => setPresetId(e.target.value)}
+              <Select 
+                value={presetId} 
+                onValueChange={(val: any) => setPresetId(val)}
               >
-                {presets && presets.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} {p.id === 'default-study-preset' ? '(Padrão)' : ''}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="deck-preset" className="w-full bg-background border-border text-foreground px-3 py-5 rounded-xl text-xs font-bold focus:border-primary/50 transition-all duration-200">
+                  <SelectValue placeholder="Selecione um preset" />
+                </SelectTrigger>
+                <SelectContent className="rounded-xl border-border/50 shadow-xl max-h-[250px] overflow-y-auto">
+                  {presets && presets.map(p => (
+                    <SelectItem key={p.id} value={p.id} className="rounded-lg cursor-pointer font-medium focus:bg-primary/10 focus:text-primary">
+                      {p.name} {p.id === 'default-study-preset' ? '(Padrão)' : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* --- LIMITES E ALGORITMO CARD --- */}
@@ -344,8 +348,7 @@ export const DeckOptionsModal: React.FC<DeckOptionsModalProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <select
-                    className="w-full bg-muted border border-border text-foreground px-3 py-1.5 rounded-lg text-xs outline-none focus:border-primary/50 font-bold transition-all cursor-pointer"
+                  <Select
                     value={
                       algoLimitType === 'preset'
                         ? (fsrsEnabled ? 'FSRS' : 'SM-2')
@@ -353,8 +356,7 @@ export const DeckOptionsModal: React.FC<DeckOptionsModalProps> = ({
                         ? algoLimitValue
                         : algoLimitToday
                     }
-                    onChange={(e) => {
-                      const val = e.target.value as 'SM-2' | 'FSRS';
+                    onValueChange={(val: any) => {
                       if (algoLimitType === 'preset') {
                         setFsrsEnabled(val === 'FSRS');
                       } else if (algoLimitType === 'deck') {
@@ -364,9 +366,14 @@ export const DeckOptionsModal: React.FC<DeckOptionsModalProps> = ({
                       }
                     }}
                   >
-                    <option value="SM-2">SM-2 (Clássico)</option>
-                    <option value="FSRS">FSRS (Moderno)</option>
-                  </select>
+                    <SelectTrigger className="w-full bg-muted border-border text-foreground px-3 py-5 rounded-lg text-xs focus:border-primary/50 font-bold transition-all duration-200">
+                      <SelectValue placeholder="Selecione o algoritmo" />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl border-border/50 shadow-xl">
+                      <SelectItem value="SM-2" className="rounded-lg cursor-pointer font-medium focus:bg-primary/10 focus:text-primary">SM-2 (Clássico)</SelectItem>
+                      <SelectItem value="FSRS" className="rounded-lg cursor-pointer font-medium focus:bg-primary/10 focus:text-primary">FSRS (Moderno)</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <button
                     type="button"
                     title="Restaurar para o preset"

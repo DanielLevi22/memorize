@@ -181,6 +181,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
   const isReversed = currentCard?.cardType === 'reversed';
   const termText = currentCard ? (isReversed ? currentCard.back : currentCard.front) : '';
   const meaningText = currentCard ? (isReversed ? currentCard.front : currentCard.back) : '';
+  const isListeningFront = currentCard && (currentCard.audio || currentCard.cardType === 'listening') && !isAudioTextRevealed;
 
   const speakText = (text: string, lang: 'en' | 'pt', onEnd?: () => void) => {
     if (typeof window === 'undefined' || !window.speechSynthesis) {
@@ -493,7 +494,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
   const handleReveal = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     if (studyMode === 'classic') {
-      if (currentCard.audio && !isAudioTextRevealed) {
+      if (isListeningFront) {
         setIsAudioTextRevealed(true);
       } else {
         setIsFlipped(true);
@@ -1087,7 +1088,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
               </div>
             ) : (
               /* 3. MODO CLÁSSICO */
-              currentCard.audio && !isAudioTextRevealed ? (
+              isListeningFront ? (
                 <div className="flex-1 flex flex-col justify-center items-center text-center gap-5">
                   <Button
                     type="button"
@@ -1331,7 +1332,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
           >
             <Eye size={16} />
             {studyMode === 'classic'
-              ? (currentCard.audio && !isAudioTextRevealed ? 'Revelar Texto (Inglês)' : 'Revelar Resposta')
+              ? (isListeningFront ? 'Revelar Texto (Inglês)' : 'Revelar Resposta')
               : (hasCheckedAnswer ? 'Revelar Significado' : 'Revelar Resposta')
             }
           </Button>

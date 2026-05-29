@@ -6,6 +6,7 @@ import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Sparkles, CheckCircle2, ChevronRight, ArrowLeft, Loader2, Key } from 'lucide-react';
 import { Toast } from './ui/toast';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 
 interface AiGeneratorModalProps {
   isOpen: boolean;
@@ -309,38 +310,44 @@ Gere resultados realistas, focados em conversação cotidiana e gramática prát
                   <label className="text-xs font-semibold text-muted-foreground" htmlFor="ai-count">
                     Quantidade de Cartões
                   </label>
-                  <select
-                    id="ai-count"
-                    value={cardCount}
-                    onChange={(e) => setCardCount(parseInt(e.target.value))}
+                  <Select 
+                    value={cardCount.toString()} 
+                    onValueChange={(val: any) => setCardCount(parseInt(val))}
                     disabled={!geminiApiKey.trim()}
-                    className="bg-background border border-border text-foreground px-3 py-2 rounded-xl text-xs font-semibold outline-none cursor-pointer focus:border-violet-500/50 h-10"
                   >
-                    <option value={5}>5 cartões</option>
-                    <option value={10}>10 cartões</option>
-                    <option value={15}>15 cartões</option>
-                    <option value={20}>20 cartões (Max)</option>
-                  </select>
+                    <SelectTrigger id="ai-count" className="bg-background border-border text-foreground px-3 py-2 rounded-xl text-xs font-semibold focus:border-violet-500/50 h-10 transition-all duration-200">
+                      <SelectValue placeholder="Quantidade" />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl border-border/50 shadow-xl">
+                      <SelectItem value="5" className="rounded-lg cursor-pointer font-medium focus:bg-violet-500/10 focus:text-violet-500">5 cartões</SelectItem>
+                      <SelectItem value="10" className="rounded-lg cursor-pointer font-medium focus:bg-violet-500/10 focus:text-violet-500">10 cartões</SelectItem>
+                      <SelectItem value="15" className="rounded-lg cursor-pointer font-medium focus:bg-violet-500/10 focus:text-violet-500">15 cartões</SelectItem>
+                      <SelectItem value="20" className="rounded-lg cursor-pointer font-medium focus:bg-violet-500/10 focus:text-violet-500">20 cartões (Max)</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="flex flex-col gap-1.5">
                   <label className="text-xs font-semibold text-muted-foreground" htmlFor="ai-deck">
                     Destino (Salvar em)
                   </label>
-                  <select
-                    id="ai-deck"
-                    value={selectedDeckId}
-                    onChange={(e) => setSelectedDeckId(e.target.value)}
+                  <Select 
+                    value={selectedDeckId} 
+                    onValueChange={(val: any) => setSelectedDeckId(val)}
                     disabled={!geminiApiKey.trim()}
-                    className="bg-background border border-border text-foreground px-3 py-2 rounded-xl text-xs font-semibold outline-none cursor-pointer focus:border-violet-500/50 h-10"
                   >
-                    <option value="new">[+] Criar Novo Baralho</option>
-                    {decks?.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        📁 {d.name}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger id="ai-deck" className="bg-background border-border text-foreground px-3 py-2 rounded-xl text-xs font-semibold focus:border-violet-500/50 h-10 transition-all duration-200">
+                      <SelectValue placeholder="Selecione o destino" />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl border-border/50 shadow-xl max-h-[250px] overflow-y-auto">
+                      <SelectItem value="new" className="rounded-lg cursor-pointer font-bold focus:bg-violet-500/10 focus:text-violet-500 text-violet-500">[+] Criar Novo Baralho</SelectItem>
+                      {decks?.map((d) => (
+                        <SelectItem key={d.id} value={d.id} className="rounded-lg cursor-pointer font-medium focus:bg-violet-500/10 focus:text-violet-500">
+                          📁 {d.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 

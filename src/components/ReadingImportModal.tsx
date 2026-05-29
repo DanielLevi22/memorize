@@ -4,6 +4,7 @@ import { db } from '../db/db';
 import { FileText, FolderPlus, Loader2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import type { ReadingText } from '../types';
 
 interface ReadingImportModalProps {
@@ -113,7 +114,7 @@ export const ReadingImportModal: React.FC<ReadingImportModalProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
-      <DialogContent className="max-w-md bg-card border-border">
+      <DialogContent className="sm:max-w-md w-full bg-card border-border">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-foreground font-black">
             <FileText size={18} className="text-primary" />
@@ -155,20 +156,19 @@ export const ReadingImportModal: React.FC<ReadingImportModalProps> = ({
                 <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
                   Coleção (Pasta)
                 </label>
-                <select
-                  className="w-full bg-muted border border-border text-foreground px-4 py-2.5 rounded-xl text-sm outline-none focus:border-primary/50 font-semibold transition-colors cursor-pointer"
-                  value={collectionId}
-                  onChange={(e) => setCollectionId(e.target.value)}
-                  disabled={isSaving}
-                >
-                  <option value="" disabled hidden>Selecione uma Coleção...</option>
-                  <option value="__new__">+ Criar Nova Coleção...</option>
-                  {collections.map((col) => (
-                    <option key={col.id} value={col.id}>
-                      📁 {col.title}
-                    </option>
-                  ))}
-                </select>
+                <Select value={collectionId} onValueChange={setCollectionId} disabled={isSaving}>
+                  <SelectTrigger className="w-full bg-muted border-border text-foreground px-4 py-5 rounded-xl text-sm font-semibold focus:border-primary/50 transition-colors">
+                    <SelectValue placeholder="Selecione uma Coleção..." />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl border-border/50 shadow-xl max-h-[250px]">
+                    <SelectItem value="__new__" className="rounded-lg cursor-pointer font-bold focus:bg-primary/10 focus:text-primary text-primary">+ Criar Nova Coleção...</SelectItem>
+                    {collections.map((col) => (
+                      <SelectItem key={col.id} value={col.id} className="rounded-lg cursor-pointer font-medium focus:bg-primary/10 focus:text-primary">
+                        📁 {col.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* Nome da Nova Coleção */}

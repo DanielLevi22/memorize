@@ -7,12 +7,13 @@ import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Volume2, Trash2, Mic, Sparkles, Loader2 } from 'lucide-react';
 import { getTagColors } from '../utils/tagColors';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 
 interface CardModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (
-    type: 'basic' | 'reversed' | 'optional_reversed' | 'typing' | 'cloze',
+    type: 'basic' | 'reversed' | 'optional_reversed' | 'typing' | 'cloze' | 'listening',
     fields: string[],
     context: string,
     audioBlob: Blob | null,
@@ -29,11 +30,13 @@ export const CardModal: React.FC<CardModalProps> = ({
   cardToEdit,
   deckName
 }) => {
-  const [noteType, setNoteType] = useState<'basic' | 'reversed' | 'optional_reversed' | 'typing' | 'cloze'>('basic');
+  const [noteType, setNoteType] = useState<'basic' | 'reversed' | 'optional_reversed' | 'typing' | 'cloze' | 'listening'>('basic');
   const [fields, setFields] = useState<string[]>(['', '', '']);
   const [context, setContext] = useState('');
   const [tagList, setTagList] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
+  const [availableTags, setAvailableTags] = useState<string[]>([]);
+  const [isTagInputFocused, setIsTagInputFocused] = useState(false);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [audioFileName, setAudioFileName] = useState('');
   const [isPlayingPreview, setIsPlayingPreview] = useState(false);
@@ -103,6 +106,20 @@ export const CardModal: React.FC<CardModalProps> = ({
         setTagList([]);
       }
       setTagInput('');
+
+      // Load all available tags
+      if (isOpen) {
+        try {
+          const notes = await db.notes.toArray();
+          const tagsSet = new Set<string>();
+          notes.forEach(n => {
+            if (n.tags) n.tags.forEach(t => tagsSet.add(t));
+          });
+          setAvailableTags(Array.from(tagsSet).sort());
+        } catch (e) {
+          console.error("Failed to load available tags", e);
+        }
+      }
     };
 
     loadNoteData();
@@ -409,7 +426,15 @@ export const CardModal: React.FC<CardModalProps> = ({
       audioRef.current = null;
     }
     
-    const cleanTags = tagList
+    let allTags = [...tagList];
+    if (tagInput.trim()) {
+      const pending = tagInput.trim().replace(/,/g, '').toLowerCase();
+      if (pending && !allTags.includes(pending)) {
+        allTags.push(pending);
+      }
+    }
+
+    const cleanTags = allTags
       .map(t => t.trim().toLowerCase())
       .filter(t => t.length > 0);
 
@@ -419,48 +444,57 @@ export const CardModal: React.FC<CardModalProps> = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="bg-card border-border text-foreground max-w-xs sm:max-w-md rounded-lg">
-        <DialogHeader>
-          <div>
-            <DialogTitle className="font-semibold text-lg text-foreground flex items-center gap-2">
-              {cardToEdit ? '✏️ Editar Nota' : '📇 Nova Nota'}
-            </DialogTitle>
-            <span className="text-[10px] text-primary font-bold uppercase tracking-wider block mt-1">
+      <DialogContent className="bg-card/95 backdrop-blur-xl border-border/50 text-foreground max-w-xs sm:max-w-lg rounded-2xl shadow-2xl shadow-primary/5 p-6 overflow-hidden">
+        <DialogHeader className="mb-2">
+          <div className="flex flex-col gap-2 items-start">
+            <span className="text-[10px] bg-primary/10 text-primary px-2.5 py-1 rounded-full font-bold uppercase tracking-wider">
               Deck: {deckName.replace(/[^a-zA-Z0-9\s]/g, '').trim()}
             </span>
+            <DialogTitle className="font-bold text-xl text-foreground flex items-center gap-2">
+              {cardToEdit ? '✏️ Editar Nota' : '📇 Nova Nota'}
+            </DialogTitle>
           </div>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-2">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-5 mt-2">
           {/* Seletor de Tipo de Nota */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-muted-foreground" htmlFor="note-type">
+            <label className="text-xs font-medium text-muted-foreground/80 tracking-wide" htmlFor="note-type">
               Tipo de Nota (Note Type)
             </label>
-            <select
-              id="note-type"
-              className="bg-background border border-border text-foreground px-3 py-2 rounded-xl text-xs font-bold outline-none cursor-pointer h-10 focus:border-primary focus:ring-2 focus:ring-primary/20"
-              value={noteType}
-              onChange={(e) => setNoteType(e.target.value as any)}
-            >
-              <option value="basic">Básico</option>
-              <option value="reversed">Básico (e cartão invertido)</option>
-              <option value="optional_reversed">Básico (cartão invertido opcional)</option>
-              <option value="typing">Básico (digite a resposta)</option>
-              <option value="cloze">Omissão de Palavras (Cloze)</option>
-            </select>
+            <Select value={noteType} onValueChange={(val: any) => setNoteType(val)}>
+              <SelectTrigger id="note-type" className="bg-muted/30 border-transparent hover:border-border text-foreground px-3 py-5 rounded-xl text-sm font-semibold focus:bg-background focus:ring-2 focus:ring-primary/20 transition-all duration-200">
+                <SelectValue placeholder="Selecione o tipo" />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl border-border/50 shadow-xl">
+                <SelectItem value="basic" className="rounded-lg cursor-pointer font-medium focus:bg-primary/10 focus:text-primary py-2.5">Básico</SelectItem>
+                <SelectItem value="reversed" className="rounded-lg cursor-pointer font-medium focus:bg-primary/10 focus:text-primary py-2.5">Básico (e cartão invertido)</SelectItem>
+                <SelectItem value="optional_reversed" className="rounded-lg cursor-pointer font-medium focus:bg-primary/10 focus:text-primary py-2.5">Básico (cartão invertido opcional)</SelectItem>
+                <SelectItem value="typing" className="rounded-lg cursor-pointer font-medium focus:bg-primary/10 focus:text-primary py-2.5">Básico (digite a resposta)</SelectItem>
+                <SelectItem value="cloze" className="rounded-lg cursor-pointer font-medium focus:bg-primary/10 focus:text-primary py-2.5">Omissão de Palavras (Cloze)</SelectItem>
+                <SelectItem value="listening" className="rounded-lg cursor-pointer font-medium focus:bg-primary/10 focus:text-primary py-2.5">Prática de Audição (Listening)</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] text-muted-foreground pt-1 leading-relaxed">
+              {noteType === 'basic' && "Cartão simples. Você vê a frente e tenta lembrar o verso."}
+              {noteType === 'reversed' && "Cria 2 cartões. Um normal (Frente ➔ Verso) e outro invertido (Verso ➔ Frente)."}
+              {noteType === 'optional_reversed' && "Cria um cartão normal, e permite criar um reverso apenas se preencher o 3º campo."}
+              {noteType === 'typing' && "Você vê a frente e precisa digitar exatamente o texto do verso."}
+              {noteType === 'cloze' && "Oculta partes do texto marcadas com {{c1::palavra}} para você adivinhar."}
+              {noteType === 'listening' && "Oculta o texto inicial, toca o áudio, e revela a resposta só após você responder."}
+            </p>
           </div>
 
           {/* Campo 1: Frente / Texto Cloze */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-muted-foreground" htmlFor="card-front">
+            <label className="text-xs font-medium text-muted-foreground/80 tracking-wide" htmlFor="card-front">
               {noteType === 'cloze' ? 'Texto (com clozes) *' : 'Frente (Termo em Inglês) *'}
             </label>
             <div className="flex gap-1.5 items-center">
               {noteType === 'cloze' ? (
                 <Textarea
                   id="card-front"
-                  className="bg-background border-border text-foreground focus-visible:ring-primary focus-visible:border-primary flex-1 min-h-[60px]"
+                  className="bg-muted/30 border-transparent hover:border-border text-foreground focus-visible:bg-background focus-visible:ring-primary/20 focus-visible:border-primary flex-1 min-h-[60px] transition-all duration-200 rounded-xl"
                   placeholder="Ex: The {{c1::apple::maçã}} is {{c2::red}}."
                   value={fields[0]}
                   onChange={(e) => setFields([e.target.value, fields[1], fields[2]])}
@@ -471,7 +505,7 @@ export const CardModal: React.FC<CardModalProps> = ({
                 <Input
                   id="card-front"
                   type="text"
-                  className="bg-background border-border text-foreground focus-visible:ring-primary focus-visible:border-primary flex-1"
+                  className="bg-muted/30 border-transparent hover:border-border text-foreground focus-visible:bg-background focus-visible:ring-primary/20 focus-visible:border-primary flex-1 transition-all duration-200 rounded-xl h-10"
                   placeholder="Ex: Get over"
                   value={fields[0]}
                   onChange={(e) => setFields([e.target.value, fields[1], fields[2]])}
@@ -483,10 +517,10 @@ export const CardModal: React.FC<CardModalProps> = ({
                 type="button"
                 variant="outline"
                 size="icon"
-                className={`h-9 w-9 border-border shrink-0 cursor-pointer transition-all ${
+                className={`h-10 w-10 rounded-xl shrink-0 cursor-pointer transition-all duration-200 active:scale-95 ${
                   isListeningFront 
                     ? 'bg-destructive/10 text-destructive border-destructive animate-pulse ring-2 ring-destructive/30' 
-                    : 'bg-muted/20 hover:bg-muted text-muted-foreground hover:text-foreground'
+                    : 'bg-muted/30 border-transparent hover:border-border text-muted-foreground hover:text-foreground'
                 }`}
                 onClick={() => {
                   if (isListeningFront) {
@@ -504,14 +538,14 @@ export const CardModal: React.FC<CardModalProps> = ({
 
           {/* Campo 2: Verso / Extra Cloze */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-muted-foreground" htmlFor="card-back">
+            <label className="text-xs font-medium text-muted-foreground/80 tracking-wide" htmlFor="card-back">
               {noteType === 'cloze' ? 'Texto Extra (Opcional)' : 'Verso (Tradução/Significado) *'}
             </label>
             <div className="flex gap-1.5 items-center">
               {noteType === 'cloze' ? (
                 <Textarea
                   id="card-back"
-                  className="bg-background border-border text-foreground focus-visible:ring-primary focus-visible:border-primary flex-1 min-h-[60px]"
+                  className="bg-muted/30 border-transparent hover:border-border text-foreground focus-visible:bg-background focus-visible:ring-primary/20 focus-visible:border-primary flex-1 min-h-[60px] transition-all duration-200 rounded-xl"
                   placeholder="Ex: Explicações ou contexto adicional revelado no verso."
                   value={fields[1]}
                   onChange={(e) => setFields([fields[0], e.target.value, fields[2]])}
@@ -520,7 +554,7 @@ export const CardModal: React.FC<CardModalProps> = ({
                 <Input
                   id="card-back"
                   type="text"
-                  className="bg-background border-border text-foreground focus-visible:ring-primary focus-visible:border-primary flex-1"
+                  className="bg-muted/30 border-transparent hover:border-border text-foreground focus-visible:bg-background focus-visible:ring-primary/20 focus-visible:border-primary flex-1 transition-all duration-200 rounded-xl h-10"
                   placeholder="Ex: Superar / Recuperar-se"
                   value={fields[1]}
                   onChange={(e) => setFields([fields[0], e.target.value, fields[2]])}
@@ -531,10 +565,10 @@ export const CardModal: React.FC<CardModalProps> = ({
                 type="button"
                 variant="outline"
                 size="icon"
-                className={`h-9 w-9 border-border shrink-0 cursor-pointer transition-all ${
+                className={`h-10 w-10 rounded-xl shrink-0 cursor-pointer transition-all duration-200 active:scale-95 ${
                   isListeningBack 
                     ? 'bg-destructive/10 text-destructive border-destructive animate-pulse ring-2 ring-destructive/30' 
-                    : 'bg-muted/20 hover:bg-muted text-muted-foreground hover:text-foreground'
+                    : 'bg-muted/30 border-transparent hover:border-border text-muted-foreground hover:text-foreground'
                 }`}
                 onClick={() => {
                   if (isListeningBack) {
@@ -553,13 +587,13 @@ export const CardModal: React.FC<CardModalProps> = ({
           {/* Campo 3: Adicionar Invertido (apenas para optional_reversed) */}
           {noteType === 'optional_reversed' && (
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-muted-foreground" htmlFor="card-reverse-trigger">
+              <label className="text-xs font-medium text-muted-foreground/80 tracking-wide" htmlFor="card-reverse-trigger">
                 Adicionar Invertido (opcional)
               </label>
               <Input
                 id="card-reverse-trigger"
                 type="text"
-                className="bg-background border-border text-foreground focus-visible:ring-primary focus-visible:border-primary w-full"
+                className="bg-muted/30 border-transparent hover:border-border text-foreground focus-visible:bg-background focus-visible:ring-primary/20 focus-visible:border-primary w-full transition-all duration-200 rounded-xl h-10"
                 placeholder="Ex: Digite algo (ex: 'y') para gerar o cartão invertido"
                 value={fields[2] || ''}
                 onChange={(e) => setFields([fields[0], fields[1], e.target.value])}
@@ -568,13 +602,13 @@ export const CardModal: React.FC<CardModalProps> = ({
           )}
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-muted-foreground" htmlFor="card-context">
+            <label className="text-xs font-medium text-muted-foreground/80 tracking-wide" htmlFor="card-context">
               Frase de Exemplo (Contexto)
             </label>
             <div className="flex gap-1.5 items-start">
               <Textarea
                 id="card-context"
-                className="bg-background border-border text-foreground focus-visible:ring-primary focus-visible:border-primary min-h-[80px] flex-1"
+                className="bg-muted/30 border-transparent hover:border-border text-foreground focus-visible:bg-background focus-visible:ring-primary/20 focus-visible:border-primary min-h-[80px] flex-1 transition-all duration-200 rounded-xl"
                 placeholder="Ex: It took her a long time to get over her illness."
                 value={context}
                 onChange={(e) => setContext(e.target.value)}
@@ -583,10 +617,10 @@ export const CardModal: React.FC<CardModalProps> = ({
                 type="button"
                 variant="outline"
                 size="icon"
-                className={`h-9 w-9 border-border shrink-0 cursor-pointer transition-all ${
+                className={`h-10 w-10 rounded-xl shrink-0 cursor-pointer transition-all duration-200 active:scale-95 ${
                   isListeningContext 
                     ? 'bg-destructive/10 text-destructive border-destructive animate-pulse ring-2 ring-destructive/30' 
-                    : 'bg-muted/20 hover:bg-muted text-muted-foreground hover:text-foreground'
+                    : 'bg-muted/30 border-transparent hover:border-border text-muted-foreground hover:text-foreground'
                 }`}
                 onClick={() => {
                   if (isListeningContext) {
@@ -602,23 +636,23 @@ export const CardModal: React.FC<CardModalProps> = ({
             </div>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-muted-foreground">
+          <div className="flex flex-col gap-1.5 relative">
+            <label className="text-xs font-medium text-muted-foreground/80 tracking-wide">
               Etiquetas / Tags
             </label>
-            <div className="flex flex-wrap gap-1.5 p-2 bg-background border border-border rounded-xl min-h-[42px] items-center focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20 transition-all">
+            <div className="flex flex-wrap gap-1.5 p-2 bg-muted/30 border border-transparent rounded-xl min-h-[42px] items-center focus-within:bg-background focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20 transition-all duration-200">
               {tagList.map((tag) => {
                 const colors = getTagColors(tag);
                 return (
                   <span
                     key={tag}
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border flex items-center gap-1 transition-all ${colors.bg} ${colors.text} ${colors.border}`}
+                    className={`text-xs font-bold px-2.5 py-1 rounded-lg border flex items-center gap-1.5 transition-all ${colors.bg} ${colors.text} ${colors.border}`}
                   >
                     #{tag}
                     <button
                       type="button"
                       onClick={() => setTagList(prev => prev.filter(t => t !== tag))}
-                      className="hover:text-foreground cursor-pointer text-[10px] font-black leading-none opacity-60 hover:opacity-100"
+                      className="hover:text-foreground cursor-pointer text-xs font-black leading-none opacity-60 hover:opacity-100"
                     >
                       &times;
                     </button>
@@ -628,11 +662,28 @@ export const CardModal: React.FC<CardModalProps> = ({
               <input
                 type="text"
                 value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
+                onFocus={() => setIsTagInputFocused(true)}
+                onBlur={() => setTimeout(() => setIsTagInputFocused(false), 200)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val.includes(',')) {
+                    const parts = val.split(',');
+                    const newTags = parts.slice(0, -1)
+                      .map(t => t.trim().toLowerCase())
+                      .filter(t => t && !tagList.includes(t));
+                    
+                    if (newTags.length > 0) {
+                      setTagList(prev => [...prev, ...newTags]);
+                    }
+                    setTagInput(parts[parts.length - 1].trimStart());
+                  } else {
+                    setTagInput(val);
+                  }
+                }}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ',') {
+                  if (e.key === 'Enter') {
                     e.preventDefault();
-                    const clean = tagInput.trim().replace(/,/g, '').toLowerCase();
+                    const clean = tagInput.trim().toLowerCase();
                     if (clean && !tagList.includes(clean)) {
                       setTagList(prev => [...prev, clean]);
                     }
@@ -643,13 +694,40 @@ export const CardModal: React.FC<CardModalProps> = ({
                 className="bg-transparent border-none outline-none text-xs text-foreground flex-1 min-w-[100px] py-0.5"
               />
             </div>
+
+            {/* Dropdown de Sugestões de Tags */}
+            {isTagInputFocused && availableTags.length > 0 && (
+              <div className="absolute top-full mt-1 left-0 right-0 bg-popover border border-border rounded-xl shadow-lg z-50 max-h-40 overflow-y-auto">
+                {availableTags
+                  .filter(t => !tagList.includes(t) && t.toLowerCase().includes(tagInput.toLowerCase()))
+                  .map(tag => (
+                    <button
+                      key={tag}
+                      type="button"
+                      className="w-full text-left px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted focus:bg-muted focus:outline-none cursor-pointer"
+                      onClick={() => {
+                        setTagList(prev => [...prev, tag]);
+                        setTagInput('');
+                      }}
+                    >
+                      #{tag}
+                    </button>
+                  ))}
+                {availableTags.filter(t => !tagList.includes(t) && t.toLowerCase().includes(tagInput.toLowerCase())).length === 0 && (
+                  <div className="px-3 py-2 text-xs text-muted-foreground italic">
+                    Nenhuma sugestão. Digite para criar nova etiqueta.
+                  </div>
+                )}
+              </div>
+            )}
+
             <p className="text-[9px] text-muted-foreground">
               Pressione <strong>Enter</strong> ou <strong>vírgula</strong> para adicionar uma tag.
             </p>
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-muted-foreground">
+            <label className="text-xs font-medium text-muted-foreground/80 tracking-wide">
               Áudio de Pronúncia (Opcional)
             </label>
             
@@ -715,7 +793,7 @@ export const CardModal: React.FC<CardModalProps> = ({
               <div className="grid grid-cols-3 gap-1.5">
                 <label 
                   htmlFor="audio-upload" 
-                  className="flex flex-col items-center justify-center p-3 border border-border border-dashed rounded-xl bg-muted/20 hover:bg-muted/40 cursor-pointer transition-colors text-muted-foreground hover:text-foreground text-center h-[90px]"
+                  className="flex flex-col items-center justify-center p-3 border border-border/50 rounded-xl bg-muted/30 hover:bg-muted/60 hover:border-border hover:shadow-sm cursor-pointer transition-all duration-200 active:scale-95 text-muted-foreground hover:text-foreground text-center h-[90px]"
                 >
                   <Volume2 size={18} className="mb-1 text-muted-foreground/80 shrink-0" />
                   <span className="text-[11px] font-bold leading-tight">Upload Áudio</span>
@@ -735,7 +813,7 @@ export const CardModal: React.FC<CardModalProps> = ({
                     setShowRecorder(true);
                     startRecording();
                   }}
-                  className="flex flex-col items-center justify-center p-3 border border-border border-dashed rounded-xl bg-muted/20 hover:bg-muted/40 cursor-pointer transition-colors text-muted-foreground hover:text-foreground text-center h-[90px]"
+                  className="flex flex-col items-center justify-center p-3 border border-border/50 rounded-xl bg-muted/30 hover:bg-muted/60 hover:border-border hover:shadow-sm cursor-pointer transition-all duration-200 active:scale-95 text-muted-foreground hover:text-foreground text-center h-[90px]"
                 >
                   <Mic size={18} className="mb-1 text-muted-foreground/80 shrink-0" />
                   <span className="text-[11px] font-bold leading-tight">Gravar Voz</span>
@@ -746,7 +824,7 @@ export const CardModal: React.FC<CardModalProps> = ({
                   type="button"
                   onClick={() => generateTtsAudio(fields[0])}
                   disabled={isGeneratingTts || !fields[0].trim()}
-                  className="flex flex-col items-center justify-center p-3 border border-border border-dashed rounded-xl bg-muted/20 hover:bg-muted/40 cursor-pointer transition-colors text-muted-foreground hover:text-foreground text-center h-[90px] disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex flex-col items-center justify-center p-3 border border-border/50 rounded-xl bg-muted/30 hover:bg-muted/60 hover:border-border hover:shadow-sm cursor-pointer transition-all duration-200 active:scale-95 text-muted-foreground hover:text-foreground text-center h-[90px] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 disabled:hover:shadow-none"
                   title={!fields[0].trim() ? "Digite o termo na Frente primeiro" : "Gerar pronúncia automaticamente"}
                 >
                   {isGeneratingTts ? (
@@ -767,21 +845,21 @@ export const CardModal: React.FC<CardModalProps> = ({
             )}
           </div>
 
-          <DialogFooter className="flex flex-row gap-2 mt-4 sm:justify-end">
+          <DialogFooter className="flex flex-row gap-2 mt-2 sm:justify-end">
             <Button 
               type="button" 
               variant="outline" 
-              className="flex-1 sm:flex-initial border-border bg-muted/30 hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
+              className="rounded-xl px-5 transition-all duration-200 active:scale-95 border-border bg-muted/30 hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer"
               onClick={onClose}
             >
               Cancelar
             </Button>
             <Button 
               type="submit" 
-              className="flex-1 sm:flex-initial bg-primary hover:bg-primary/90 text-primary-foreground cursor-pointer disabled:opacity-50"
+              className="rounded-xl px-6 font-bold shadow-md shadow-primary/20 transition-all duration-200 active:scale-95 flex-1 sm:flex-initial bg-primary hover:bg-primary/90 text-primary-foreground cursor-pointer disabled:opacity-50"
               disabled={!fields[0].trim() || (noteType !== 'cloze' && !fields[1].trim()) || isRecording || isListeningFront || isListeningBack || isListeningContext || isGeneratingTts}
             >
-              {cardToEdit ? 'Salvar' : 'Criar Cartão'}
+              {cardToEdit ? 'Salvar Alterações' : 'Criar Cartão'}
             </Button>
           </DialogFooter>
         </form>
