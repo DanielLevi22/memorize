@@ -23,6 +23,7 @@ export interface Deck {
   algoLimitValue?: 'SM-2' | 'FSRS'; // Usado quando algoLimitType === 'deck'
   algoLimitToday?: 'SM-2' | 'FSRS'; // Usado quando algoLimitType === 'today'
   algoLimitTodayDate?: string; // YYYY-MM-DD em que o limite de hoje foi definido
+
 }
 
 export interface Note {
@@ -44,7 +45,6 @@ export interface Card {
   back: string; // Tradução/Resposta
   context: string; // Exemplo em contexto
   audio?: Blob; // Áudio de pronúncia opcional
-  
   // SRS (Spaced Repetition System) Fields
   interval: number; // Intervalo atual em dias (0 = novo/não estudado)
   ease: number; // Fator de facilidade (Ease Factor, padrão = 2.5)

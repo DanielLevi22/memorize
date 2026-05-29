@@ -40,21 +40,22 @@ export async function processTextWithAI(
   apiKey: string
 ): Promise<{ title: string; translatedText: string; lines: ReadingLine[] }> {
   const promptText = `
-Você é um especialista em ensino de idiomas. Receba o texto abaixo e retorne:
+Você é um especialista em ensino de idiomas. Receba o texto fornecido (que pode ser a extração de um PDF contendo texto bilíngue com frases no idioma original e suas respectivas traduções logo abaixo, ou apenas o texto simples no idioma original).
 
+Seu objetivo é analisar o texto, segmentá-lo em frases e retornar a estrutura JSON:
 1. Um título curto e descritivo para o texto (campo "title")
 2. Para cada frase/sentença do texto:
-   - "original": a frase no idioma original (exatamente como está escrita no texto fornecido, sem qualquer tradução)
-   - "translated": a tradução natural para português do Brasil
+   - "original": a frase exatamente no idioma original de estudo (ex: em inglês)
+   - "translated": a tradução correspondente para português do Brasil
    - "highlights": 2 a 4 palavras ou expressões-chave da frase original que são importantes para o aprendizado de vocabulário
 
-Regras:
-- Separe o texto em frases naturais (por pontuação: . ! ? ou quebras de linha significativas)
-- Mantenha a ordem original das frases
-- ATENÇÃO CRÍTICA: O campo "original" DEVE ser mantido no idioma original (ex: inglês, espanhol, etc.) conforme enviado no texto abaixo. NUNCA coloque a tradução em português no campo "original". Apenas o campo "translated" deve ser traduzido para o português.
-- As highlights devem ser palavras que aparecem EXATAMENTE na frase original (no idioma original)
-- A tradução deve ser natural e coloquial, não literal
-- Não pule nenhuma frase do texto
+Regras de Segmentação e Tradução Inteligente:
+- **Detecção de Conteúdo Bilíngue**: Analise se o texto fornecido já contém pares de frases em inglês seguidas de suas traduções em português (ex: uma linha em inglês e a linha seguinte com a tradução em português, ou a tradução entre parênteses/itálico). Se o texto já contiver as traduções originais das frases, você DEVE extrair e usar exatamente as traduções existentes no texto para o campo "translated", em vez de gerar novas traduções do zero.
+- **Caso não haja Tradução no Texto**: Se o texto contiver apenas sentenças no idioma original (ex: apenas inglês), você deve traduzir cada frase de forma natural e coloquial para o português do Brasil no campo "translated".
+- **Idioma Original**: O campo "original" DEVE conter a frase estritamente no idioma original (ex: inglês), exatamente como escrita no texto original. Nunca coloque a tradução no campo "original".
+- Mantenha a ordem original das frases.
+- As highlights devem ser palavras que aparecem EXATAMENTE na frase original (no idioma original).
+- Não pule nenhuma frase do texto.
 
 TEXTO:
 ${originalText}

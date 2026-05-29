@@ -109,6 +109,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       answerAction: 'good',
       daysOffMultiplier: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
       fsrsEnabled: false,
+
       maxInterval: 36500,
       startingEase: 2.50,
       easyBonus: 1.30,
@@ -175,6 +176,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       setLocalApiKey('');
     }
   };
+
+
 
   if (activePresetToEdit) {
     return (
@@ -1172,7 +1175,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                 </Button>
               )}
             </div>
-            {saveSuccess && (
+          </div>
+
+          {saveSuccess && (
               <p className="text-[10px] text-emerald-500 font-bold animate-pulse">
                 ✅ Chave de API salva com sucesso!
               </p>
@@ -1182,7 +1187,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             </p>
           </div>
         </div>
-      </div>
 
       <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/60 shadow-sm">
         <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider px-4 pt-4 pb-2 bg-muted/20">

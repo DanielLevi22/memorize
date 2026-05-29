@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Eye, AlertCircle, Volume2, Mic, Lock } from 'lucide-react';
+import { ArrowLeft, Eye, AlertCircle, Volume2, Mic, Lock, Languages, RefreshCw } from 'lucide-react';
 import type { Card, DeckPreset } from '../types';
 import { 
   getFriendlyInterval, 
@@ -16,6 +16,9 @@ import { Button } from './ui/button';
 import { Progress } from './ui/progress';
 import { getTagColors } from '../utils/tagColors';
 import { KeyboardShortcutCheatsheet } from './KeyboardShortcutCheatsheet';
+
+
+import { translateWithMyMemory } from '../utils/readingProcessor';
 
 const stripHtmlTags = (str: string) => {
   if (!str) return '';
@@ -63,7 +66,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
   ttsRate = 1.0,
   ttsVoice = '',
   autoPlayAudio = true,
-  preset
+  preset,
 }) => {
   const [sessionQueue, setSessionQueue] = useState<Card[]>(() => [...cardsToStudy]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -73,6 +76,44 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
+
+
+  // Tradução
+  const [selectedText, setSelectedText] = useState('');
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [translationResult, setTranslationResult] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleSelection = () => {
+      const selection = window.getSelection();
+      const text = selection?.toString().trim() || '';
+      if (text && text.length < 100) { // Limit length to avoid translating huge blocks
+         setSelectedText(text);
+      } else {
+         setSelectedText('');
+      }
+    };
+    document.addEventListener('selectionchange', handleSelection);
+    return () => document.removeEventListener('selectionchange', handleSelection);
+  }, []);
+
+  useEffect(() => {
+    setTranslationResult(null); // Reset when selection changes
+  }, [selectedText]);
+
+  const handleTranslateSelection = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!selectedText || isTranslating) return;
+    setIsTranslating(true);
+    try {
+      const res = await translateWithMyMemory(selectedText);
+      setTranslationResult(res);
+    } catch (err) {
+      setTranslationResult('Erro ao traduzir');
+    } finally {
+      setIsTranslating(false);
+    }
+  };
 
   // Inicializa a fila de sessão quando os cartões carregam pela primeira vez.
   // Evita redefinir a fila e resetar o progresso no meio dos estudos quando ocorrem atualizações no banco.
@@ -264,6 +305,8 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
       }
     };
   }, [currentIndex, currentCard]);
+
+
 
   // Parar qualquer áudio ao revelar a resposta (verso)
   useEffect(() => {
@@ -1139,6 +1182,8 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                 dangerouslySetInnerHTML={{ __html: meaningText }}
               />
 
+
+
               {studyMode === 'speaking' && (
                 <div className="w-full flex flex-col items-center gap-2 my-1" onClick={(e) => e.stopPropagation()}>
                   <Button
@@ -1217,6 +1262,40 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
 
         </div>
       </div>
+
+      {/* Pílula de Tradução de Seleção (Floating) */}
+      {selectedText && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-5 fade-in duration-200 pointer-events-auto">
+          <div className="bg-zinc-900 dark:bg-zinc-100 text-zinc-50 dark:text-zinc-900 shadow-2xl shadow-black/20 rounded-2xl p-1.5 flex items-center gap-2 max-w-[90vw] w-max border border-zinc-800 dark:border-zinc-200">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="hover:bg-zinc-800 dark:hover:bg-zinc-200 text-zinc-50 dark:text-zinc-900 rounded-xl px-3 py-1.5 h-auto text-xs font-bold shrink-0 cursor-pointer"
+              onClick={handleTranslateSelection}
+              disabled={isTranslating}
+            >
+              {isTranslating ? (
+                <RefreshCw size={14} className="mr-1.5 animate-spin" />
+              ) : (
+                <Languages size={14} className="mr-1.5" />
+              )}
+              {isTranslating ? 'Traduzindo...' : 'Traduzir'}
+            </Button>
+            
+            <div className="border-l border-current/20 pl-2 pr-2 max-w-[200px] sm:max-w-[300px]">
+              {translationResult ? (
+                <span className="text-[11px] font-bold leading-tight line-clamp-3 select-text">
+                  {translationResult}
+                </span>
+              ) : (
+                <span className="text-[11px] font-medium opacity-70 truncate block select-none">
+                  "{selectedText}"
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Controls Area */}
       <div className="mt-auto flex flex-col items-center w-full gap-2">

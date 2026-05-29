@@ -40,6 +40,9 @@ export const DeckOptionsModal: React.FC<DeckOptionsModalProps> = ({
   const [algoLimitValue, setAlgoLimitValue] = useState<'SM-2' | 'FSRS'>('SM-2');
   const [algoLimitToday, setAlgoLimitToday] = useState<'SM-2' | 'FSRS'>('SM-2');
 
+  // Overrides de Imagens
+
+
   // Preset-wide options
   const activePreset = presets?.find(p => p.id === presetId);
   const [presetNewCardsPerDay, setPresetNewCardsPerDay] = useState(20);
@@ -63,6 +66,8 @@ export const DeckOptionsModal: React.FC<DeckOptionsModalProps> = ({
       setAlgoLimitType(deck.algoLimitType || 'preset');
       setAlgoLimitValue(deck.algoLimitValue || 'SM-2');
       setAlgoLimitToday(deck.algoLimitToday || 'SM-2');
+
+
     }
   }, [deck, isOpen]);
 
@@ -97,6 +102,8 @@ export const DeckOptionsModal: React.FC<DeckOptionsModalProps> = ({
       algoLimitValue,
       algoLimitToday,
       algoLimitTodayDate: algoLimitType === 'today' ? todayStr : deck.algoLimitTodayDate,
+
+
     };
 
     const presetUpdates: Partial<DeckPreset> = {
@@ -370,6 +377,8 @@ export const DeckOptionsModal: React.FC<DeckOptionsModalProps> = ({
                   </button>
                 </div>
               </div>
+
+
 
               {/* Toggles globais do Preset */}
               <div className="space-y-3 pt-2 border-t border-border/60">

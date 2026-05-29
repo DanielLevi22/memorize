@@ -4,9 +4,10 @@ import { db } from '../db/db';
 import type { ChatMessage, ChatPartner } from '../types';
 import { 
   Send, Mic, MicOff, Volume2, ArrowLeft, Trash2, 
-  Sparkles, AlertCircle, Headphones
+  Sparkles, AlertCircle, Headphones, Languages, Loader2
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
+import { translateWithMyMemory } from '../utils/readingProcessor';
 
 interface ConversationPageProps {
   geminiApiKey: string;
@@ -51,6 +52,8 @@ export function ConversationPage({ geminiApiKey, ttsRate, ttsVoice }: Conversati
   const [isThinking, setIsThinking] = useState(false);
   const [handsFree, setHandsFree] = useState(false);
   const [currentlySpeakingId, setCurrentlySpeakingId] = useState<string | null>(null);
+  const [translations, setTranslations] = useState<Record<string, string>>({});
+  const [translatingId, setTranslatingId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
@@ -79,24 +82,54 @@ export function ConversationPage({ geminiApiKey, ttsRate, ttsVoice }: Conversati
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isThinking]);
 
+  const hasSeededRef = useRef(false);
+  useEffect(() => {
+    hasSeededRef.current = false;
+  }, [selectedPartner]);
+
   // Initialize/Seed initial message if chat is empty
   useEffect(() => {
     const seedChat = async () => {
-      if (selectedPartner && messages && messages.length === 0) {
-        const welcomeMessage: ChatMessage & { partnerId: string } = {
-          id: crypto.randomUUID(),
-          partnerId: selectedPartner.id,
-          sender: 'ai',
-          text: selectedPartner.initialMessage,
-          timestamp: Date.now(),
-          grammarCorrection: null
-        };
-        await db.chatMessages.add(welcomeMessage);
-        speakResponse(welcomeMessage.text, welcomeMessage.id);
+      // Use !== undefined check to wait for Dexie to load
+      if (selectedPartner && messages !== undefined && messages.length === 0 && !hasSeededRef.current) {
+        hasSeededRef.current = true;
+        // Double check DB to prevent React StrictMode double insertion
+        const count = await db.chatMessages.where('partnerId').equals(selectedPartner.id).count();
+        if (count === 0) {
+          const welcomeMessage: ChatMessage & { partnerId: string } = {
+            id: crypto.randomUUID(),
+            partnerId: selectedPartner.id,
+            sender: 'ai',
+            text: selectedPartner.initialMessage,
+            timestamp: Date.now(),
+            grammarCorrection: null
+          };
+          await db.chatMessages.add(welcomeMessage);
+          speakResponse(welcomeMessage.text, welcomeMessage.id);
+        }
       }
     };
     seedChat();
   }, [selectedPartner, messages]);
+
+  const handleTranslate = async (msgId: string, text: string) => {
+    if (translations[msgId]) {
+      const newTrans = { ...translations };
+      delete newTrans[msgId];
+      setTranslations(newTrans);
+      return;
+    }
+    
+    setTranslatingId(msgId);
+    try {
+      const ptText = await translateWithMyMemory(text);
+      setTranslations(prev => ({ ...prev, [msgId]: ptText }));
+    } catch (e) {
+      console.error("Translation error:", e);
+    } finally {
+      setTranslatingId(null);
+    }
+  };
 
   // Handle SpeechSynthesis audio output
   const speakResponse = (text: string, msgId: string) => {
@@ -291,9 +324,14 @@ export function ConversationPage({ geminiApiKey, ttsRate, ttsVoice }: Conversati
     }
 
     const parsed = JSON.parse(resultText);
+    let gc = parsed.grammarCorrection;
+    if (gc === "null" || gc === "None" || gc === "") {
+      gc = null;
+    }
+    
     return {
       reply: parsed.reply || "Sorry, I didn't catch that. Could you repeat?",
-      grammarCorrection: parsed.grammarCorrection || null
+      grammarCorrection: gc || null
     };
   };
 
@@ -501,26 +539,47 @@ export function ConversationPage({ geminiApiKey, ttsRate, ttsVoice }: Conversati
                   key={msg.id}
                   className={`flex flex-col space-y-1.5 max-w-[85%] ${isUser ? 'ml-auto items-end' : 'mr-auto items-start animate-fadeIn'}`}
                 >
-                  <div className="flex items-end gap-1.5">
-                    {/* User bubble vs AI bubble */}
-                    <div 
-                      onClick={() => speakResponse(msg.text, msg.id)}
-                      className={`p-3 rounded-2xl text-xs font-semibold leading-relaxed shadow-sm transition-all duration-200 cursor-pointer ${
-                        isUser
-                          ? 'bg-primary text-primary-foreground rounded-tr-none hover:bg-primary/95'
-                          : 'bg-card text-foreground border border-border/80 rounded-tl-none hover:bg-muted/30'
-                      } ${isSpeaking ? 'ring-2 ring-primary ring-offset-2 ring-offset-background scale-[1.01]' : ''}`}
-                      title="Clique para ouvir áudio"
-                    >
-                      <div className="flex items-start gap-1">
-                        <span className="whitespace-pre-wrap">{msg.text}</span>
-                        <Volume2 size={12} className={`shrink-0 mt-0.5 opacity-40 hover:opacity-100 ${isSpeaking ? 'text-primary animate-pulse opacity-100' : ''}`} />
+                  <div className="flex flex-col gap-1 w-full">
+                    <div className={`flex items-end gap-1.5 ${isUser ? 'ml-auto' : 'mr-auto'}`}>
+                      {/* User bubble vs AI bubble */}
+                      <div 
+                        className={`p-3 rounded-2xl text-xs font-semibold leading-relaxed shadow-sm transition-all duration-200 group ${
+                          isUser
+                            ? 'bg-primary text-primary-foreground rounded-tr-none'
+                            : 'bg-card text-foreground border border-border/80 rounded-tl-none'
+                        } ${isSpeaking ? 'ring-2 ring-primary ring-offset-2 ring-offset-background scale-[1.01]' : ''}`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="whitespace-pre-wrap">{msg.text}</span>
+                          <div className="flex gap-2 items-start shrink-0 opacity-40 group-hover:opacity-100 transition-opacity mt-0.5">
+                            <button 
+                              onClick={() => handleTranslate(msg.id, msg.text)}
+                              title="Traduzir"
+                              className="hover:text-primary transition-colors cursor-pointer"
+                            >
+                              {translatingId === msg.id ? <Loader2 size={12} className="animate-spin" /> : <Languages size={12} />}
+                            </button>
+                            <button 
+                              onClick={() => speakResponse(msg.text, msg.id)}
+                              title="Ouvir"
+                              className={`hover:text-primary transition-colors cursor-pointer ${isSpeaking ? 'text-primary animate-pulse opacity-100' : ''}`}
+                            >
+                              <Volume2 size={12} />
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </div>
+                    {/* Translation display */}
+                    {translations[msg.id] && (
+                      <div className={`text-[11px] font-medium p-2 rounded-xl bg-muted/40 border border-border/50 text-muted-foreground animate-fadeIn ${isUser ? 'ml-auto text-right rounded-tr-none' : 'mr-auto text-left rounded-tl-none'}`}>
+                        {translations[msg.id]}
+                      </div>
+                    )}
                   </div>
 
                   {/* Grammar Correction Panel */}
-                  {isUser && msg.grammarCorrection && (
+                  {isUser && msg.grammarCorrection && msg.grammarCorrection !== "null" && (
                     <div className="w-full bg-amber-500/10 dark:bg-amber-500/20 border border-amber-500/20 rounded-xl p-2.5 text-[11px] text-amber-800 dark:text-amber-300 leading-normal animate-fadeIn flex gap-1.5 shadow-sm max-w-sm">
                       <AlertCircle size={14} className="shrink-0 text-amber-500 mt-0.5" />
                       <div>

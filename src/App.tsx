@@ -154,11 +154,14 @@ function App() {
     return '';
   });
 
+
+
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('memorize_gemini_api_key', geminiApiKey);
   }, [geminiApiKey]);
+
 
   // --- CONFIGURAÇÃO DE META DIÁRIA ---
   const [dailyGoal, setDailyGoal] = useState<number>(() => {
@@ -1481,6 +1484,7 @@ function App() {
                 getNotificationPermission={getNotificationPermission}
                 geminiApiKey={geminiApiKey}
                 setGeminiApiKey={setGeminiApiKey}
+
                 dailyGoal={dailyGoal}
                 setDailyGoal={setDailyGoal}
                 presets={presets}
