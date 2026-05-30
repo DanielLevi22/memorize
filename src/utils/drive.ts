@@ -209,3 +209,38 @@ export function revokeToken(accessToken: string): Promise<void> {
     }
   });
 }
+
+export interface DriveUserProfile {
+  displayName: string;
+  emailAddress: string;
+  photoLink?: string;
+}
+
+/**
+ * Obtém o perfil do usuário do Google Drive usando o access token.
+ */
+export async function getDriveUserProfile(accessToken: string): Promise<DriveUserProfile> {
+  const url = 'https://www.googleapis.com/drive/v3/about?fields=user';
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorDetails = await response.text();
+    console.error('Erro ao buscar perfil do Drive:', errorDetails);
+    throw new Error('Falha ao obter perfil do usuário do Google Drive.');
+  }
+
+  const result = await response.json();
+  if (result.user) {
+    return {
+      displayName: result.user.displayName || '',
+      emailAddress: result.user.emailAddress || '',
+      photoLink: result.user.photoLink || '',
+    };
+  }
+  throw new Error('Perfil de usuário não retornado pelo Google.');
+}

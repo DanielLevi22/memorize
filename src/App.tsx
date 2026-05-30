@@ -49,7 +49,7 @@ import { getTagColors } from './utils/tagColors';
 import { setupNotifications, requestNotificationPermission, getNotificationPermission, clearAppBadge } from './utils/notifications';
 
 // Sincronização e Criptografia com Google Drive
-import { requestAccessToken, findBackupFile, downloadBackupFile, createBackupFile, updateBackupFile, revokeToken } from './utils/drive';
+import { requestAccessToken, findBackupFile, downloadBackupFile, createBackupFile, updateBackupFile, revokeToken, getDriveUserProfile } from './utils/drive';
 import { encryptData, decryptData } from './utils/crypto';
 import { exportDatabase, performMergeSync } from './utils/sync';
 
@@ -187,18 +187,39 @@ function App() {
 
   const [userName, setUserName] = useState<string>(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('memorize_user_name') || 'Daniel Oliveira';
+      const savedProfile = localStorage.getItem('memorize_drive_user_profile');
+      if (savedProfile) {
+        try {
+          const parsed = JSON.parse(savedProfile);
+          return parsed.displayName || '';
+        } catch (e) {
+          return '';
+        }
+      }
+      return '';
     }
-    return 'Daniel Oliveira';
+    return '';
+  });
+
+  const [userPhoto, setUserPhoto] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const savedProfile = localStorage.getItem('memorize_drive_user_profile');
+      if (savedProfile) {
+        try {
+          const parsed = JSON.parse(savedProfile);
+          return parsed.photoLink || '';
+        } catch (e) {
+          return '';
+        }
+      }
+      return '';
+    }
+    return '';
   });
 
   useEffect(() => {
     localStorage.setItem('memorize_daily_goal', dailyGoal.toString());
   }, [dailyGoal]);
-
-  useEffect(() => {
-    localStorage.setItem('memorize_user_name', userName);
-  }, [userName]);
 
   // --- ESTADOS DE SINCRONIZAÇÃO GOOGLE DRIVE ---
   const [driveClientId, setDriveClientId] = useState<string>(() => {
@@ -858,6 +879,15 @@ function App() {
         setSyncStatusMessage('Conectando ao Google OAuth...');
         token = await requestAccessToken(driveClientId);
         setDriveAccessToken(token);
+        
+        try {
+          const profile = await getDriveUserProfile(token);
+          setUserName(profile.displayName);
+          setUserPhoto(profile.photoLink || '');
+          localStorage.setItem('memorize_drive_user_profile', JSON.stringify(profile));
+        } catch (profileErr) {
+          console.warn('Erro ao obter perfil de usuário:', profileErr);
+        }
       }
 
       setSyncProgress(30);
@@ -990,6 +1020,9 @@ function App() {
       }
     }
     setDriveAccessToken('');
+    setUserName('');
+    setUserPhoto('');
+    localStorage.removeItem('memorize_drive_user_profile');
     toast.success('Desconectado do Google Drive com sucesso. A sessão foi encerrada.');
   };
 
@@ -1745,6 +1778,7 @@ function App() {
                 totalRevisionsCount={totalRevisionsCount}
                 decksCount={decks ? decks.length : 0}
                 userName={userName}
+                userPhoto={userPhoto}
               />
             )}
 
@@ -1779,9 +1813,6 @@ function App() {
                 onSavePreset={handleSavePreset}
                 onDeletePreset={handleDeletePreset}
                 
-                userName={userName}
-                setUserName={setUserName}
-
                 // Google Drive Sync props
                 driveClientId={driveClientId}
                 setDriveClientId={setDriveClientId}

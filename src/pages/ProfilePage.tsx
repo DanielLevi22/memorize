@@ -11,6 +11,7 @@ interface ProfilePageProps {
   totalRevisionsCount: number;
   decksCount: number;
   userName: string;
+  userPhoto: string;
 }
 
 export const ProfilePage: React.FC<ProfilePageProps> = ({
@@ -20,18 +21,27 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
   xpNeededForNextLevel,
   totalRevisionsCount,
   decksCount,
-  userName
+  userName,
+  userPhoto
 }) => {
   return (
     <div className="space-y-6 w-full max-w-none px-2 md:px-6">
       {/* Perfil Compacto */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-5xl mx-auto">
         <ShadcnCard className="bg-card border-border p-4 text-center flex flex-row items-center gap-4 rounded-2xl shadow-sm md:col-span-1 justify-center md:justify-start">
-          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-violet-600 to-violet-400 flex items-center justify-center font-black text-xl border border-border shadow-md text-zinc-50 shrink-0">
-            {userName ? userName.charAt(0).toUpperCase() : '👤'}
+          <div className="w-12 h-12 rounded-full overflow-hidden border border-border shadow-md shrink-0 bg-muted flex items-center justify-center">
+            {userPhoto ? (
+              <img src={userPhoto} alt={userName} className="w-full h-full object-cover rounded-full" referrerPolicy="no-referrer" />
+            ) : (
+              <div className="w-full h-full bg-gradient-to-br from-violet-600 to-violet-400 flex items-center justify-center font-black text-xl text-zinc-50 rounded-full">
+                {userName ? userName.charAt(0).toUpperCase() : '👤'}
+              </div>
+            )}
           </div>
           <div className="text-left space-y-0.5">
-            <h3 className="font-extrabold text-sm text-foreground">{userName || 'Usuário'}</h3>
+            {userName && (
+              <h3 className="font-extrabold text-sm text-foreground">{userName}</h3>
+            )}
             <div className="text-[10px] font-bold bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full inline-block">
               Nível {userLevel} • {earnedXp} XP
             </div>
