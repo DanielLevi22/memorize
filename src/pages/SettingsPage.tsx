@@ -1359,20 +1359,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         </p>
 
         <div className="space-y-3 pt-1">
-          {/* Campo Client ID */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[10px] font-bold text-muted-foreground flex items-center gap-1">
-              Google Client ID
-            </label>
-            <input
-              type="text"
-              placeholder="Ex: 123456-abcdef.apps.googleusercontent.com"
-              className="bg-background border border-border text-foreground px-3 py-1.5 rounded-xl text-xs font-semibold focus:border-primary focus:outline-none w-full h-10 transition-colors"
-              value={clientIdInput}
-              onChange={(e) => setClientIdInput(e.target.value)}
-            />
-          </div>
-
           {/* Campo Senha */}
           <div className="flex flex-col gap-1.5">
             <label className="text-[10px] font-bold text-muted-foreground flex items-center gap-1">
@@ -1416,7 +1402,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               size="sm"
               className="w-full sm:w-auto bg-primary hover:bg-primary/95 text-zinc-50 font-bold h-9 text-xs rounded-xl cursor-pointer"
               onClick={handleSaveSyncCredentials}
-              disabled={!clientIdInput || !passwordInput}
+              disabled={!passwordInput}
             >
               Salvar Credenciais
             </Button>
@@ -1471,32 +1457,30 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         <DialogContent className="sm:max-w-[500px] rounded-2xl bg-card border border-border text-foreground p-6 shadow-2xl">
           <DialogHeader>
             <DialogTitle className="text-lg font-black tracking-tight flex items-center gap-1.5 text-foreground">
-              <Cloud className="text-primary animate-bounce h-5 w-5" size={18} /> Configurar Sincronização Google Drive
+              <Cloud className="text-primary animate-bounce h-5 w-5" size={18} /> Sincronização Google Drive
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground font-medium">
-              Como criar seu Google OAuth Client ID gratuito em 2 minutos.
+              Informações sobre como funciona o backup seguro na nuvem.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-3.5 text-xs text-muted-foreground leading-relaxed pt-2">
-            <p>Como o Memorize é um aplicativo que roda totalmente no seu dispositivo (local-first), você precisa criar suas credenciais no Google para que possamos nos conectar de forma segura:</p>
-            <ol className="list-decimal pl-5 space-y-2 font-medium">
-              <li>Acesse o <a href="https://console.cloud.google.com/" target="_blank" rel="noreferrer" className="text-primary hover:underline font-extrabold">Google Cloud Console</a> e faça login.</li>
-              <li>Crie um novo projeto (ex: <code className="bg-muted px-1.5 py-0.5 rounded font-mono font-bold text-foreground">Memorize PWA</code>).</li>
-              <li>No menu lateral, vá em **Tela de consentimento OAuth** (OAuth consent screen). Selecione o tipo de usuário <strong className="text-foreground">Externo</strong> (ou Interno se estiver usando GSuite).</li>
-              <li>Preencha apenas o nome do app, email de suporte e email do desenvolvedor. Salve e continue até o final.</li>
-              <li>Vá na aba <strong className="text-foreground">Credenciais</strong> (Credentials). Clique em <strong className="text-foreground">+ Criar Credenciais</strong> e escolha <strong className="text-foreground">ID do cliente OAuth</strong>.</li>
-              <li>Selecione Tipo de Aplicativo: <strong className="text-foreground">Aplicativo Web</strong> (Web Application).</li>
-              <li>Em **Origens autorizadas do JavaScript** (Authorized JavaScript origins), adicione a URL onde você usa o app.
-                <ul className="list-disc pl-5 mt-1 text-[11px] text-muted-foreground/85">
-                  <li>Se estiver testando localmente: <code className="bg-muted px-1 rounded font-mono text-[10px] font-bold text-foreground">http://localhost:5173</code></li>
-                  <li>Se já estiver hospedado: adicione o domínio do seu site.</li>
-                </ul>
-              </li>
-              <li>Clique em **Criar** e copie o **ID do cliente** (Client ID) exibido na tela.</li>
+            <p>O Memorize já vem configurado com uma chave de conexão pública padrão (**Google Client ID**). Isso significa que você <strong>não precisa configurar nada no Google Cloud</strong> para usar a sincronização em sua conta pessoal!</p>
+            
+            <p className="font-bold text-foreground">Como usar:</p>
+            <ol className="list-decimal pl-5 space-y-1.5 font-medium">
+              <li>Defina uma <strong className="text-foreground">Senha de Criptografia</strong> no painel de sincronização e clique em <strong>Salvar Credenciais</strong>.</li>
+              <li>Clique em <strong>Sincronizar Agora</strong>. Uma janela pop-up segura do Google será aberta.</li>
+              <li>Escolha a sua conta de e-mail do Google (a mesma do seu navegador) e dê permissão de acesso.</li>
+              <li>Pronto! O aplicativo vai criptografar seus dados locais e salvá-los no seu Drive pessoal.</li>
             </ol>
-            <p className="text-[11px] bg-amber-500/10 text-amber-600 dark:text-amber-500 p-2.5 rounded-xl border border-amber-500/15">
-              ⚠️ <strong>Cuidado:</strong> Guarde bem a sua <strong>Senha de Criptografia</strong>. Todos os dados salvos no Drive serão criptografados e apenas esta senha poderá decifrá-los. Se você perder a senha, não poderá recuperar os backups em um novo dispositivo.
+
+            <div className="bg-primary/5 text-primary border border-primary/10 p-2.5 rounded-xl text-[11px] font-medium leading-relaxed">
+              🔒 <strong>Criptografia Zero-Knowledge:</strong> A sua senha de criptografia nunca é enviada ao Google ou a qualquer servidor. Ela é usada exclusivamente no seu navegador para cifrar os dados (usando AES-GCM) antes de subirem para o Drive. Se você perder esta senha, não será possível recuperar os dados em outros dispositivos.
+            </div>
+
+            <p className="text-[10px] text-muted-foreground/80">
+              💡 <em>Nota para desenvolvedores:</em> Se você clonou este projeto e está hospedando sua própria versão em um domínio diferente, você deve configurar o seu próprio Google Client ID no código-fonte em <code className="bg-muted px-1 rounded font-mono">App.tsx</code> para que o login funcione no seu domínio.
             </p>
           </div>
 

@@ -190,7 +190,7 @@ function App() {
 
   // --- ESTADOS DE SINCRONIZAÇÃO GOOGLE DRIVE ---
   const [driveClientId, setDriveClientId] = useState<string>(() => {
-    return localStorage.getItem('memorize_sync_client_id') || '';
+    return localStorage.getItem('memorize_sync_client_id') || '754580033922-j6fhjnrhe8gr1c0olic52tkcjp12j70s.apps.googleusercontent.com';
   });
   const [drivePassword, setDrivePassword] = useState<string>(() => {
     return localStorage.getItem('memorize_sync_password') || '';
