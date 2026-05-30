@@ -1399,8 +1399,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
 
             {/* Salvar credenciais */}
             <Button
+              variant="default"
               size="sm"
-              className="w-full sm:w-auto bg-primary hover:bg-primary/95 text-zinc-50 font-bold h-9 text-xs rounded-xl cursor-pointer"
+              className="w-full sm:w-auto font-bold h-9 text-xs rounded-xl cursor-pointer transition-all duration-150"
               onClick={handleSaveSyncCredentials}
               disabled={!passwordInput}
             >
