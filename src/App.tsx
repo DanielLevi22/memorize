@@ -1219,7 +1219,7 @@ function App() {
                 {userPhoto ? (
                   <img src={userPhoto} alt={userName} className="w-full h-full object-cover rounded-full" referrerPolicy="no-referrer" />
                 ) : (
-                  <div className="w-full h-full bg-primary text-zinc-50 flex items-center justify-center font-bold">
+                  <div className="w-full h-full bg-primary text-primary-foreground flex items-center justify-center font-bold">
                     {userName ? userName.charAt(0).toUpperCase() : (streak > 0 ? '🔥' : '👤')}
                   </div>
                 )}
@@ -1452,7 +1452,7 @@ function App() {
                     {userPhoto ? (
                       <img src={userPhoto} alt={userName} className="w-full h-full object-cover rounded-full" referrerPolicy="no-referrer" />
                     ) : (
-                      <div className="w-full h-full bg-primary text-zinc-50 flex items-center justify-center font-bold">
+                      <div className="w-full h-full bg-primary text-primary-foreground flex items-center justify-center font-bold">
                         {userName ? userName.charAt(0).toUpperCase() : (streak > 0 ? '🔥' : '👤')}
                       </div>
                     )}
@@ -2249,7 +2249,7 @@ function App() {
               <Button
                 type="submit"
                 variant="default"
-                className="w-full sm:w-auto flex-1 bg-primary hover:bg-primary/95 text-zinc-50 font-bold h-10 text-xs rounded-xl cursor-pointer"
+                className="w-full sm:w-auto flex-1 bg-primary hover:bg-primary/95 text-primary-foreground font-bold h-10 text-xs rounded-xl cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 disabled={!passwordPromptInput}
               >
                 Confirmar e Sincronizar
