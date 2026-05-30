@@ -1456,36 +1456,41 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               <span>Último Sync: <strong className="text-foreground">{lastSyncTime ? new Date(lastSyncTime).toLocaleString('pt-BR') : 'Nunca'}</strong></span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="space-y-3">
               <Button
-                variant="outline"
-                className="border-primary/20 bg-primary/5 hover:bg-primary hover:text-zinc-50 text-primary font-bold cursor-pointer h-10 text-xs rounded-xl gap-2 justify-center transition-all duration-150"
+                variant="default"
+                className="w-full bg-primary hover:bg-primary/95 text-zinc-50 font-bold cursor-pointer h-11 text-xs rounded-xl gap-2 justify-center transition-all duration-150 shadow-md"
                 onClick={() => handleDriveSync()}
                 disabled={isSyncing}
               >
                 <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} /> 
-                {isSyncing ? 'Sincronizando...' : 'Sincronizar Agora'}
+                {isSyncing ? 'Sincronizando...' : 'Sincronizar Agora (Recomendado)'}
               </Button>
               
-              <Button
-                variant="ghost"
-                className="border border-border hover:bg-muted text-foreground font-semibold cursor-pointer h-10 text-xs rounded-xl gap-1.5 justify-center transition-all duration-150"
-                onClick={() => handleDriveSync('upload')}
-                disabled={isSyncing}
-                title="Subir base de dados local sobrescrevendo a nuvem"
-              >
-                <Upload size={12} /> Forçar Upload
-              </Button>
+              <div className="flex flex-col gap-2 border border-border/40 rounded-xl p-2.5 bg-muted/30">
+                <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider block">Ações de Resolução / Substituição</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <Button
+                    variant="outline"
+                    className="border border-border bg-background hover:bg-muted text-foreground font-semibold cursor-pointer h-9 text-xs rounded-xl gap-1.5 justify-center transition-all duration-150"
+                    onClick={() => handleDriveSync('upload')}
+                    disabled={isSyncing}
+                    title="Subir base de dados local sobrescrevendo a nuvem"
+                  >
+                    <Upload size={12} /> Sobrescrever Nuvem (Upload)
+                  </Button>
 
-              <Button
-                variant="ghost"
-                className="border border-border hover:bg-muted text-foreground font-semibold cursor-pointer h-10 text-xs rounded-xl gap-1.5 justify-center transition-all duration-150"
-                onClick={() => handleDriveSync('download')}
-                disabled={isSyncing}
-                title="Baixar base de dados da nuvem sobrescrevendo a local"
-              >
-                <Download size={12} /> Forçar Download
-              </Button>
+                  <Button
+                    variant="outline"
+                    className="border border-border bg-background hover:bg-muted text-foreground font-semibold cursor-pointer h-9 text-xs rounded-xl gap-1.5 justify-center transition-all duration-150"
+                    onClick={() => handleDriveSync('download')}
+                    disabled={isSyncing}
+                    title="Baixar base de dados da nuvem sobrescrevendo a local"
+                  >
+                    <Download size={12} /> Sobrescrever Local (Download)
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
         )}
