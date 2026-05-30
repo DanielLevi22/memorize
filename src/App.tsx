@@ -4,7 +4,7 @@ import {
   Flame, Plus, Sparkles, Menu, User, 
   Search, Settings, Sun, Moon,
   ChevronLeft, LayoutDashboard, TrendingUp, ClipboardList,
-  BookOpen, Info, MessageSquare
+  BookOpen, Info, MessageSquare, Timer
 } from 'lucide-react';
 
 // Banco de Dados e Types
@@ -41,6 +41,7 @@ import { StatsDashboard } from './components/StatsDashboard';
 import { AppGuideDocs } from './components/AppGuideDocs';
 import { GlobalSearch } from './components/GlobalSearch';
 import { AiGeneratorModal } from './components/AiGeneratorModal';
+import { PomodoroWidget } from './components/PomodoroWidget';
 import { getTagColors } from './utils/tagColors';
 
 // Utilitários
@@ -71,6 +72,10 @@ function App() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
 
+  const [accentColor, setAccentColor] = useState<string>(() => {
+    return localStorage.getItem('memorize_accent') || 'zinc';
+  });
+
   // --- ESTADOS DE CONTROLE DE TELA ---
   const [currentView, setCurrentView] = useState<'dashboard' | 'study' | 'congrats'>('dashboard');
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
@@ -81,6 +86,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation'>('dashboard');
   const [guideInitialTab, setGuideInitialTab] = useState<'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math'>('overview');
   const [searchTerm, setSearchTerm] = useState('');
+  const [isPomodoroOpen, setIsPomodoroOpen] = useState(false);
 
   const handleSetActiveTab = (
     tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation',
@@ -259,6 +265,13 @@ function App() {
     }
     localStorage.setItem('memorize_theme', theme);
   }, [theme]);
+
+  useEffect(() => {
+    const root = window.document.documentElement;
+    root.classList.remove('theme-zinc', 'theme-blue', 'theme-green', 'theme-violet', 'theme-orange', 'theme-rose');
+    root.classList.add(`theme-${accentColor}`);
+    localStorage.setItem('memorize_accent', accentColor);
+  }, [accentColor]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -1362,6 +1375,16 @@ function App() {
                 {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
               </Button>
 
+              <Button
+                variant="ghost"
+                size="icon"
+                className={`text-muted-foreground hover:text-foreground cursor-pointer h-8 w-8 ${isPomodoroOpen ? 'bg-primary/20 text-primary hover:text-primary hover:bg-primary/30' : 'hover:bg-muted'}`}
+                onClick={() => setIsPomodoroOpen(prev => !prev)}
+                title="Timer / Pomodoro"
+              >
+                <Timer size={16} />
+              </Button>
+
               {streak > 0 ? (
                 <div className="flex items-center gap-1.5 bg-amber-500/10 text-amber-500 px-3 py-1 rounded-full text-xs font-bold border border-amber-500/20 shadow-sm">
                   <Flame size={14} className="fill-amber-500" />
@@ -1469,6 +1492,8 @@ function App() {
               <SettingsPage
                 theme={theme}
                 setTheme={setTheme}
+                accentColor={accentColor}
+                setAccentColor={setAccentColor}
                 notificationsEnabled={notificationsEnabled}
                 setNotificationsEnabled={setNotificationsEnabled}
                 cards={cards}
@@ -1762,6 +1787,9 @@ function App() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* POMODORO FLUTUANTE */}
+      <PomodoroWidget isOpen={isPomodoroOpen} onClose={() => setIsPomodoroOpen(false)} />
 
       <ImportModal
         isOpen={isImportModalOpen}

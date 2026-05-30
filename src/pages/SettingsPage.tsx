@@ -11,6 +11,8 @@ import { AlertTriangle } from 'lucide-react';
 interface SettingsPageProps {
   theme: 'light' | 'dark';
   setTheme: (theme: 'light' | 'dark') => void;
+  accentColor: string;
+  setAccentColor: (color: string) => void;
   notificationsEnabled: boolean;
   setNotificationsEnabled: (enabled: boolean) => void;
   cards: Card[] | undefined;
@@ -44,6 +46,8 @@ interface SettingsPageProps {
 export const SettingsPage: React.FC<SettingsPageProps> = ({
   theme,
   setTheme,
+  accentColor,
+  setAccentColor,
   notificationsEnabled,
   setNotificationsEnabled,
   cards,
@@ -73,6 +77,16 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const [showApiKey, setShowApiKey] = useState(false);
   const [localApiKey, setLocalApiKey] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // Available theme accent colors
+  const ACCENT_COLORS = [
+    { id: 'zinc', class: 'bg-zinc-500', name: 'Cinza' },
+    { id: 'blue', class: 'bg-blue-500', name: 'Azul' },
+    { id: 'green', class: 'bg-emerald-500', name: 'Verde' },
+    { id: 'violet', class: 'bg-violet-500', name: 'Roxo' },
+    { id: 'orange', class: 'bg-orange-500', name: 'Laranja' },
+    { id: 'rose', class: 'bg-rose-500', name: 'Rosa' }
+  ];
 
   // Modal states
   const [showRemoveKeyConfirm, setShowRemoveKeyConfirm] = useState(false);
@@ -904,6 +918,28 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               <SelectItem value="dark" className="text-xs font-bold cursor-pointer">Escuro 🌙</SelectItem>
             </SelectContent>
           </Select>
+        </div>
+
+        {/* Seletor de Cor de Destaque */}
+        <div className="flex items-center justify-between p-4 bg-card">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-sm font-semibold text-foreground">Cor de Destaque</span>
+            <span className="text-[11px] text-muted-foreground">Personalize a cor principal</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {ACCENT_COLORS.map(color => (
+              <button
+                key={color.id}
+                onClick={() => setAccentColor(color.id)}
+                title={color.name}
+                className={`w-6 h-6 rounded-full cursor-pointer transition-transform duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring ${color.class} ${
+                  accentColor === color.id 
+                    ? 'ring-2 ring-offset-2 ring-offset-background ring-foreground scale-110 shadow-sm' 
+                    : 'opacity-70 hover:opacity-100 hover:scale-105'
+                }`}
+              />
+            ))}
+          </div>
         </div>
 
 

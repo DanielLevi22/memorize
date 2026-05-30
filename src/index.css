@@ -117,6 +117,79 @@
     --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* Custom Themes */
+/* Zinc (Default) */
+.theme-zinc {
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --ring: oklch(0.708 0 0);
+}
+.dark.theme-zinc, .dark .theme-zinc {
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --ring: oklch(0.556 0 0);
+}
+
+/* Blue */
+.theme-blue {
+  --primary: oklch(0.55 0.15 250);
+  --primary-foreground: oklch(0.98 0 0);
+  --ring: oklch(0.55 0.15 250);
+}
+.dark.theme-blue, .dark .theme-blue {
+  --primary: oklch(0.7 0.15 250);
+  --primary-foreground: oklch(0.1 0 0);
+  --ring: oklch(0.7 0.15 250);
+}
+
+/* Green */
+.theme-green {
+  --primary: oklch(0.55 0.15 150);
+  --primary-foreground: oklch(0.98 0 0);
+  --ring: oklch(0.55 0.15 150);
+}
+.dark.theme-green, .dark .theme-green {
+  --primary: oklch(0.7 0.15 150);
+  --primary-foreground: oklch(0.1 0 0);
+  --ring: oklch(0.7 0.15 150);
+}
+
+/* Violet */
+.theme-violet {
+  --primary: oklch(0.55 0.2 290);
+  --primary-foreground: oklch(0.98 0 0);
+  --ring: oklch(0.55 0.2 290);
+}
+.dark.theme-violet, .dark .theme-violet {
+  --primary: oklch(0.7 0.2 290);
+  --primary-foreground: oklch(0.1 0 0);
+  --ring: oklch(0.7 0.2 290);
+}
+
+/* Orange */
+.theme-orange {
+  --primary: oklch(0.6 0.15 40);
+  --primary-foreground: oklch(0.98 0 0);
+  --ring: oklch(0.6 0.15 40);
+}
+.dark.theme-orange, .dark .theme-orange {
+  --primary: oklch(0.7 0.15 40);
+  --primary-foreground: oklch(0.1 0 0);
+  --ring: oklch(0.7 0.15 40);
+}
+
+/* Rose */
+.theme-rose {
+  --primary: oklch(0.55 0.2 10);
+  --primary-foreground: oklch(0.98 0 0);
+  --ring: oklch(0.55 0.2 10);
+}
+.dark.theme-rose, .dark .theme-rose {
+  --primary: oklch(0.7 0.2 10);
+  --primary-foreground: oklch(0.1 0 0);
+  --ring: oklch(0.7 0.2 10);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

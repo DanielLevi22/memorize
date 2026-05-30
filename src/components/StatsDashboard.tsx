@@ -613,21 +613,21 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
     const data = [
       {
         name: 'Aprendendo',
-        "Errei (1)": counts.learning[1],
-        "Difícil (2)": counts.learning[2],
-        "Fácil (3)": counts.learning[3],
+        errei: counts.learning[1],
+        dificil: counts.learning[2],
+        facil: counts.learning[3],
       },
       {
         name: 'Recentes',
-        "Errei (1)": counts.young[1],
-        "Difícil (2)": counts.young[2],
-        "Fácil (3)": counts.young[3],
+        errei: counts.young[1],
+        dificil: counts.young[2],
+        facil: counts.young[3],
       },
       {
         name: 'Maduros',
-        "Errei (1)": counts.mature[1],
-        "Difícil (2)": counts.mature[2],
-        "Fácil (3)": counts.mature[3],
+        errei: counts.mature[1],
+        dificil: counts.mature[2],
+        facil: counts.mature[3],
       }
     ];
 
@@ -665,8 +665,8 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
       runningSum += val;
       return {
         date: formattedDate,
-        "Criados": val,
-        "Acumulado": runningSum
+        criados: val,
+        acumulado: runningSum
       };
     });
 
@@ -823,13 +823,13 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
         </div>
 
         <div className="h-64 w-full">
-          <ChartContainer config={{ "Revisões": { label: "Revisões", color: "#10b981" } }}>
-            <BarChart data={forecastData.chartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+          <ChartContainer config={{ revisoes: { label: "Revisões", color: "#10b981" } }}>
+            <BarChart data={forecastData.chartData.map(d => ({ ...d, revisoes: d['Revisões'] }))} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} />
               <YAxis tickLine={false} axisLine={false} tickMargin={8} domain={[0, 'auto']} />
               <ChartTooltip content={<ChartTooltipContent />} />
-              <Bar dataKey="Revisões" fill="var(--color-Revisões)" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="revisoes" fill="var(--color-revisoes)" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ChartContainer>
         </div>
@@ -1270,18 +1270,18 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
 
         <div className="h-64 w-full">
           <ChartContainer config={{
-            "Errei (1)": { label: "Errei (1)", color: "#ef4444" },
-            "Difícil (2)": { label: "Difícil (2)", color: "#f97316" },
-            "Fácil (3)": { label: "Fácil (3)", color: "#10b981" }
+            errei: { label: "Errei (1)", color: "#ef4444" },
+            dificil: { label: "Difícil (2)", color: "#f97316" },
+            facil: { label: "Fácil (3)", color: "#10b981" }
           }}>
             <BarChart data={buttonsData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={8} />
               <YAxis tickLine={false} axisLine={false} tickMargin={8} domain={[0, 'auto']} />
               <ChartTooltip content={<ChartTooltipContent />} />
-              <Bar dataKey="Errei (1)" fill="var(--color-Errei-1)" radius={[3, 3, 0, 0]} />
-              <Bar dataKey="Difícil (2)" fill="var(--color-Difícil-2)" radius={[3, 3, 0, 0]} />
-              <Bar dataKey="Fácil (3)" fill="var(--color-Fácil-3)" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="errei" fill="var(--color-errei)" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="dificil" fill="var(--color-dificil)" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="facil" fill="var(--color-facil)" radius={[3, 3, 0, 0]} />
             </BarChart>
           </ChartContainer>
         </div>
@@ -1309,13 +1309,13 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
         </div>
 
         <div className="h-64 w-full">
-          <ChartContainer config={{ "Criados": { label: "Criados", color: "#3b82f6" } }}>
+          <ChartContainer config={{ criados: { label: "Criados", color: "#3b82f6" } }}>
             <BarChart data={addedCardsData.chartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} />
               <YAxis tickLine={false} axisLine={false} tickMargin={8} domain={[0, 'auto']} />
               <ChartTooltip content={<ChartTooltipContent />} />
-              <Bar dataKey="Criados" fill="var(--color-Criados)" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="criados" fill="var(--color-criados)" radius={[3, 3, 0, 0]} />
             </BarChart>
           </ChartContainer>
         </div>
