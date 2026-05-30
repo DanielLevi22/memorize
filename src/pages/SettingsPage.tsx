@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Download, Upload, Trash2, Volume2, Eye, EyeOff, Sparkles, Key, ArrowLeft, Plus, Settings, Edit, Save, Cloud, Lock, RefreshCw, HelpCircle } from 'lucide-react';
+import { Download, Upload, Trash2, Volume2, Eye, EyeOff, Sparkles, Key, ArrowLeft, Plus, Settings, Edit, Save, Cloud, RefreshCw, HelpCircle } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import type { Card, DeckPreset } from '../types';
@@ -45,8 +45,6 @@ interface SettingsPageProps {
   // Google Drive Sync
   driveClientId: string;
   setDriveClientId: (id: string) => void;
-  drivePassword: string;
-  setDrivePassword: (pw: string) => void;
   autoSyncEnabled: boolean;
   setAutoSyncEnabled: (v: boolean) => void;
   lastSyncTime: number;
@@ -88,8 +86,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   // Google Drive Sync props
   driveClientId,
   setDriveClientId: _setDriveClientId,
-  drivePassword,
-  setDrivePassword,
   autoSyncEnabled,
   setAutoSyncEnabled,
   lastSyncTime,
@@ -103,20 +99,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const [showApiKey, setShowApiKey] = useState(false);
   const [localApiKey, setLocalApiKey] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [showDrivePassword, setShowDrivePassword] = useState(false);
   const [showDriveHelp, setShowDriveHelp] = useState(false);
-  const [passwordInput, setPasswordInput] = useState('');
-
-  useEffect(() => {
-    setPasswordInput('');
-  }, [drivePassword]);
-
-  const handleSaveSyncCredentials = () => {
-    if (passwordInput.trim()) {
-      setDrivePassword(passwordInput);
-      toast.success('Configurações de Sincronização salvas com sucesso!');
-    }
-  };
 
   // Available theme accent colors
   const ACCENT_COLORS = [
@@ -1358,29 +1341,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         </p>
 
         <div className="space-y-3 pt-1">
-          {/* Campo Senha */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-[10px] font-bold text-muted-foreground flex items-center gap-1">
-              <Lock size={10} /> Senha de Criptografia (Mantenha Segura!)
-            </label>
-            <div className="relative">
-              <input
-                type={showDrivePassword ? 'text' : 'password'}
-                placeholder={drivePassword ? '•••••••• (Senha Salva - Digite para alterar)' : 'Senha para encriptar seus dados...'}
-                className="bg-background border border-border text-foreground pl-3 pr-10 py-1.5 rounded-xl text-xs font-semibold focus:border-primary focus:outline-none w-full h-10 transition-colors"
-                value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
-              />
-              <button
-                type="button"
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-                onClick={() => setShowDrivePassword(!showDrivePassword)}
-              >
-                {showDrivePassword ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
-            </div>
-          </div>
-
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-1">
             {/* Sincronização Automática */}
             <div className="flex items-center gap-2">
@@ -1395,42 +1355,11 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                 Sincronizar ao iniciar o aplicativo
               </label>
             </div>
-
-            {/* Salvar credenciais */}
-            <div className="flex gap-2 w-full sm:w-auto">
-              {drivePassword && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full sm:w-auto text-rose-500 hover:text-rose-600 hover:bg-rose-500/5 font-semibold h-9 text-xs rounded-xl cursor-pointer"
-                  onClick={() => {
-                    setDrivePassword('');
-                    setPasswordInput('');
-                    _setDriveClientId('754580033922-j6fhjnrhe8gr1c0olic52tkcjp12j70s.apps.googleusercontent.com');
-                    localStorage.removeItem('memorize_sync_password');
-                    localStorage.removeItem('memorize_sync_client_id');
-                    toast.success('Configurações de sincronização removidas.');
-                  }}
-                  title="Remover senha e desconfigurar sincronização"
-                >
-                  Remover
-                </Button>
-              )}
-              <Button
-                variant="default"
-                size="sm"
-                className="w-full sm:w-auto font-bold h-9 text-xs rounded-xl cursor-pointer transition-all duration-150"
-                onClick={handleSaveSyncCredentials}
-                disabled={!passwordInput}
-              >
-                Salvar Credenciais
-              </Button>
-            </div>
           </div>
         </div>
 
         {/* Status de Sincronização */}
-        {driveClientId && drivePassword && (
+        {driveClientId && (
           <div className="border-t border-border/60 pt-3 mt-3 space-y-3 animate-in fade-in duration-200">
             {driveAccessToken && (
               <div className="flex items-center justify-between bg-emerald-500/5 border border-emerald-500/10 rounded-xl p-2.5 text-[11px] font-medium text-muted-foreground animate-in slide-in-from-top-1 duration-150">

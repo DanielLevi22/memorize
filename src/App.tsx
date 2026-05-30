@@ -4,7 +4,8 @@ import {
   Flame, Plus, Sparkles, Menu, User, 
   Search, Settings, Sun, Moon,
   ChevronLeft, LayoutDashboard, TrendingUp, ClipboardList,
-  BookOpen, Info, MessageSquare, Timer, RefreshCw, Cloud
+  BookOpen, Info, MessageSquare, Timer, RefreshCw, Cloud,
+  Lock, Key, Eye, EyeOff
 } from 'lucide-react';
 
 // Banco de Dados e Types
@@ -192,9 +193,6 @@ function App() {
   const [driveClientId, setDriveClientId] = useState<string>(() => {
     return localStorage.getItem('memorize_sync_client_id') || '754580033922-j6fhjnrhe8gr1c0olic52tkcjp12j70s.apps.googleusercontent.com';
   });
-  const [drivePassword, setDrivePassword] = useState<string>(() => {
-    return localStorage.getItem('memorize_sync_password') || '';
-  });
   const [autoSyncEnabled, setAutoSyncEnabled] = useState<boolean>(() => {
     return localStorage.getItem('memorize_auto_sync') === 'true';
   });
@@ -205,17 +203,26 @@ function App() {
   const [syncProgress, setSyncProgress] = useState<number>(0);
   const [syncStatusMessage, setSyncStatusMessage] = useState<string>('');
 
+  // Estados do Modal de Prompt de Senha
+  const [isPasswordPromptOpen, setIsPasswordPromptOpen] = useState(false);
+  const [passwordPromptInput, setPasswordPromptInput] = useState('');
+  const [pendingSyncMode, setPendingSyncMode] = useState<'upload' | 'download' | undefined>(undefined);
+  const [showPromptPassword, setShowPromptPassword] = useState(false);
+
   useEffect(() => {
     localStorage.setItem('memorize_sync_client_id', driveClientId);
   }, [driveClientId]);
 
   useEffect(() => {
-    localStorage.setItem('memorize_sync_password', drivePassword);
-  }, [drivePassword]);
-
-  useEffect(() => {
     localStorage.setItem('memorize_auto_sync', autoSyncEnabled.toString());
   }, [autoSyncEnabled]);
+
+  // Limpeza de senhas antigas salvas para segurança
+  useEffect(() => {
+    if (localStorage.getItem('memorize_sync_password')) {
+      localStorage.removeItem('memorize_sync_password');
+    }
+  }, []);
 
   // --- ESTADOS DE SESSÃO CRAM (REFORÇO) ---
   const [cramSessionCards, setCramSessionCards] = useState<Card[] | null>(null);
@@ -818,13 +825,15 @@ function App() {
   };
 
   // --- SINCRONIZAÇÃO GOOGLE DRIVE REAL ---
-  const handleDriveSync = async (forceMode?: 'upload' | 'download') => {
+  const handleDriveSync = async (forceMode?: 'upload' | 'download', password?: string) => {
     if (!driveClientId) {
       toast.error('Google Client ID não configurado nas opções.');
       return;
     }
-    if (!drivePassword) {
-      toast.error('Senha de criptografia não configurada nas opções.');
+    if (!password) {
+      setPendingSyncMode(forceMode);
+      setPasswordPromptInput('');
+      setIsPasswordPromptOpen(true);
       return;
     }
 
@@ -851,7 +860,7 @@ function App() {
         
         setSyncProgress(65);
         setSyncStatusMessage('Criptografando com AES-GCM-256...');
-        const envelope = await encryptData(JSON.stringify(localExport), drivePassword);
+        const envelope = await encryptData(JSON.stringify(localExport), password);
         
         setSyncProgress(85);
         setSyncStatusMessage('Enviando para o Google Drive...');
@@ -880,7 +889,7 @@ function App() {
         
         setSyncProgress(70);
         setSyncStatusMessage('Descriptografando envelope com sua senha...');
-        const decryptedStr = await decryptData(envelope, drivePassword);
+        const decryptedStr = await decryptData(envelope, password);
         const remoteData = JSON.parse(decryptedStr);
         
         setSyncProgress(85);
@@ -905,7 +914,7 @@ function App() {
         
         setSyncProgress(70);
         setSyncStatusMessage('Criptografando base local...');
-        const envelope = await encryptData(JSON.stringify(localExport), drivePassword);
+        const envelope = await encryptData(JSON.stringify(localExport), password);
         
         setSyncProgress(90);
         setSyncStatusMessage('Criando primeiro backup no Drive...');
@@ -924,7 +933,7 @@ function App() {
         
         setSyncProgress(60);
         setSyncStatusMessage('Descriptografando dados de nuvem...');
-        const decryptedStr = await decryptData(envelope, drivePassword);
+        const decryptedStr = await decryptData(envelope, password);
         const remoteData = JSON.parse(decryptedStr);
 
         setSyncProgress(75);
@@ -937,7 +946,7 @@ function App() {
         
         setSyncProgress(90);
         setSyncStatusMessage('Criptografando dados unificados...');
-        const newEnvelope = await encryptData(JSON.stringify(mergedExport), drivePassword);
+        const newEnvelope = await encryptData(JSON.stringify(mergedExport), password);
         
         setSyncProgress(95);
         setSyncStatusMessage('Subindo base unificada para o Google Drive...');
@@ -975,7 +984,7 @@ function App() {
 
   // --- SINCRONIZAÇÃO GERAL (BOTÃO HEADER) ---
   const handleSync = () => {
-    if (driveClientId && drivePassword) {
+    if (driveClientId) {
       handleDriveSync();
     } else {
       setIsSyncing(true);
@@ -1004,7 +1013,7 @@ function App() {
 
   // --- AUTO SINCRONIZAÇÃO NO INÍCIO ---
   useEffect(() => {
-    if (autoSyncEnabled && driveClientId && drivePassword) {
+    if (autoSyncEnabled && driveClientId) {
       const timer = setTimeout(() => {
         handleDriveSync();
       }, 2000);
@@ -1579,7 +1588,7 @@ function App() {
                 onClick={handleSync}
                 disabled={isSyncing}
                 title={
-                  driveClientId && drivePassword 
+                  driveClientId 
                     ? `Sincronização na Nuvem ativa (Google Drive)${lastSyncTime ? `\nÚltimo Sync: ${new Date(lastSyncTime).toLocaleString('pt-BR')}` : ''}`
                     : 'Sincronizar localmente (Configure o Google Drive nas opções para backup na nuvem)'
                 }
@@ -1591,7 +1600,7 @@ function App() {
                   </>
                 ) : (
                   <>
-                    {driveClientId && drivePassword ? (
+                    {driveClientId ? (
                       <Cloud size={13} className="text-primary animate-pulse" />
                     ) : (
                       <RefreshCw size={12} />
@@ -1761,8 +1770,6 @@ function App() {
                 // Google Drive Sync props
                 driveClientId={driveClientId}
                 setDriveClientId={setDriveClientId}
-                drivePassword={drivePassword}
-                setDrivePassword={setDrivePassword}
                 autoSyncEnabled={autoSyncEnabled}
                 setAutoSyncEnabled={setAutoSyncEnabled}
                 lastSyncTime={lastSyncTime}
@@ -2077,6 +2084,91 @@ function App() {
               />
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* DIALOG DE SOLICITAÇÃO DE SENHA PARA CRIPTOGRAFIA */}
+      <Dialog open={isPasswordPromptOpen} onOpenChange={(open) => {
+        if (!open) {
+          setIsPasswordPromptOpen(false);
+          setPendingSyncMode(undefined);
+          setPasswordPromptInput('');
+        }
+      }}>
+        <DialogContent className="sm:max-w-[400px] rounded-2xl bg-card border border-border text-foreground p-6 shadow-2xl">
+          <DialogHeader className="space-y-1.5 flex flex-col items-center text-center">
+            <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center text-primary mb-1">
+              <Lock size={20} />
+            </div>
+            <DialogTitle className="text-lg font-black tracking-tight text-foreground">
+              Senha de Criptografia
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground font-semibold">
+              Digite a senha para descriptografar os dados da nuvem ou criar um novo backup seguro.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            if (!passwordPromptInput) return;
+            const p = passwordPromptInput;
+            const m = pendingSyncMode;
+            
+            // Limpa o estado primeiro
+            setIsPasswordPromptOpen(false);
+            setPendingSyncMode(undefined);
+            setPasswordPromptInput('');
+            
+            // Dispara o sync com a senha fornecida
+            handleDriveSync(m, p);
+          }} className="space-y-4 pt-2">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                <Key size={10} /> Senha de Segurança
+              </label>
+              <div className="relative">
+                <input
+                  type={showPromptPassword ? 'text' : 'password'}
+                  placeholder="Digite sua senha de sincronização..."
+                  className="bg-background border border-border text-foreground pl-3 pr-10 py-1.5 rounded-xl text-xs font-semibold focus:border-primary focus:outline-none w-full h-10 transition-colors"
+                  value={passwordPromptInput}
+                  onChange={(e) => setPasswordPromptInput(e.target.value)}
+                  autoFocus
+                  required
+                />
+                <button
+                  type="button"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                  onClick={() => setShowPromptPassword(!showPromptPassword)}
+                >
+                  {showPromptPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+            </div>
+
+            <DialogFooter className="pt-2 flex flex-col sm:flex-row gap-2 border-t border-border/40">
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full sm:w-auto border border-border hover:bg-muted text-foreground font-semibold h-10 text-xs rounded-xl cursor-pointer"
+                onClick={() => {
+                  setIsPasswordPromptOpen(false);
+                  setPendingSyncMode(undefined);
+                  setPasswordPromptInput('');
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                variant="default"
+                className="w-full sm:w-auto flex-1 bg-primary hover:bg-primary/95 text-zinc-50 font-bold h-10 text-xs rounded-xl cursor-pointer"
+                disabled={!passwordPromptInput}
+              >
+                Confirmar e Sincronizar
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 

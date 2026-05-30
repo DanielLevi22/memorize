@@ -44,10 +44,10 @@ O Memorize é um aplicativo local-first estruturado em cima do IndexedDB (via De
 
 ### 2.3 Requisitos de Interface e Experiência do Usuário (UI/UX)
 * **Painel Premium nas Configurações:** Integração de uma seção dedicada em `SettingsPage.tsx` com visual moderno, suporte ao tema do sistema (Zinc, Blue, Green, Violet, Orange, Rose) e animações suaves.
-* **Controle de Senha:** Campo de entrada com visibilidade alternável para a senha de criptografia.
-* **OAuth2 Client ID Configurável:** Campo para o usuário inserir seu próprio Client ID do Google Cloud Console para fins de portabilidade e local-first completo.
-* **Feedback Visual:** Indicadores dinâmicos de status da sincronização ("Desconectado", "Conectado", "Último Sync: [Data]") e spinner animado durante processos assíncronos.
-* **Sincronização Automática:** Opção para sincronizar automaticamente ao carregar o aplicativo.
+* **Senha sob Demanda (Sem Persistência):** A senha de criptografia nunca é salva no navegador ou no armazenamento local (`localStorage`). Em toda sincronização (manual ou ao carregar o aplicativo), o usuário é solicitado interativamente via modal a digitar a senha. Ela é mantida em memória volátil apenas durante o processo e descartada imediatamente após o término ou erro da sincronização.
+* **OAuth2 Client ID Configurável:** Opção avançada nas configurações para o desenvolvedor ou usuário avançado alterar o Google Client ID.
+* **Feedback Visual de Progresso**: Exibição de uma barra de progresso e mensagens de status detalhando o passo-a-passo da operação em andamento.
+* **Sincronização Automática:** Opção para disparar o fluxo de sincronização automaticamente ao carregar o aplicativo (o que abrirá o modal de senha caso necessário).
 
 ---
 
