@@ -4,7 +4,7 @@ import {
   Flame, Plus, Sparkles, Menu, User, 
   Search, Settings, Sun, Moon,
   ChevronLeft, LayoutDashboard, TrendingUp, ClipboardList,
-  BookOpen, Info, MessageSquare, Timer, RefreshCw
+  BookOpen, Info, MessageSquare, Timer, RefreshCw, Cloud
 } from 'lucide-react';
 
 // Banco de Dados e Types
@@ -1575,11 +1575,30 @@ function App() {
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-xs font-extrabold px-3.5 py-1.5 rounded-lg cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all duration-150 border border-border/80"
+                className="text-xs font-extrabold px-3.5 py-1.5 rounded-lg cursor-pointer text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all duration-150 border border-border/80 gap-2 flex items-center"
                 onClick={handleSync}
                 disabled={isSyncing}
+                title={
+                  driveClientId && drivePassword 
+                    ? `Sincronização na Nuvem ativa (Google Drive)${lastSyncTime ? `\nÚltimo Sync: ${new Date(lastSyncTime).toLocaleString('pt-BR')}` : ''}`
+                    : 'Sincronizar localmente (Configure o Google Drive nas opções para backup na nuvem)'
+                }
               >
-                {isSyncing ? 'Sincronizando...' : '🔄 Sincronizar'}
+                {isSyncing ? (
+                  <>
+                    <RefreshCw size={13} className="animate-spin text-primary" />
+                    <span>Sincronizando...</span>
+                  </>
+                ) : (
+                  <>
+                    {driveClientId && drivePassword ? (
+                      <Cloud size={13} className="text-primary animate-pulse" />
+                    ) : (
+                      <RefreshCw size={12} />
+                    )}
+                    <span>Sincronizar</span>
+                  </>
+                )}
               </Button>
             </div>
 
