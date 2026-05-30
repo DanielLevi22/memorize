@@ -219,9 +219,20 @@ export interface ChatMessage {
   grammarCorrection?: string | null;
 }
 
-/** Uma faixa de áudio completa enviada pelo usuário para a Playlist */
+/** Uma playlist ou álbum de áudio completo */
+export interface Playlist {
+  id: string; // UUID
+  name: string; // Nome do álbum/playlist
+  description?: string; // Descrição opcional
+  coverImage?: Blob; // Imagem de capa do álbum (Blob)
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Uma faixa de áudio completa enviada pelo usuário para um álbum */
 export interface AudioTrack {
   id: string; // UUID
+  playlistId: string; // ID da playlist correspondente
   title: string; // Título da faixa/aula
   description?: string; // Descrição opcional (ex: Aula 1, Podcast, etc.)
   audioFile: Blob; // Arquivo de áudio (MP3/WAV/etc.)
