@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Eye, AlertCircle, Volume2, Mic, Lock, Languages, RefreshCw } from 'lucide-react';
+import { toast } from 'sonner';
+import confetti from 'canvas-confetti';
 import type { Card, DeckPreset } from '../types';
 import { 
   getFriendlyInterval, 
@@ -417,7 +419,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
   const handleStartSpeechRecognition = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert("Reconhecimento de voz não é suportado neste navegador. Use o Chrome ou Edge.");
+      toast.error("Reconhecimento de voz não é suportado neste navegador. Use o Chrome ou Edge.");
       return;
     }
 
@@ -603,6 +605,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
         setCurrentIndex(nextIndex);
       }, 200);
     } else {
+      confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
       onFinishSession(studiedCount + 1);
     }
   };

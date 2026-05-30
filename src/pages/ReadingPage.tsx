@@ -10,6 +10,7 @@ import { Button } from '../components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { db } from '../db/db';
 import type { ReadingText, ReadingCollection, Note, Card } from '../types';
+import { toast } from 'sonner';
 
 interface DraftCard {
   id: string; // Temporary UI id
@@ -26,6 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from '../components/ui/dialog';
 import { extractTextFromPdf, processTextWithAI, segmentTextManually, segmentAndTranslateWithFreeAPI, translateWithMyMemory } from '../utils/readingProcessor';
 import { motion } from 'framer-motion';
@@ -85,6 +87,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   const [isCreatingCollection, setIsCreatingCollection] = useState(false);
   const [newCollectionTitle, setNewCollectionTitle] = useState('');
   const [newCollectionDescription, setNewCollectionDescription] = useState('');
+  const [textToDelete, setTextToDelete] = useState<string | null>(null);
 
   // Collection editing states
   const [editingCollection, setEditingCollection] = useState<ReadingCollection | null>(null);
@@ -649,7 +652,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   const handleStartSpeechRecognition = (targetIndexOverride?: number) => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert("Reconhecimento de voz não é suportado neste navegador. Use o Chrome ou Edge.");
+      toast.error("Reconhecimento de voz não é suportado neste navegador. Use o Chrome ou Edge.");
       return;
     }
 
@@ -665,7 +668,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
     const targetIdx = targetIndexOverride !== undefined ? targetIndexOverride : activeLineIdx;
 
     if (!selectedText || targetIdx < 0 || targetIdx >= selectedText.lines.length) {
-      alert("Por favor, selecione uma frase para ler.");
+      toast.error("Por favor, selecione uma frase para ler.");
       return;
     }
 
@@ -754,7 +757,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
 
                   return nextIdx;
                 } else {
-                  alert("Parabéns! Você concluiu a leitura e pronúncia de todas as frases do texto!");
+                  toast.success("Parabéns! Você concluiu a leitura e pronúncia de todas as frases do texto!");
                   return prev;
                 }
               });
@@ -1032,7 +1035,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
 
             return nextIdx;
           } else {
-            alert("Parabéns! Você concluiu a escrita de todas as frases do texto!");
+            toast.success("Parabéns! Você concluiu a escrita de todas as frases do texto!");
             return prev;
           }
         });
@@ -1070,7 +1073,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
         speakText(selectedText.lines[nextIdx].original);
       }, 100);
     } else {
-      alert("Parabéns! Você concluiu a escrita de todas as frases do texto!");
+      toast.success("Parabéns! Você concluiu a escrita de todas as frases do texto!");
     }
   };
 
@@ -1078,10 +1081,16 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
     await db.readings.put(reading);
   };
 
-  const handleDeleteReading = async (id: string) => {
-    if (window.confirm('Deseja excluir este texto? Esta ação não pode ser desfeita.')) {
-      await db.readings.delete(id);
-      if (selectedTextId === id) setSelectedTextId(null);
+  const handleDeleteReading = (id: string) => {
+    setTextToDelete(id);
+  };
+
+  const confirmDeleteReading = async () => {
+    if (textToDelete) {
+      await db.readings.delete(textToDelete);
+      if (selectedTextId === textToDelete) setSelectedTextId(null);
+      setTextToDelete(null);
+      toast.success("Texto excluído com sucesso!");
     }
   };
 
@@ -4071,6 +4080,39 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
               {associatedReadingsCount > 0 ? 'Excluir tudo' : 'Excluir pasta'}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Confirmação de Exclusão de Texto */}
+      <Dialog open={!!textToDelete} onOpenChange={(open) => !open && setTextToDelete(null)}>
+        <DialogContent className="sm:max-w-[400px] text-center flex flex-col items-center p-6 gap-6">
+          <div className="h-16 w-16 rounded-full bg-destructive/10 flex items-center justify-center text-destructive">
+            <Trash2 size={28} />
+          </div>
+          <DialogHeader className="space-y-2 flex flex-col items-center">
+            <DialogTitle className="text-xl font-extrabold text-foreground tracking-tight">
+              Excluir Texto
+            </DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground font-medium max-w-[280px]">
+              Tem certeza que deseja apagar este texto? Essa ação é permanente.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col sm:flex-row w-full gap-3 pt-2">
+            <Button
+              variant="outline"
+              className="flex-1 font-bold h-11 rounded-xl"
+              onClick={() => setTextToDelete(null)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              className="flex-1 font-bold h-11 rounded-xl shadow-sm"
+              onClick={confirmDeleteReading}
+            >
+              Sim, excluir
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

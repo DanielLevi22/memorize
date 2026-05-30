@@ -26,6 +26,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { ReadingPage } from './pages/ReadingPage';
 import { ConversationPage } from './pages/ConversationPage';
+import { Toaster, toast } from 'sonner';
 
 // Componentes do Projeto
 import { DeckModal } from './components/DeckModal';
@@ -645,7 +646,7 @@ function App() {
     try {
       const deck = await db.decks.get(deckId);
       if (!deck) {
-        alert('Deck não encontrado!');
+        toast.error('Deck não encontrado!');
         return;
       }
 
@@ -675,9 +676,10 @@ function App() {
 
       const safeName = deck.name.replace(/[\\/:*?"<>|]/g, '').trim() || 'deck';
       downloadJSON(data, `${safeName}.json`);
+      toast.success('Deck exportado com sucesso!');
     } catch (err: any) {
       console.error(err);
-      throw err;
+      toast.error('Erro ao exportar deck: ' + err.message);
     }
   };
 
@@ -712,22 +714,21 @@ function App() {
 
       const today = new Date().toISOString().split('T')[0];
       downloadJSON(data, `memorize_backup_${today}.json`);
+      toast.success('Backup completo gerado com sucesso!');
     } catch (err: any) {
       console.error(err);
-      alert('Erro ao criar backup completo: ' + err.message);
+      toast.error('Erro ao criar backup completo: ' + err.message);
     }
   };
 
   // --- LIMPAR E RESETAR BANCO LOCAL ---
   const handleResetAllData = async () => {
-    if (window.confirm("⚠️ ATENÇÃO: Isso apagará permanentemente todos os seus decks, cartões e histórico de estudos deste dispositivo. Deseja prosseguir?")) {
-      await db.decks.clear();
-      await db.cards.clear();
-      await db.revisions.clear();
-      localStorage.clear();
-      alert("Dados limpos com sucesso! O aplicativo será reiniciado.");
-      window.location.reload();
-    }
+    await db.decks.clear();
+    await db.cards.clear();
+    await db.revisions.clear();
+    localStorage.clear();
+    toast.success("Dados limpos com sucesso! O aplicativo será reiniciado.");
+    setTimeout(() => window.location.reload(), 1500);
   };
 
   // --- IMPORTAR CARDS GERADOS POR IA ---
@@ -766,6 +767,7 @@ function App() {
     }));
 
     await db.cards.bulkAdd(newCards);
+    toast.success('Cards importados com sucesso!');
   };
 
   // --- SINCRONIZAÇÃO ANKI SIMULADA ---
@@ -773,7 +775,7 @@ function App() {
     setIsSyncing(true);
     setTimeout(() => {
       setIsSyncing(false);
-      alert('Sincronização concluída! Todos os baralhos, cartões e revisões locais estão 100% atualizados.');
+      toast.success('Sincronização concluída! Todos os baralhos, cartões e revisões locais estão 100% atualizados.');
     }, 800);
   };
 
@@ -905,6 +907,7 @@ function App() {
 
   return (
     <div className="app-container min-h-screen flex flex-row bg-background text-foreground relative font-sans w-full">
+      <Toaster position="bottom-right" richColors />
       
       {/* 1. SIDEBAR FIXA PARA DESKTOP (md:flex) */}
       <aside className={`hidden md:flex flex-col border-r border-border bg-card h-screen sticky top-0 justify-between shrink-0 transition-all duration-300 ${

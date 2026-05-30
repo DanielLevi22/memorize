@@ -4,7 +4,9 @@ import { Button } from '../components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import type { Card, DeckPreset } from '../types';
 import { downloadPresetFile, openPresetFile, deserializePreset } from '../utils/presets';
-import { createTestDeck } from '../db/db';
+import { toast } from 'sonner';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
+import { AlertTriangle } from 'lucide-react';
 
 interface SettingsPageProps {
   theme: 'light' | 'dark';
@@ -71,6 +73,11 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const [showApiKey, setShowApiKey] = useState(false);
   const [localApiKey, setLocalApiKey] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // Modal states
+  const [showRemoveKeyConfirm, setShowRemoveKeyConfirm] = useState(false);
+  const [showResetDataConfirm, setShowResetDataConfirm] = useState(false);
+  const [presetToDelete, setPresetToDelete] = useState<DeckPreset | null>(null);
   
   const [activePresetToEdit, setActivePresetToEdit] = useState<DeckPreset | null>(null);
 
@@ -127,12 +134,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
 
     const result = deserializePreset(jsonContent);
     if (!result.success) {
-      alert(`❌ Erro ao importar preset:\n${result.error}`);
+      toast.error(`Erro ao importar preset:\n${result.error}`);
       return;
     }
 
-    await onSavePreset(result.preset);
-    alert(`✅ Preset "${result.preset.name}" importado com sucesso!`);
+    await onSavePreset(result.preset!);
+    toast.success(`Preset "${result.preset!.name}" importado com sucesso!`);
   };
 
   useEffect(() => {
@@ -171,10 +178,23 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     }, 3000);
   };
 
-  const handleRemoveApiKey = () => {
-    if (window.confirm("Deseja remover sua Chave de API do Gemini? O recurso de IA ficará inativo.")) {
-      setGeminiApiKey('');
-      setLocalApiKey('');
+  const confirmRemoveApiKey = () => {
+    setGeminiApiKey('');
+    setLocalApiKey('');
+    setShowRemoveKeyConfirm(false);
+    toast.success("Chave da API removida.");
+  };
+
+  const confirmResetData = () => {
+    setShowResetDataConfirm(false);
+    handleResetAllData();
+  };
+
+  const confirmDeletePreset = async () => {
+    if (presetToDelete) {
+      await onDeletePreset(presetToDelete.id);
+      setPresetToDelete(null);
+      toast.success("Preset excluído com sucesso.");
     }
   };
 
@@ -211,7 +231,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             <Button
               onClick={async () => {
                 if (!activePresetToEdit.name.trim()) {
-                  alert('Por favor, defina um nome para o preset.');
+                  toast.error('Por favor, defina um nome para o preset.');
                   return;
                 }
                 await onSavePreset(activePresetToEdit);
@@ -1084,10 +1104,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                     </button>
                     {!isDefault && (
                       <button
-                        onClick={async () => {
-                          if (window.confirm(`Deseja realmente excluir o preset "${preset.name}"? Os baralhos que usam este preset voltarão ao padrão.`)) {
-                            await onDeletePreset(preset.id);
-                          }
+                        onClick={() => {
+                          setPresetToDelete(preset);
                         }}
                         className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors cursor-pointer border border-border bg-card shadow-sm flex items-center justify-center h-7 w-7"
                         title="Excluir preset"
@@ -1179,7 +1197,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               </Button>
               {geminiApiKey && (
                 <Button
-                  onClick={handleRemoveApiKey}
+                  onClick={() => setShowRemoveKeyConfirm(true)}
                   variant="outline"
                   className="border-destructive/20 hover:bg-destructive/10 text-destructive text-xs font-bold px-3 py-2 rounded-xl h-auto cursor-pointer flex-shrink-0"
                 >
@@ -1268,41 +1286,93 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       </div>
 
       <div className="bg-card border border-border rounded-2xl p-5 space-y-3 shadow-sm">
-        <div className="text-[10px] text-primary font-bold uppercase tracking-wider">
-          🛠️ Ferramentas de Desenvolvimento / Testes
-        </div>
-        <p className="text-[11px] text-muted-foreground">
-          Gere um baralho contendo cartões de todos os tipos e estados do Anki para testar o exportador .apkg e o comportamento do algoritmo.
-        </p>
-        <Button
-          variant="outline"
-          className="w-full border-blue-500/30 bg-blue-500/10 hover:bg-blue-500 hover:text-zinc-50 text-blue-600 dark:text-blue-400 font-semibold cursor-pointer h-10 text-xs rounded-xl transition-all duration-200"
-          onClick={async () => {
-            try {
-              await createTestDeck();
-              alert('Baralho "🧪 Baralho de Testes Anki" criado com sucesso! Você pode estudá-lo ou exportá-lo a partir do Dashboard.');
-            } catch (err: any) {
-              alert('Erro ao criar baralho de testes: ' + err.message);
-            }
-          }}
-        >
-          Gerar Baralho de Testes do Anki
-        </Button>
-      </div>
-
-      <div className="bg-card border border-border rounded-2xl p-5 space-y-3 shadow-sm">
         <div className="text-[10px] text-destructive font-bold uppercase tracking-wider">
           Zona de Perigo
         </div>
         <Button 
           variant="outline"
           className="w-full border-destructive/20 bg-destructive/5 hover:bg-destructive hover:text-destructive-foreground text-destructive font-semibold cursor-pointer py-5 text-xs rounded-xl"
-          onClick={handleResetAllData}
+          onClick={() => setShowResetDataConfirm(true)}
         >
           <Trash2 size={14} className="mr-1.5" />
           Limpar todos os dados locais
         </Button>
       </div>
+
+      {/* Modal: Remover API Key */}
+      <Dialog open={showRemoveKeyConfirm} onOpenChange={setShowRemoveKeyConfirm}>
+        <DialogContent className="sm:max-w-[400px] text-center flex flex-col items-center p-6 gap-6">
+          <div className="h-16 w-16 rounded-full bg-destructive/10 flex items-center justify-center text-destructive">
+            <Key size={28} />
+          </div>
+          <DialogHeader className="space-y-2 flex flex-col items-center">
+            <DialogTitle className="text-xl font-extrabold text-foreground tracking-tight">
+              Remover API Key
+            </DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground font-medium max-w-[280px]">
+              Deseja remover sua Chave de API do Gemini? O recurso de IA ficará inativo.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col sm:flex-row w-full gap-3 pt-2">
+            <Button variant="outline" className="flex-1 font-bold h-11 rounded-xl" onClick={() => setShowRemoveKeyConfirm(false)}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" className="flex-1 font-bold h-11 rounded-xl shadow-sm" onClick={confirmRemoveApiKey}>
+              Sim, remover
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Resetar Dados */}
+      <Dialog open={showResetDataConfirm} onOpenChange={setShowResetDataConfirm}>
+        <DialogContent className="sm:max-w-[400px] text-center flex flex-col items-center p-6 gap-6">
+          <div className="h-16 w-16 rounded-full bg-destructive/10 flex items-center justify-center text-destructive">
+            <AlertTriangle size={28} />
+          </div>
+          <DialogHeader className="space-y-2 flex flex-col items-center">
+            <DialogTitle className="text-xl font-extrabold text-foreground tracking-tight">
+              Atenção
+            </DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground font-medium max-w-[280px]">
+              Isso apagará permanentemente todos os seus decks, cartões e histórico de estudos deste dispositivo. Deseja prosseguir?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col sm:flex-row w-full gap-3 pt-2">
+            <Button variant="outline" className="flex-1 font-bold h-11 rounded-xl" onClick={() => setShowResetDataConfirm(false)}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" className="flex-1 font-bold h-11 rounded-xl shadow-sm" onClick={confirmResetData}>
+              Sim, apagar tudo
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Excluir Preset */}
+      <Dialog open={!!presetToDelete} onOpenChange={(open) => !open && setPresetToDelete(null)}>
+        <DialogContent className="sm:max-w-[400px] text-center flex flex-col items-center p-6 gap-6">
+          <div className="h-16 w-16 rounded-full bg-destructive/10 flex items-center justify-center text-destructive">
+            <Trash2 size={28} />
+          </div>
+          <DialogHeader className="space-y-2 flex flex-col items-center">
+            <DialogTitle className="text-xl font-extrabold text-foreground tracking-tight">
+              Excluir Preset
+            </DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground font-medium max-w-[280px]">
+              Deseja realmente excluir o preset <strong className="text-foreground">{presetToDelete?.name}</strong>? Os baralhos que usam este preset voltarão ao padrão.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col sm:flex-row w-full gap-3 pt-2">
+            <Button variant="outline" className="flex-1 font-bold h-11 rounded-xl" onClick={() => setPresetToDelete(null)}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" className="flex-1 font-bold h-11 rounded-xl shadow-sm" onClick={confirmDeletePreset}>
+              Sim, excluir
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

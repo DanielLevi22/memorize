@@ -1,7 +1,8 @@
-import React from 'react';
-import { Plus, Upload, Layers, Sparkles } from 'lucide-react';
+import React, { useState } from 'react';
+import { Plus, Upload, Layers, Sparkles, Trash2 } from 'lucide-react';
 import { Card as ShadcnCard } from '../components/ui/card';
 import { Button } from '../components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import type { Deck, Card } from '../types';
 
 interface DashboardPageProps {
@@ -64,6 +65,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   readingStats,
   handleGoToReading,
 }) => {
+  const [deckToDelete, setDeckToDelete] = useState<Deck | null>(null);
+
   return (
     <div className="space-y-6 w-full max-w-none px-2 md:px-6">
       {/* Stats Overview */}
@@ -325,10 +328,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                                 type="button"
                                 className="w-full text-left px-4 py-2 hover:bg-destructive/10 text-red-500 hover:text-red-600 cursor-pointer flex items-center gap-2.5 transition-colors"
                                 onClick={() => { 
-                                  setActiveDeckMenuId(null);
-                                  if (window.confirm(`Tem certeza que deseja excluir o deck "${deck.name}"? Todos os cartões associados serão apagados permanentemente.`)) {
-                                    handleDeleteDeck(deck.id); 
-                                  }
+                                  if (deck) setDeckToDelete(deck);
                                 }}
                               >
                                 🗑️ Excluir Baralho
@@ -379,6 +379,44 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           </div>
         )}
       </section>
+
+      {/* Modal de Confirmação de Exclusão de Deck */}
+      <Dialog open={!!deckToDelete} onOpenChange={(open) => !open && setDeckToDelete(null)}>
+        <DialogContent className="sm:max-w-[400px] text-center flex flex-col items-center p-6 gap-6">
+          <div className="h-16 w-16 rounded-full bg-destructive/10 flex items-center justify-center text-destructive">
+            <Trash2 size={28} />
+          </div>
+          <DialogHeader className="space-y-2 flex flex-col items-center">
+            <DialogTitle className="text-xl font-extrabold text-foreground tracking-tight">
+              Excluir Baralho
+            </DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground font-medium max-w-[280px]">
+              Tem certeza que deseja apagar o baralho <strong className="text-foreground">{deckToDelete?.name}</strong>? Todos os cartões dentro dele serão perdidos permanentemente.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col sm:flex-row w-full gap-3 pt-2">
+            <Button
+              variant="outline"
+              className="flex-1 font-bold h-11 rounded-xl"
+              onClick={() => setDeckToDelete(null)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              className="flex-1 font-bold h-11 rounded-xl shadow-sm"
+              onClick={() => {
+                if (deckToDelete) {
+                  handleDeleteDeck(deckToDelete.id);
+                  setDeckToDelete(null);
+                }
+              }}
+            >
+              Sim, excluir
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

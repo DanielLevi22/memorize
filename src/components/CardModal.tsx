@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { Card } from '../types';
 import { db } from '../db/db';
+import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -177,7 +178,7 @@ export const CardModal: React.FC<CardModalProps> = ({
   ) => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert("Reconhecimento de voz não é suportado neste navegador. Tente usar o Google Chrome ou Microsoft Edge.");
+      toast.error("Reconhecimento de voz não é suportado neste navegador. Tente usar o Google Chrome ou Microsoft Edge.");
       return;
     }
 
@@ -272,8 +273,7 @@ export const CardModal: React.FC<CardModalProps> = ({
       }, 1000);
 
     } catch (err) {
-      console.error("Failed to start recording:", err);
-      alert("Erro ao acessar o microfone. Verifique se deu permissão de uso ao navegador.");
+      toast.error("Erro ao acessar o microfone. Verifique se deu permissão de uso ao navegador.");
       setIsRecording(false);
       setShowRecorder(false);
     }
@@ -314,7 +314,7 @@ export const CardModal: React.FC<CardModalProps> = ({
 
   const generateTtsAudio = async (text: string) => {
     if (!text.trim()) {
-      alert("Por favor, digite o termo na Frente antes de gerar o áudio.");
+      toast.error("Por favor, digite o termo na Frente antes de gerar o áudio.");
       return;
     }
 
@@ -352,9 +352,9 @@ export const CardModal: React.FC<CardModalProps> = ({
       }
       setIsPlayingPreview(false);
       
-    } catch (error) {
-      console.error("Error generating TTS audio:", error);
-      alert("Erro ao gerar áudio por Text-to-Speech. Verifique sua conexão ou tente gravar a voz manualmente.");
+    } catch (err) {
+      console.error(err);
+      toast.error("Erro ao gerar áudio por Text-to-Speech. Verifique sua conexão ou tente gravar a voz manualmente.");
     } finally {
       setIsGeneratingTts(false);
     }

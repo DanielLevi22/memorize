@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { translateWithMyMemory } from '../utils/readingProcessor';
+import { toast } from 'sonner';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 
 interface ConversationPageProps {
   geminiApiKey: string;
@@ -54,6 +56,7 @@ export function ConversationPage({ geminiApiKey, ttsRate, ttsVoice }: Conversati
   const [currentlySpeakingId, setCurrentlySpeakingId] = useState<string | null>(null);
   const [translations, setTranslations] = useState<Record<string, string>>({});
   const [translatingId, setTranslatingId] = useState<string | null>(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
@@ -222,7 +225,7 @@ export function ConversationPage({ geminiApiKey, ttsRate, ttsVoice }: Conversati
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert("Reconhecimento de voz não suportado neste navegador. Use o Chrome ou Edge.");
+      toast.error("Reconhecimento de voz não suportado neste navegador. Use o Chrome ou Edge.");
       return;
     }
 
@@ -398,12 +401,17 @@ export function ConversationPage({ geminiApiKey, ttsRate, ttsVoice }: Conversati
     }
   };
 
-  const handleClearChat = async () => {
+  const handleClearChat = () => {
     if (!selectedPartner) return;
-    if (window.confirm(`Deseja limpar todo o histórico de conversas com ${selectedPartner.name}?`)) {
-      stopSpeaking();
-      await db.chatMessages.where('partnerId').equals(selectedPartner.id).delete();
-    }
+    setShowClearConfirm(true);
+  };
+
+  const confirmClearChat = async () => {
+    if (!selectedPartner) return;
+    stopSpeaking();
+    await db.chatMessages.where('partnerId').equals(selectedPartner.id).delete();
+    setShowClearConfirm(false);
+    toast.success("Histórico limpo com sucesso!");
   };
 
   const handleBackToPartners = () => {
@@ -651,6 +659,39 @@ export function ConversationPage({ geminiApiKey, ttsRate, ttsVoice }: Conversati
           </div>
         </div>
       )}
+
+      {/* Modal de Confirmação de Limpeza */}
+      <Dialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
+        <DialogContent className="sm:max-w-[400px] text-center flex flex-col items-center p-6 gap-6">
+          <div className="h-16 w-16 rounded-full bg-destructive/10 flex items-center justify-center text-destructive">
+            <Trash2 size={28} />
+          </div>
+          <DialogHeader className="space-y-2 flex flex-col items-center">
+            <DialogTitle className="text-xl font-extrabold text-foreground tracking-tight">
+              Limpar Histórico
+            </DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground font-medium max-w-[280px]">
+              Tem certeza que deseja apagar todas as conversas com <strong className="text-foreground">{selectedPartner?.name}</strong>? Essa ação é permanente.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col sm:flex-row w-full gap-3 pt-2">
+            <Button
+              variant="outline"
+              className="flex-1 font-bold h-11 rounded-xl"
+              onClick={() => setShowClearConfirm(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              className="flex-1 font-bold h-11 rounded-xl shadow-sm"
+              onClick={confirmClearChat}
+            >
+              Sim, apagar tudo
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

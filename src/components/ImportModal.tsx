@@ -8,6 +8,7 @@ import { Input } from './ui/input';
 import { Upload, Plus, Layers, AlertTriangle } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import JSZip from 'jszip';
+import { toast } from 'sonner';
 
 interface ImportModalProps {
   isOpen: boolean;
@@ -272,8 +273,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
           });
         }
       } catch (err: any) {
-        console.error(err);
-        alert('Erro ao processar pacote APKG: ' + err.message);
+        toast.error('Erro ao processar pacote APKG: ' + err.message);
         setIsApkg(false);
       } finally {
         setIsImporting(false);
@@ -351,7 +351,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       if (importDestinationMode === 'create') {
         const deckNameClean = newDeckName.trim();
         if (!deckNameClean) {
-          alert('Por favor, digite o nome do novo baralho.');
+          toast.error('Por favor, digite o nome do novo baralho.');
           setIsImporting(false);
           return;
         }
@@ -367,7 +367,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         targetDeckId = newDeck.id;
       } else {
         if (!selectedDeckId) {
-          alert('Por favor, selecione um baralho existente para anexar os cartões.');
+          toast.error('Por favor, selecione um baralho existente para anexar os cartões.');
           setIsImporting(false);
           return;
         }
@@ -436,14 +436,14 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
       if (cardsToInsert.length > 0) {
         await db.cards.bulkAdd(cardsToInsert);
-        alert(`Sucesso: ${cardsToInsert.length} cartões importados!`);
+        toast.success(`Sucesso: ${cardsToInsert.length} cartões importados!`);
       } else {
-        alert('Nenhum cartão válido encontrado para importar.');
+        toast.error('Nenhum cartão válido encontrado para importar.');
       }
       onClose();
     } catch (err: any) {
       console.error(err);
-      alert('Erro na importação: ' + err.message);
+      toast.error('Erro na importação: ' + err.message);
     } finally {
       setIsImporting(false);
     }
@@ -525,12 +525,12 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         }
       }
 
-      alert('Backup completo restaurado com sucesso!');
+      toast.success('Backup completo restaurado com sucesso!');
       onClose();
       window.location.reload(); // Recarrega para atualizar reativamente as live queries do app
     } catch (err: any) {
       console.error(err);
-      alert('Erro ao restaurar backup: ' + err.message);
+      toast.error('Erro ao restaurar backup: ' + err.message);
     } finally {
       setIsImporting(false);
     }
