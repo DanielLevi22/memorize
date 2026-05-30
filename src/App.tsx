@@ -217,6 +217,22 @@ function App() {
     return '';
   });
 
+  const [userEmail, setUserEmail] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const savedProfile = localStorage.getItem('memorize_drive_user_profile');
+      if (savedProfile) {
+        try {
+          const parsed = JSON.parse(savedProfile);
+          return parsed.emailAddress || '';
+        } catch (e) {
+          return '';
+        }
+      }
+      return '';
+    }
+    return '';
+  });
+
   useEffect(() => {
     localStorage.setItem('memorize_daily_goal', dailyGoal.toString());
   }, [dailyGoal]);
@@ -884,6 +900,7 @@ function App() {
           const profile = await getDriveUserProfile(token);
           setUserName(profile.displayName);
           setUserPhoto(profile.photoLink || '');
+          setUserEmail(profile.emailAddress || '');
           localStorage.setItem('memorize_drive_user_profile', JSON.stringify(profile));
         } catch (profileErr) {
           console.warn('Erro ao obter perfil de usuário:', profileErr);
@@ -1203,12 +1220,27 @@ function App() {
           {/* User Profile Header & Collapse Button */}
           <div className="flex items-center justify-between pb-5 border-b border-border gap-2">
             <div className="flex items-center gap-3 overflow-hidden">
-              <div className="w-10 h-10 shrink-0 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-bold text-base border border-border shadow-lg shadow-primary/5">
-                {streak > 0 ? '🔥' : '👤'}
+              <div className="w-10 h-10 shrink-0 rounded-full overflow-hidden border border-border bg-muted flex items-center justify-center text-base shadow-sm">
+                {userPhoto ? (
+                  <img src={userPhoto} alt={userName} className="w-full h-full object-cover rounded-full" referrerPolicy="no-referrer" />
+                ) : (
+                  <div className="w-full h-full bg-primary text-zinc-50 flex items-center justify-center font-bold">
+                    {userName ? userName.charAt(0).toUpperCase() : (streak > 0 ? '🔥' : '👤')}
+                  </div>
+                )}
               </div>
               <div className="flex flex-col min-w-0">
-                <span className="font-bold text-sm text-foreground truncate">Daniel Oliveira</span>
-                <span className="text-[10px] text-muted-foreground font-semibold tracking-wide truncate">daniel.estudos@email.com</span>
+                {userName ? (
+                  <>
+                    <span className="font-bold text-sm text-foreground truncate">{userName}</span>
+                    <span className="text-[10px] text-muted-foreground font-semibold tracking-wide truncate">{userEmail}</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="font-bold text-xs text-muted-foreground uppercase tracking-wide">Modo Local</span>
+                    <span className="text-[9px] text-muted-foreground/60 font-semibold tracking-wide truncate">Sem backup na nuvem</span>
+                  </>
+                )}
               </div>
             </div>
             
@@ -1421,12 +1453,27 @@ function App() {
               <div className="space-y-6">
                 {/* User Profile Header */}
                 <div className="flex items-center gap-3 pb-5 border-b border-border">
-                  <div className="w-12 h-12 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-bold text-lg border border-border shadow-lg shadow-primary/5">
-                    {streak > 0 ? '🔥' : '👤'}
+                  <div className="w-12 h-12 rounded-full overflow-hidden border border-border bg-muted flex items-center justify-center text-lg shadow-sm">
+                    {userPhoto ? (
+                      <img src={userPhoto} alt={userName} className="w-full h-full object-cover rounded-full" referrerPolicy="no-referrer" />
+                    ) : (
+                      <div className="w-full h-full bg-primary text-zinc-50 flex items-center justify-center font-bold">
+                        {userName ? userName.charAt(0).toUpperCase() : (streak > 0 ? '🔥' : '👤')}
+                      </div>
+                    )}
                   </div>
-                  <div className="flex flex-col">
-                    <span className="font-bold text-sm text-foreground">Daniel Oliveira</span>
-                    <span className="text-[10px] text-muted-foreground font-semibold tracking-wide">daniel.estudos@email.com</span>
+                  <div className="flex flex-col min-w-0">
+                    {userName ? (
+                      <>
+                        <span className="font-bold text-sm text-foreground truncate">{userName}</span>
+                        <span className="text-[10px] text-muted-foreground font-semibold tracking-wide truncate">{userEmail}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-bold text-xs text-muted-foreground uppercase tracking-wide">Modo Local</span>
+                        <span className="text-[9px] text-muted-foreground/60 font-semibold tracking-wide truncate">Sem backup na nuvem</span>
+                      </>
+                    )}
                   </div>
                 </div>
 
