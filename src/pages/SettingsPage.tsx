@@ -37,6 +37,10 @@ interface SettingsPageProps {
   // Daily Goal
   dailyGoal: number;
   setDailyGoal: (goal: number) => void;
+  // User Profile
+  userName: string;
+  setUserName: (name: string) => void;
+
   // Presets
   presets: DeckPreset[] | undefined;
   onSavePreset: (preset: DeckPreset) => Promise<void>;
@@ -79,6 +83,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   setGeminiApiKey,
   dailyGoal,
   setDailyGoal,
+  userName,
+  setUserName,
   presets,
   onSavePreset,
   onDeletePreset,
@@ -963,6 +969,21 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               />
             ))}
           </div>
+        </div>
+
+        {/* Nome do Perfil */}
+        <div className="flex items-center justify-between p-4 bg-card">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-sm font-semibold text-foreground">Nome do Perfil</span>
+            <span className="text-[11px] text-muted-foreground">Nome exibido na tela de perfil e conquistas</span>
+          </div>
+          <input
+            type="text"
+            className="bg-muted border border-border text-foreground px-3 py-1.5 rounded-xl text-xs font-semibold focus:border-primary focus:outline-none w-48 h-9 text-right"
+            value={userName}
+            onChange={(e) => setUserName(e.target.value)}
+            placeholder="Seu nome..."
+          />
         </div>
 
 

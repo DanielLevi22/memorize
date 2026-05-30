@@ -10,6 +10,7 @@ interface ProfilePageProps {
   xpNeededForNextLevel: number;
   totalRevisionsCount: number;
   decksCount: number;
+  userName: string;
 }
 
 export const ProfilePage: React.FC<ProfilePageProps> = ({
@@ -18,7 +19,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
   earnedXp,
   xpNeededForNextLevel,
   totalRevisionsCount,
-  decksCount
+  decksCount,
+  userName
 }) => {
   return (
     <div className="space-y-6 w-full max-w-none px-2 md:px-6">
@@ -26,10 +28,10 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-5xl mx-auto">
         <ShadcnCard className="bg-card border-border p-4 text-center flex flex-row items-center gap-4 rounded-2xl shadow-sm md:col-span-1 justify-center md:justify-start">
           <div className="w-12 h-12 rounded-full bg-gradient-to-br from-violet-600 to-violet-400 flex items-center justify-center font-black text-xl border border-border shadow-md text-zinc-50 shrink-0">
-            👤
+            {userName ? userName.charAt(0).toUpperCase() : '👤'}
           </div>
           <div className="text-left space-y-0.5">
-            <h3 className="font-extrabold text-sm text-foreground">Daniel Oliveira</h3>
+            <h3 className="font-extrabold text-sm text-foreground">{userName || 'Usuário'}</h3>
             <div className="text-[10px] font-bold bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full inline-block">
               Nível {userLevel} • {earnedXp} XP
             </div>

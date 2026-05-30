@@ -185,9 +185,20 @@ function App() {
     return 20;
   });
 
+  const [userName, setUserName] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('memorize_user_name') || 'Daniel Oliveira';
+    }
+    return 'Daniel Oliveira';
+  });
+
   useEffect(() => {
     localStorage.setItem('memorize_daily_goal', dailyGoal.toString());
   }, [dailyGoal]);
+
+  useEffect(() => {
+    localStorage.setItem('memorize_user_name', userName);
+  }, [userName]);
 
   // --- ESTADOS DE SINCRONIZAÇÃO GOOGLE DRIVE ---
   const [driveClientId, setDriveClientId] = useState<string>(() => {
@@ -1733,6 +1744,7 @@ function App() {
                 xpNeededForNextLevel={xpNeededForNextLevel}
                 totalRevisionsCount={totalRevisionsCount}
                 decksCount={decks ? decks.length : 0}
+                userName={userName}
               />
             )}
 
@@ -1767,6 +1779,9 @@ function App() {
                 onSavePreset={handleSavePreset}
                 onDeletePreset={handleDeletePreset}
                 
+                userName={userName}
+                setUserName={setUserName}
+
                 // Google Drive Sync props
                 driveClientId={driveClientId}
                 setDriveClientId={setDriveClientId}
