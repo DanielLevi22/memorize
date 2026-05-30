@@ -4,7 +4,7 @@ import {
   Flame, Plus, Sparkles, Menu, User, 
   Search, Settings, Sun, Moon,
   ChevronLeft, LayoutDashboard, TrendingUp, ClipboardList,
-  BookOpen, Info, MessageSquare, Timer
+  BookOpen, Info, MessageSquare, Timer, RefreshCw
 } from 'lucide-react';
 
 // Banco de Dados e Types
@@ -48,14 +48,14 @@ import { getTagColors } from './utils/tagColors';
 import { setupNotifications, requestNotificationPermission, getNotificationPermission, clearAppBadge } from './utils/notifications';
 
 // Sincronização e Criptografia com Google Drive
-import { requestAccessToken, findBackupFile, downloadBackupFile, createBackupFile, updateBackupFile } from './utils/drive';
+import { requestAccessToken, findBackupFile, downloadBackupFile, createBackupFile, updateBackupFile, revokeToken } from './utils/drive';
 import { encryptData, decryptData } from './utils/crypto';
 import { exportDatabase, performMergeSync } from './utils/sync';
 
 // Componentes Shadcn UI
 import { Button } from './components/ui/button';
 import { Sheet, SheetContent } from './components/ui/sheet';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from './components/ui/dialog';
 
 const stripHtmlTags = (str: string) => {
   if (!str) return '';
@@ -202,6 +202,8 @@ function App() {
     return Number(localStorage.getItem('memorize_last_sync_time')) || 0;
   });
   const [driveAccessToken, setDriveAccessToken] = useState<string>('');
+  const [syncProgress, setSyncProgress] = useState<number>(0);
+  const [syncStatusMessage, setSyncStatusMessage] = useState<string>('');
 
   useEffect(() => {
     localStorage.setItem('memorize_sync_client_id', driveClientId);
@@ -827,26 +829,43 @@ function App() {
     }
 
     setIsSyncing(true);
+    setSyncProgress(5);
+    setSyncStatusMessage('Inicializando sincronização...');
     try {
       let token = driveAccessToken;
       if (!token) {
+        setSyncProgress(15);
+        setSyncStatusMessage('Conectando ao Google OAuth...');
         token = await requestAccessToken(driveClientId);
         setDriveAccessToken(token);
       }
 
+      setSyncProgress(30);
+      setSyncStatusMessage('Pesquisando backup existente no Drive...');
       const fileInfo = await findBackupFile(token);
 
       if (forceMode === 'upload') {
+        setSyncProgress(45);
+        setSyncStatusMessage('Exportando base de dados local...');
         const localExport = await exportDatabase();
+        
+        setSyncProgress(65);
+        setSyncStatusMessage('Criptografando com AES-GCM-256...');
         const envelope = await encryptData(JSON.stringify(localExport), drivePassword);
+        
+        setSyncProgress(85);
+        setSyncStatusMessage('Enviando para o Google Drive...');
         if (fileInfo) {
           await updateBackupFile(token, fileInfo.id, envelope);
         } else {
           await createBackupFile(token, envelope);
         }
+        
         const now = Date.now();
         setLastSyncTime(now);
         localStorage.setItem('memorize_last_sync_time', now.toString());
+        setSyncProgress(100);
+        setSyncStatusMessage('Upload concluído com sucesso!');
         toast.success('Upload completo concluído. Dados locais salvos no Google Drive!');
         return;
       }
@@ -855,15 +874,24 @@ function App() {
         if (!fileInfo) {
           throw new Error('Nenhum backup encontrado no Google Drive para baixar.');
         }
+        setSyncProgress(50);
+        setSyncStatusMessage('Baixando dados criptografados do Drive...');
         const envelope = await downloadBackupFile(token, fileInfo.id);
+        
+        setSyncProgress(70);
+        setSyncStatusMessage('Descriptografando envelope com sua senha...');
         const decryptedStr = await decryptData(envelope, drivePassword);
         const remoteData = JSON.parse(decryptedStr);
         
+        setSyncProgress(85);
+        setSyncStatusMessage('Importando e substituindo base de dados local...');
         await performMergeSync(remoteData);
         
         const now = Date.now();
         setLastSyncTime(now);
         localStorage.setItem('memorize_last_sync_time', now.toString());
+        setSyncProgress(100);
+        setSyncStatusMessage('Sincronização de download concluída!');
         toast.success('Download completo concluído. Dados locais substituídos!');
         setTimeout(() => window.location.reload(), 1000);
         return;
@@ -871,27 +899,55 @@ function App() {
 
       // Modo Padrão: Mesclagem Inteligente de Duas Vias
       if (!fileInfo) {
+        setSyncProgress(45);
+        setSyncStatusMessage('Nenhum backup remoto. Exportando dados locais...');
         const localExport = await exportDatabase();
+        
+        setSyncProgress(70);
+        setSyncStatusMessage('Criptografando base local...');
         const envelope = await encryptData(JSON.stringify(localExport), drivePassword);
+        
+        setSyncProgress(90);
+        setSyncStatusMessage('Criando primeiro backup no Drive...');
         await createBackupFile(token, envelope);
+        
         const now = Date.now();
         setLastSyncTime(now);
         localStorage.setItem('memorize_last_sync_time', now.toString());
+        setSyncProgress(100);
+        setSyncStatusMessage('Sincronização de envio concluída!');
         toast.success('Primeiro backup criptografado criado no Google Drive!');
       } else {
+        setSyncProgress(40);
+        setSyncStatusMessage('Baixando backup criptografado do Drive...');
         const envelope = await downloadBackupFile(token, fileInfo.id);
+        
+        setSyncProgress(60);
+        setSyncStatusMessage('Descriptografando dados de nuvem...');
         const decryptedStr = await decryptData(envelope, drivePassword);
         const remoteData = JSON.parse(decryptedStr);
 
+        setSyncProgress(75);
+        setSyncStatusMessage('Executando mesclagem inteligente de tabelas...');
         await performMergeSync(remoteData);
 
+        setSyncProgress(85);
+        setSyncStatusMessage('Exportando base de dados unificada...');
         const mergedExport = await exportDatabase();
+        
+        setSyncProgress(90);
+        setSyncStatusMessage('Criptografando dados unificados...');
         const newEnvelope = await encryptData(JSON.stringify(mergedExport), drivePassword);
+        
+        setSyncProgress(95);
+        setSyncStatusMessage('Subindo base unificada para o Google Drive...');
         await updateBackupFile(token, fileInfo.id, newEnvelope);
 
         const now = Date.now();
         setLastSyncTime(now);
         localStorage.setItem('memorize_last_sync_time', now.toString());
+        setSyncProgress(100);
+        setSyncStatusMessage('Sincronização e unificação concluídas!');
         toast.success('Sincronização com nuvem realizada com sucesso!');
         
         setTimeout(() => window.location.reload(), 1000);
@@ -901,7 +957,20 @@ function App() {
       toast.error('Erro na sincronização: ' + err.message);
     } finally {
       setIsSyncing(false);
+      setSyncProgress(0);
     }
+  };
+
+  const handleDisconnectDrive = async () => {
+    if (driveAccessToken) {
+      try {
+        await revokeToken(driveAccessToken);
+      } catch (err) {
+        console.warn('Erro ao revogar token:', err);
+      }
+    }
+    setDriveAccessToken('');
+    toast.success('Desconectado do Google Drive com sucesso. A sessão foi encerrada.');
   };
 
   // --- SINCRONIZAÇÃO GERAL (BOTÃO HEADER) ---
@@ -910,10 +979,26 @@ function App() {
       handleDriveSync();
     } else {
       setIsSyncing(true);
+      setSyncProgress(10);
+      setSyncStatusMessage('Conectando ao servidor de testes...');
+      
       setTimeout(() => {
-        setIsSyncing(false);
-        toast.success('Sincronização simulada com sucesso! Configure seu Google Drive nas opções para backup real.');
-      }, 800);
+        setSyncProgress(50);
+        setSyncStatusMessage('Verificando integridade dos cartões locais...');
+        
+        setTimeout(() => {
+          setSyncProgress(85);
+          setSyncStatusMessage('Consolidando revisões e estatísticas...');
+          
+          setTimeout(() => {
+            setSyncProgress(100);
+            setSyncStatusMessage('Simulação finalizada!');
+            setIsSyncing(false);
+            setSyncProgress(0);
+            toast.success('Sincronização simulada com sucesso! Configure seu Google Drive nas opções para backup real.');
+          }, 300);
+        }, 300);
+      }, 300);
     }
   };
 
@@ -1664,6 +1749,8 @@ function App() {
                 lastSyncTime={lastSyncTime}
                 isSyncing={isSyncing}
                 handleDriveSync={handleDriveSync}
+                driveAccessToken={driveAccessToken}
+                handleDisconnectDrive={handleDisconnectDrive}
               />
             )}
 
@@ -1942,6 +2029,37 @@ function App() {
         onClose={() => setIsImportModalOpen(false)}
         decks={decks}
       />
+
+      {/* DIALOG DE PROGRESSO DE SINCRONIZAÇÃO */}
+      <Dialog open={isSyncing && syncProgress > 0} onOpenChange={() => {}}>
+        <DialogContent className="sm:max-w-[400px] text-center flex flex-col items-center p-6 gap-6 rounded-2xl bg-card border border-border shadow-2xl">
+          <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center text-primary animate-pulse">
+            <RefreshCw size={28} className="animate-spin" />
+          </div>
+          <DialogHeader className="space-y-2 flex flex-col items-center">
+            <DialogTitle className="text-lg font-black text-foreground tracking-tight">
+              Sincronizando dados
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground font-semibold">
+              Por favor, não feche o aplicativo até que a operação seja concluída.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="w-full space-y-2 pt-2">
+            <div className="flex justify-between text-[10px] font-bold text-muted-foreground">
+              <span className="truncate max-w-[250px]">{syncStatusMessage}</span>
+              <span>{syncProgress}%</span>
+            </div>
+            {/* Barra de Progresso */}
+            <div className="w-full bg-muted border border-border/50 h-2.5 rounded-full overflow-hidden">
+              <div 
+                className="bg-primary h-full transition-all duration-300 rounded-full" 
+                style={{ width: `${syncProgress}%` }}
+              />
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <ExportModal
         isOpen={isExportModalOpen}

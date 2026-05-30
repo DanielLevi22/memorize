@@ -189,3 +189,23 @@ export async function updateBackupFile(
     throw new Error('Falha ao atualizar dados de sincronização no Google Drive.');
   }
 }
+
+/**
+ * Revoga um token de acesso OAuth2 usando o SDK do Google.
+ */
+export function revokeToken(accessToken: string): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window !== 'undefined' && (window as any).google?.accounts?.oauth2) {
+      try {
+        (window as any).google.accounts.oauth2.revoke(accessToken, () => {
+          resolve();
+        });
+      } catch (err) {
+        console.warn('Erro ao revogar token via Google GIS SDK:', err);
+        resolve();
+      }
+    } else {
+      resolve();
+    }
+  });
+}

@@ -52,6 +52,8 @@ interface SettingsPageProps {
   lastSyncTime: number;
   isSyncing: boolean;
   handleDriveSync: (forceMode?: 'upload' | 'download') => Promise<void>;
+  driveAccessToken: string;
+  handleDisconnectDrive: () => Promise<void>;
 }
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({
@@ -93,6 +95,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   lastSyncTime,
   isSyncing,
   handleDriveSync,
+  driveAccessToken,
+  handleDisconnectDrive,
 }) => {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [notifPermission, setNotifPermission] = useState<NotificationPermission | 'unsupported'>(() => getNotificationPermission());
@@ -1393,23 +1397,62 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             </div>
 
             {/* Salvar credenciais */}
-            <Button
-              variant="default"
-              size="sm"
-              className="w-full sm:w-auto font-bold h-9 text-xs rounded-xl cursor-pointer transition-all duration-150"
-              onClick={handleSaveSyncCredentials}
-              disabled={!passwordInput}
-            >
-              Salvar Credenciais
-            </Button>
+            <div className="flex gap-2 w-full sm:w-auto">
+              {drivePassword && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full sm:w-auto text-rose-500 hover:text-rose-600 hover:bg-rose-500/5 font-semibold h-9 text-xs rounded-xl cursor-pointer"
+                  onClick={() => {
+                    setDrivePassword('');
+                    setPasswordInput('');
+                    _setDriveClientId('754580033922-j6fhjnrhe8gr1c0olic52tkcjp12j70s.apps.googleusercontent.com');
+                    localStorage.removeItem('memorize_sync_password');
+                    localStorage.removeItem('memorize_sync_client_id');
+                    toast.success('Configurações de sincronização removidas.');
+                  }}
+                  title="Remover senha e desconfigurar sincronização"
+                >
+                  Remover
+                </Button>
+              )}
+              <Button
+                variant="default"
+                size="sm"
+                className="w-full sm:w-auto font-bold h-9 text-xs rounded-xl cursor-pointer transition-all duration-150"
+                onClick={handleSaveSyncCredentials}
+                disabled={!passwordInput}
+              >
+                Salvar Credenciais
+              </Button>
+            </div>
           </div>
         </div>
 
         {/* Status de Sincronização */}
         {driveClientId && drivePassword && (
           <div className="border-t border-border/60 pt-3 mt-3 space-y-3 animate-in fade-in duration-200">
+            {driveAccessToken && (
+              <div className="flex items-center justify-between bg-emerald-500/5 border border-emerald-500/10 rounded-xl p-2.5 text-[11px] font-medium text-muted-foreground animate-in slide-in-from-top-1 duration-150">
+                <span className="flex items-center gap-1.5 text-foreground font-semibold">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  Sessão Google Ativa
+                </span>
+                <button
+                  type="button"
+                  onClick={handleDisconnectDrive}
+                  className="text-rose-500 hover:text-rose-600 font-bold text-[10px] cursor-pointer hover:underline"
+                >
+                  Desconectar / Alterar Conta
+                </button>
+              </div>
+            )}
+
             <div className="flex items-center justify-between text-[10px] font-semibold text-muted-foreground">
-              <span>Status: <strong className="text-emerald-500 font-bold">Conectado / Configurado</strong></span>
+              <span>Status: <strong className="text-emerald-500 font-bold">Configurado</strong></span>
               <span>Último Sync: <strong className="text-foreground">{lastSyncTime ? new Date(lastSyncTime).toLocaleString('pt-BR') : 'Nunca'}</strong></span>
             </div>
 
