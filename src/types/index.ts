@@ -218,3 +218,13 @@ export interface ChatMessage {
   timestamp: number;
   grammarCorrection?: string | null;
 }
+
+/** Uma faixa de áudio completa enviada pelo usuário para a Playlist */
+export interface AudioTrack {
+  id: string; // UUID
+  title: string; // Título da faixa/aula
+  description?: string; // Descrição opcional (ex: Aula 1, Podcast, etc.)
+  audioFile: Blob; // Arquivo de áudio (MP3/WAV/etc.)
+  createdAt: number;
+  updatedAt: number;
+}
