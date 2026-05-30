@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Download, Upload, Trash2, Volume2, Eye, EyeOff, Sparkles, Key, ArrowLeft, Plus, Settings, Edit, Save } from 'lucide-react';
+import { Download, Upload, Trash2, Volume2, Eye, EyeOff, Sparkles, Key, ArrowLeft, Plus, Settings, Edit, Save, Cloud, Lock, RefreshCw, HelpCircle } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import type { Card, DeckPreset } from '../types';
 import { downloadPresetFile, openPresetFile, deserializePreset } from '../utils/presets';
 import { toast } from 'sonner';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../components/ui/dialog';
 import { AlertTriangle } from 'lucide-react';
 
 interface SettingsPageProps {
@@ -41,6 +41,17 @@ interface SettingsPageProps {
   presets: DeckPreset[] | undefined;
   onSavePreset: (preset: DeckPreset) => Promise<void>;
   onDeletePreset: (presetId: string) => Promise<void>;
+
+  // Google Drive Sync
+  driveClientId: string;
+  setDriveClientId: (id: string) => void;
+  drivePassword: string;
+  setDrivePassword: (pw: string) => void;
+  autoSyncEnabled: boolean;
+  setAutoSyncEnabled: (v: boolean) => void;
+  lastSyncTime: number;
+  isSyncing: boolean;
+  handleDriveSync: (forceMode?: 'upload' | 'download') => Promise<void>;
 }
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({
@@ -71,12 +82,42 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   presets,
   onSavePreset,
   onDeletePreset,
+  
+  // Google Drive Sync props
+  driveClientId,
+  setDriveClientId,
+  drivePassword,
+  setDrivePassword,
+  autoSyncEnabled,
+  setAutoSyncEnabled,
+  lastSyncTime,
+  isSyncing,
+  handleDriveSync,
 }) => {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [notifPermission, setNotifPermission] = useState<NotificationPermission | 'unsupported'>(() => getNotificationPermission());
   const [showApiKey, setShowApiKey] = useState(false);
   const [localApiKey, setLocalApiKey] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [showDrivePassword, setShowDrivePassword] = useState(false);
+  const [showDriveHelp, setShowDriveHelp] = useState(false);
+  const [clientIdInput, setClientIdInput] = useState(driveClientId);
+  const [passwordInput, setPasswordInput] = useState(drivePassword);
+
+  // Sincronizar inputs locais com props externas
+  useEffect(() => {
+    setClientIdInput(driveClientId);
+  }, [driveClientId]);
+
+  useEffect(() => {
+    setPasswordInput(drivePassword);
+  }, [drivePassword]);
+
+  const handleSaveSyncCredentials = () => {
+    setDriveClientId(clientIdInput.trim());
+    setDrivePassword(passwordInput);
+    toast.success('Configurações de Sincronização salvas com sucesso!');
+  };
 
   // Available theme accent colors
   const ACCENT_COLORS = [
@@ -1295,6 +1336,180 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
           </Button>
         </div>
       )}
+
+      {/* CARD DE SINCRONIZAÇÃO NO GOOGLE DRIVE */}
+      <div className="bg-card border border-border rounded-2xl p-5 space-y-4 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div className="text-[10px] text-primary font-bold uppercase tracking-wider flex items-center gap-1.5">
+            <Cloud size={12} className="text-primary animate-pulse" /> Sincronização na Nuvem (Google Drive)
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 text-muted-foreground hover:text-foreground cursor-pointer rounded-full"
+            onClick={() => setShowDriveHelp(true)}
+            title="Como configurar?"
+          >
+            <HelpCircle size={14} />
+          </Button>
+        </div>
+
+        <p className="text-[11px] text-muted-foreground leading-relaxed">
+          Sincronize seus dados de forma criptografada de ponta a ponta (Zero-Knowledge) usando sua própria conta do Google Drive. Seus dados são cifrados localmente antes de serem enviados.
+        </p>
+
+        <div className="space-y-3 pt-1">
+          {/* Campo Client ID */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[10px] font-bold text-muted-foreground flex items-center gap-1">
+              Google Client ID
+            </label>
+            <input
+              type="text"
+              placeholder="Ex: 123456-abcdef.apps.googleusercontent.com"
+              className="bg-background border border-border text-foreground px-3 py-1.5 rounded-xl text-xs font-semibold focus:border-primary focus:outline-none w-full h-10 transition-colors"
+              value={clientIdInput}
+              onChange={(e) => setClientIdInput(e.target.value)}
+            />
+          </div>
+
+          {/* Campo Senha */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[10px] font-bold text-muted-foreground flex items-center gap-1">
+              <Lock size={10} /> Senha de Criptografia (Mantenha Segura!)
+            </label>
+            <div className="relative">
+              <input
+                type={showDrivePassword ? 'text' : 'password'}
+                placeholder="Senha para encriptar seus dados..."
+                className="bg-background border border-border text-foreground pl-3 pr-10 py-1.5 rounded-xl text-xs font-semibold focus:border-primary focus:outline-none w-full h-10 transition-colors"
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+              />
+              <button
+                type="button"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                onClick={() => setShowDrivePassword(!showDrivePassword)}
+              >
+                {showDrivePassword ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-1">
+            {/* Sincronização Automática */}
+            <div className="flex items-center gap-2">
+              <input
+                id="auto-sync-check"
+                type="checkbox"
+                className="w-4 h-4 accent-primary cursor-pointer rounded-md"
+                checked={autoSyncEnabled}
+                onChange={(e) => setAutoSyncEnabled(e.target.checked)}
+              />
+              <label htmlFor="auto-sync-check" className="text-[11px] text-muted-foreground font-semibold cursor-pointer select-none">
+                Sincronizar ao iniciar o aplicativo
+              </label>
+            </div>
+
+            {/* Salvar credenciais */}
+            <Button
+              size="sm"
+              className="w-full sm:w-auto bg-primary hover:bg-primary/95 text-zinc-50 font-bold h-9 text-xs rounded-xl cursor-pointer"
+              onClick={handleSaveSyncCredentials}
+              disabled={!clientIdInput || !passwordInput}
+            >
+              Salvar Credenciais
+            </Button>
+          </div>
+        </div>
+
+        {/* Status de Sincronização */}
+        {driveClientId && drivePassword && (
+          <div className="border-t border-border/60 pt-3 mt-3 space-y-3 animate-in fade-in duration-200">
+            <div className="flex items-center justify-between text-[10px] font-semibold text-muted-foreground">
+              <span>Status: <strong className="text-emerald-500 font-bold">Conectado / Configurado</strong></span>
+              <span>Último Sync: <strong className="text-foreground">{lastSyncTime ? new Date(lastSyncTime).toLocaleString('pt-BR') : 'Nunca'}</strong></span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <Button
+                variant="outline"
+                className="border-primary/20 bg-primary/5 hover:bg-primary hover:text-zinc-50 text-primary font-bold cursor-pointer h-10 text-xs rounded-xl gap-2 justify-center transition-all duration-150"
+                onClick={() => handleDriveSync()}
+                disabled={isSyncing}
+              >
+                <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} /> 
+                {isSyncing ? 'Sincronizando...' : 'Sincronizar Agora'}
+              </Button>
+              
+              <Button
+                variant="ghost"
+                className="border border-border hover:bg-muted text-foreground font-semibold cursor-pointer h-10 text-xs rounded-xl gap-1.5 justify-center transition-all duration-150"
+                onClick={() => handleDriveSync('upload')}
+                disabled={isSyncing}
+                title="Subir base de dados local sobrescrevendo a nuvem"
+              >
+                <Upload size={12} /> Forçar Upload
+              </Button>
+
+              <Button
+                variant="ghost"
+                className="border border-border hover:bg-muted text-foreground font-semibold cursor-pointer h-10 text-xs rounded-xl gap-1.5 justify-center transition-all duration-150"
+                onClick={() => handleDriveSync('download')}
+                disabled={isSyncing}
+                title="Baixar base de dados da nuvem sobrescrevendo a local"
+              >
+                <Download size={12} /> Forçar Download
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Modal Ajuda do Drive Client ID */}
+      <Dialog open={showDriveHelp} onOpenChange={setShowDriveHelp}>
+        <DialogContent className="sm:max-w-[500px] rounded-2xl bg-card border border-border text-foreground p-6 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-black tracking-tight flex items-center gap-1.5 text-foreground">
+              <Cloud className="text-primary animate-bounce h-5 w-5" size={18} /> Configurar Sincronização Google Drive
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground font-medium">
+              Como criar seu Google OAuth Client ID gratuito em 2 minutos.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3.5 text-xs text-muted-foreground leading-relaxed pt-2">
+            <p>Como o Memorize é um aplicativo que roda totalmente no seu dispositivo (local-first), você precisa criar suas credenciais no Google para que possamos nos conectar de forma segura:</p>
+            <ol className="list-decimal pl-5 space-y-2 font-medium">
+              <li>Acesse o <a href="https://console.cloud.google.com/" target="_blank" rel="noreferrer" className="text-primary hover:underline font-extrabold">Google Cloud Console</a> e faça login.</li>
+              <li>Crie um novo projeto (ex: <code className="bg-muted px-1.5 py-0.5 rounded font-mono font-bold text-foreground">Memorize PWA</code>).</li>
+              <li>No menu lateral, vá em **Tela de consentimento OAuth** (OAuth consent screen). Selecione o tipo de usuário <strong className="text-foreground">Externo</strong> (ou Interno se estiver usando GSuite).</li>
+              <li>Preencha apenas o nome do app, email de suporte e email do desenvolvedor. Salve e continue até o final.</li>
+              <li>Vá na aba <strong className="text-foreground">Credenciais</strong> (Credentials). Clique em <strong className="text-foreground">+ Criar Credenciais</strong> e escolha <strong className="text-foreground">ID do cliente OAuth</strong>.</li>
+              <li>Selecione Tipo de Aplicativo: <strong className="text-foreground">Aplicativo Web</strong> (Web Application).</li>
+              <li>Em **Origens autorizadas do JavaScript** (Authorized JavaScript origins), adicione a URL onde você usa o app.
+                <ul className="list-disc pl-5 mt-1 text-[11px] text-muted-foreground/85">
+                  <li>Se estiver testando localmente: <code className="bg-muted px-1 rounded font-mono text-[10px] font-bold text-foreground">http://localhost:5173</code></li>
+                  <li>Se já estiver hospedado: adicione o domínio do seu site.</li>
+                </ul>
+              </li>
+              <li>Clique em **Criar** e copie o **ID do cliente** (Client ID) exibido na tela.</li>
+            </ol>
+            <p className="text-[11px] bg-amber-500/10 text-amber-600 dark:text-amber-500 p-2.5 rounded-xl border border-amber-500/15">
+              ⚠️ <strong>Cuidado:</strong> Guarde bem a sua <strong>Senha de Criptografia</strong>. Todos os dados salvos no Drive serão criptografados e apenas esta senha poderá decifrá-los. Se você perder a senha, não poderá recuperar os backups em um novo dispositivo.
+            </p>
+          </div>
+
+          <DialogFooter className="pt-4 border-t border-border/40">
+            <Button
+              className="w-full bg-primary hover:bg-primary/95 text-zinc-50 font-bold h-10 rounded-xl cursor-pointer"
+              onClick={() => setShowDriveHelp(false)}
+            >
+              Entendido
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="bg-card border border-border rounded-2xl p-5 space-y-3 shadow-sm">
         <div className="text-[10px] text-primary font-bold uppercase tracking-wider">

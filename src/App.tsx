@@ -47,6 +47,11 @@ import { getTagColors } from './utils/tagColors';
 // Utilitários
 import { setupNotifications, requestNotificationPermission, getNotificationPermission, clearAppBadge } from './utils/notifications';
 
+// Sincronização e Criptografia com Google Drive
+import { requestAccessToken, findBackupFile, downloadBackupFile, createBackupFile, updateBackupFile } from './utils/drive';
+import { encryptData, decryptData } from './utils/crypto';
+import { exportDatabase, performMergeSync } from './utils/sync';
+
 // Componentes Shadcn UI
 import { Button } from './components/ui/button';
 import { Sheet, SheetContent } from './components/ui/sheet';
@@ -182,6 +187,33 @@ function App() {
   useEffect(() => {
     localStorage.setItem('memorize_daily_goal', dailyGoal.toString());
   }, [dailyGoal]);
+
+  // --- ESTADOS DE SINCRONIZAÇÃO GOOGLE DRIVE ---
+  const [driveClientId, setDriveClientId] = useState<string>(() => {
+    return localStorage.getItem('memorize_sync_client_id') || '';
+  });
+  const [drivePassword, setDrivePassword] = useState<string>(() => {
+    return localStorage.getItem('memorize_sync_password') || '';
+  });
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState<boolean>(() => {
+    return localStorage.getItem('memorize_auto_sync') === 'true';
+  });
+  const [lastSyncTime, setLastSyncTime] = useState<number>(() => {
+    return Number(localStorage.getItem('memorize_last_sync_time')) || 0;
+  });
+  const [driveAccessToken, setDriveAccessToken] = useState<string>('');
+
+  useEffect(() => {
+    localStorage.setItem('memorize_sync_client_id', driveClientId);
+  }, [driveClientId]);
+
+  useEffect(() => {
+    localStorage.setItem('memorize_sync_password', drivePassword);
+  }, [drivePassword]);
+
+  useEffect(() => {
+    localStorage.setItem('memorize_auto_sync', autoSyncEnabled.toString());
+  }, [autoSyncEnabled]);
 
   // --- ESTADOS DE SESSÃO CRAM (REFORÇO) ---
   const [cramSessionCards, setCramSessionCards] = useState<Card[] | null>(null);
@@ -783,14 +815,117 @@ function App() {
     toast.success('Cards importados com sucesso!');
   };
 
-  // --- SINCRONIZAÇÃO ANKI SIMULADA ---
-  const handleSync = () => {
+  // --- SINCRONIZAÇÃO GOOGLE DRIVE REAL ---
+  const handleDriveSync = async (forceMode?: 'upload' | 'download') => {
+    if (!driveClientId) {
+      toast.error('Google Client ID não configurado nas opções.');
+      return;
+    }
+    if (!drivePassword) {
+      toast.error('Senha de criptografia não configurada nas opções.');
+      return;
+    }
+
     setIsSyncing(true);
-    setTimeout(() => {
+    try {
+      let token = driveAccessToken;
+      if (!token) {
+        token = await requestAccessToken(driveClientId);
+        setDriveAccessToken(token);
+      }
+
+      const fileInfo = await findBackupFile(token);
+
+      if (forceMode === 'upload') {
+        const localExport = await exportDatabase();
+        const envelope = await encryptData(JSON.stringify(localExport), drivePassword);
+        if (fileInfo) {
+          await updateBackupFile(token, fileInfo.id, envelope);
+        } else {
+          await createBackupFile(token, envelope);
+        }
+        const now = Date.now();
+        setLastSyncTime(now);
+        localStorage.setItem('memorize_last_sync_time', now.toString());
+        toast.success('Upload completo concluído. Dados locais salvos no Google Drive!');
+        return;
+      }
+
+      if (forceMode === 'download') {
+        if (!fileInfo) {
+          throw new Error('Nenhum backup encontrado no Google Drive para baixar.');
+        }
+        const envelope = await downloadBackupFile(token, fileInfo.id);
+        const decryptedStr = await decryptData(envelope, drivePassword);
+        const remoteData = JSON.parse(decryptedStr);
+        
+        await performMergeSync(remoteData);
+        
+        const now = Date.now();
+        setLastSyncTime(now);
+        localStorage.setItem('memorize_last_sync_time', now.toString());
+        toast.success('Download completo concluído. Dados locais substituídos!');
+        setTimeout(() => window.location.reload(), 1000);
+        return;
+      }
+
+      // Modo Padrão: Mesclagem Inteligente de Duas Vias
+      if (!fileInfo) {
+        const localExport = await exportDatabase();
+        const envelope = await encryptData(JSON.stringify(localExport), drivePassword);
+        await createBackupFile(token, envelope);
+        const now = Date.now();
+        setLastSyncTime(now);
+        localStorage.setItem('memorize_last_sync_time', now.toString());
+        toast.success('Primeiro backup criptografado criado no Google Drive!');
+      } else {
+        const envelope = await downloadBackupFile(token, fileInfo.id);
+        const decryptedStr = await decryptData(envelope, drivePassword);
+        const remoteData = JSON.parse(decryptedStr);
+
+        await performMergeSync(remoteData);
+
+        const mergedExport = await exportDatabase();
+        const newEnvelope = await encryptData(JSON.stringify(mergedExport), drivePassword);
+        await updateBackupFile(token, fileInfo.id, newEnvelope);
+
+        const now = Date.now();
+        setLastSyncTime(now);
+        localStorage.setItem('memorize_last_sync_time', now.toString());
+        toast.success('Sincronização com nuvem realizada com sucesso!');
+        
+        setTimeout(() => window.location.reload(), 1000);
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast.error('Erro na sincronização: ' + err.message);
+    } finally {
       setIsSyncing(false);
-      toast.success('Sincronização concluída! Todos os baralhos, cartões e revisões locais estão 100% atualizados.');
-    }, 800);
+    }
   };
+
+  // --- SINCRONIZAÇÃO GERAL (BOTÃO HEADER) ---
+  const handleSync = () => {
+    if (driveClientId && drivePassword) {
+      handleDriveSync();
+    } else {
+      setIsSyncing(true);
+      setTimeout(() => {
+        setIsSyncing(false);
+        toast.success('Sincronização simulada com sucesso! Configure seu Google Drive nas opções para backup real.');
+      }, 800);
+    }
+  };
+
+  // --- AUTO SINCRONIZAÇÃO NO INÍCIO ---
+  useEffect(() => {
+    if (autoSyncEnabled && driveClientId && drivePassword) {
+      const timer = setTimeout(() => {
+        handleDriveSync();
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, []);
 
   // --- FLUXO NAVEGAÇÃO SIDEBAR ---
   const handleNavigateFromSidebar = (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation') => {
@@ -1518,6 +1653,17 @@ function App() {
                 presets={presets}
                 onSavePreset={handleSavePreset}
                 onDeletePreset={handleDeletePreset}
+                
+                // Google Drive Sync props
+                driveClientId={driveClientId}
+                setDriveClientId={setDriveClientId}
+                drivePassword={drivePassword}
+                setDrivePassword={setDrivePassword}
+                autoSyncEnabled={autoSyncEnabled}
+                setAutoSyncEnabled={setAutoSyncEnabled}
+                lastSyncTime={lastSyncTime}
+                isSyncing={isSyncing}
+                handleDriveSync={handleDriveSync}
               />
             )}
 
