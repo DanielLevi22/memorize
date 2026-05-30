@@ -70,6 +70,8 @@ const stripHtmlTags = (str: string) => {
   }
 };
 
+const DRIVE_CLIENT_ID = '754580033922-j6fhjnrhe8gr1c0olic52tkcjp12j70s.apps.googleusercontent.com';
+
 function App() {
   // --- ESTADO DE TEMA (CLARO/ESCURO) ---
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -238,9 +240,6 @@ function App() {
   }, [dailyGoal]);
 
   // --- ESTADOS DE SINCRONIZAÇÃO GOOGLE DRIVE ---
-  const [driveClientId, setDriveClientId] = useState<string>(() => {
-    return localStorage.getItem('memorize_sync_client_id') || '754580033922-j6fhjnrhe8gr1c0olic52tkcjp12j70s.apps.googleusercontent.com';
-  });
   const [autoSyncEnabled, setAutoSyncEnabled] = useState<boolean>(() => {
     return localStorage.getItem('memorize_auto_sync') === 'true';
   });
@@ -256,10 +255,6 @@ function App() {
   const [passwordPromptInput, setPasswordPromptInput] = useState('');
   const [pendingSyncMode, setPendingSyncMode] = useState<'upload' | 'download' | undefined>(undefined);
   const [showPromptPassword, setShowPromptPassword] = useState(false);
-
-  useEffect(() => {
-    localStorage.setItem('memorize_sync_client_id', driveClientId);
-  }, [driveClientId]);
 
   useEffect(() => {
     localStorage.setItem('memorize_auto_sync', autoSyncEnabled.toString());
@@ -874,8 +869,8 @@ function App() {
 
   // --- SINCRONIZAÇÃO GOOGLE DRIVE REAL ---
   const handleDriveSync = async (forceMode?: 'upload' | 'download', password?: string) => {
-    if (!driveClientId) {
-      toast.error('Google Client ID não configurado nas opções.');
+    if (!DRIVE_CLIENT_ID) {
+      toast.error('Google Client ID não configurado.');
       return;
     }
     if (!password) {
@@ -893,7 +888,7 @@ function App() {
       if (!token) {
         setSyncProgress(15);
         setSyncStatusMessage('Conectando ao Google OAuth...');
-        token = await requestAccessToken(driveClientId);
+        token = await requestAccessToken(DRIVE_CLIENT_ID);
         setDriveAccessToken(token);
         
         try {
@@ -1045,7 +1040,7 @@ function App() {
 
   // --- SINCRONIZAÇÃO GERAL (BOTÃO HEADER) ---
   const handleSync = () => {
-    if (driveClientId) {
+    if (DRIVE_CLIENT_ID) {
       handleDriveSync();
     } else {
       setIsSyncing(true);
@@ -1074,7 +1069,7 @@ function App() {
 
   // --- AUTO SINCRONIZAÇÃO NO INÍCIO ---
   useEffect(() => {
-    if (autoSyncEnabled && driveClientId) {
+    if (autoSyncEnabled && DRIVE_CLIENT_ID) {
       const timer = setTimeout(() => {
         handleDriveSync();
       }, 2000);
@@ -1679,7 +1674,7 @@ function App() {
                 onClick={handleSync}
                 disabled={isSyncing}
                 title={
-                  driveClientId 
+                  DRIVE_CLIENT_ID 
                     ? `Sincronização na Nuvem ativa (Google Drive)${lastSyncTime ? `\nÚltimo Sync: ${new Date(lastSyncTime).toLocaleString('pt-BR')}` : ''}`
                     : 'Sincronizar localmente (Configure o Google Drive nas opções para backup na nuvem)'
                 }
@@ -1691,7 +1686,7 @@ function App() {
                   </>
                 ) : (
                   <>
-                    {driveClientId ? (
+                    {DRIVE_CLIENT_ID ? (
                       <Cloud size={13} className="text-primary animate-pulse" />
                     ) : (
                       <RefreshCw size={12} />
@@ -1861,8 +1856,7 @@ function App() {
                 onDeletePreset={handleDeletePreset}
                 
                 // Google Drive Sync props
-                driveClientId={driveClientId}
-                setDriveClientId={setDriveClientId}
+                driveClientId={DRIVE_CLIENT_ID}
                 autoSyncEnabled={autoSyncEnabled}
                 setAutoSyncEnabled={setAutoSyncEnabled}
                 lastSyncTime={lastSyncTime}

@@ -45,7 +45,6 @@ interface SettingsPageProps {
 
   // Google Drive Sync
   driveClientId: string;
-  setDriveClientId: (id: string) => void;
   autoSyncEnabled: boolean;
   setAutoSyncEnabled: (v: boolean) => void;
   lastSyncTime: number;
@@ -86,7 +85,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   
   // Google Drive Sync props
   driveClientId,
-  setDriveClientId: _setDriveClientId,
   autoSyncEnabled,
   setAutoSyncEnabled,
   lastSyncTime,
@@ -101,12 +99,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const [localApiKey, setLocalApiKey] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [showDriveHelp, setShowDriveHelp] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [tempClientId, setTempClientId] = useState(driveClientId);
-
-  useEffect(() => {
-    setTempClientId(driveClientId);
-  }, [driveClientId]);
 
   // Available theme accent colors
   const ACCENT_COLORS = [
@@ -1348,62 +1340,17 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         <div className="space-y-3 pt-1">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-1">
             {/* Sincronização Automática */}
-            <div className="flex flex-col gap-3 w-full">
-              <div className="flex items-center gap-2">
-                <input
-                  id="auto-sync-check"
-                  type="checkbox"
-                  className="w-4 h-4 accent-primary cursor-pointer rounded-md"
-                  checked={autoSyncEnabled}
-                  onChange={(e) => setAutoSyncEnabled(e.target.checked)}
-                />
-                <label htmlFor="auto-sync-check" className="text-[11px] text-muted-foreground font-semibold cursor-pointer select-none">
-                  Sincronizar ao iniciar o aplicativo
-                </label>
-              </div>
-
-              {/* Opções Avançadas (Client ID personalizado) */}
-              <div className="border-t border-border/40 pt-2.5 mt-1">
-                <button
-                  type="button"
-                  className="text-[10px] font-extrabold text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1 transition-colors select-none"
-                  onClick={() => setShowAdvanced(!showAdvanced)}
-                >
-                  {showAdvanced ? '⚙️ Ocultar Configurações Avançadas' : '⚙️ Mostrar Configurações Avançadas'}
-                </button>
-                
-                {showAdvanced && (
-                  <div className="space-y-3 pt-3 animate-in slide-in-from-top-1 duration-150">
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                        Google Client ID Personalizado
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          placeholder="Seu Google Client ID..."
-                          className="bg-background border border-border text-foreground px-3 py-1.5 rounded-xl text-xs font-semibold focus:border-primary focus:outline-none flex-1 h-9"
-                          value={tempClientId}
-                          onChange={(e) => setTempClientId(e.target.value)}
-                        />
-                        <Button
-                          variant="outline"
-                          className="h-9 px-3 border border-border bg-background hover:bg-muted text-foreground text-xs font-bold rounded-xl cursor-pointer"
-                          onClick={() => {
-                            _setDriveClientId(tempClientId.trim() || '754580033922-j6fhjnrhe8gr1c0olic52tkcjp12j70s.apps.googleusercontent.com');
-                            toast.success('Client ID de Sincronização atualizado com sucesso!');
-                          }}
-                        >
-                          Salvar
-                        </Button>
-                      </div>
-                      <p className="text-[9px] text-muted-foreground leading-normal">
-                        Necessário se você estiver rodando o aplicativo em outro domínio ou porta local (evita erro de <code className="bg-muted px-1 py-0.5 rounded text-[8px] font-mono border border-border">origin_mismatch</code>). Deixe em branco para usar o ID padrão do desenvolvedor.
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
+            <div className="flex items-center gap-2">
+              <input
+                id="auto-sync-check"
+                type="checkbox"
+                className="w-4 h-4 accent-primary cursor-pointer rounded-md"
+                checked={autoSyncEnabled}
+                onChange={(e) => setAutoSyncEnabled(e.target.checked)}
+              />
+              <label htmlFor="auto-sync-check" className="text-[11px] text-muted-foreground font-semibold cursor-pointer select-none">
+                Sincronizar ao iniciar o aplicativo
+              </label>
             </div>
           </div>
         </div>
