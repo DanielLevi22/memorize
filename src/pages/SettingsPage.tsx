@@ -85,7 +85,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   
   // Google Drive Sync props
   driveClientId,
-  setDriveClientId,
+  setDriveClientId: _setDriveClientId,
   drivePassword,
   setDrivePassword,
   autoSyncEnabled,
@@ -101,22 +101,17 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [showDrivePassword, setShowDrivePassword] = useState(false);
   const [showDriveHelp, setShowDriveHelp] = useState(false);
-  const [clientIdInput, setClientIdInput] = useState(driveClientId);
-  const [passwordInput, setPasswordInput] = useState(drivePassword);
-
-  // Sincronizar inputs locais com props externas
-  useEffect(() => {
-    setClientIdInput(driveClientId);
-  }, [driveClientId]);
+  const [passwordInput, setPasswordInput] = useState('');
 
   useEffect(() => {
-    setPasswordInput(drivePassword);
+    setPasswordInput('');
   }, [drivePassword]);
 
   const handleSaveSyncCredentials = () => {
-    setDriveClientId(clientIdInput.trim());
-    setDrivePassword(passwordInput);
-    toast.success('Configurações de Sincronização salvas com sucesso!');
+    if (passwordInput.trim()) {
+      setDrivePassword(passwordInput);
+      toast.success('Configurações de Sincronização salvas com sucesso!');
+    }
   };
 
   // Available theme accent colors
@@ -1367,7 +1362,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             <div className="relative">
               <input
                 type={showDrivePassword ? 'text' : 'password'}
-                placeholder="Senha para encriptar seus dados..."
+                placeholder={drivePassword ? '•••••••• (Senha Salva - Digite para alterar)' : 'Senha para encriptar seus dados...'}
                 className="bg-background border border-border text-foreground pl-3 pr-10 py-1.5 rounded-xl text-xs font-semibold focus:border-primary focus:outline-none w-full h-10 transition-colors"
                 value={passwordInput}
                 onChange={(e) => setPasswordInput(e.target.value)}
