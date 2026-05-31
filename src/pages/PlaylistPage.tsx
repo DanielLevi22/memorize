@@ -1009,22 +1009,10 @@ Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", 
     }
   }, [progress, activeTranscriptionTrack]);
 
-  // Auto-scroll active line in view (smooth centered inside the scroll container only)
+  // Auto-scroll active line in view
   useEffect(() => {
-    if (activeLineRef.current && scrollContainerRef.current) {
-      const container = scrollContainerRef.current;
-      const element = activeLineRef.current;
-      
-      const containerHeight = container.clientHeight;
-      const elementHeight = element.offsetHeight;
-      const elementTop = element.offsetTop;
-      
-      const targetScrollTop = elementTop - (containerHeight / 2) + (elementHeight / 2);
-      
-      container.scrollTo({
-        top: targetScrollTop,
-        behavior: 'smooth'
-      });
+    if (activeLineRef.current) {
+      activeLineRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }, [activeLineIdx]);
 
