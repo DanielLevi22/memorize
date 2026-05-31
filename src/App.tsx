@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { 
-  Flame, Plus, Sparkles, Menu, User, 
+  Flame, Plus, Sparkles, Menu, User, Target,
   Search, Settings, Sun, Moon,
   ChevronLeft, LayoutDashboard, TrendingUp, ClipboardList,
   BookOpen, Info, MessageSquare, Timer, RefreshCw, Cloud, Headphones,
@@ -28,6 +28,7 @@ import { HistoryPage } from './pages/HistoryPage';
 import { ReadingPage } from './pages/ReadingPage';
 import { ConversationPage } from './pages/ConversationPage';
 import { PlaylistPage } from './pages/PlaylistPage';
+import { CefrPage } from './pages/CefrPage';
 import { Toaster, toast } from 'sonner';
 
 // Componentes do Projeto
@@ -92,13 +93,13 @@ function App() {
   // --- ESTADO DA SIDEBAR E NAVEGAÇÃO INTERNA ---
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDesktopSidebarOpen, setIsDesktopSidebarOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr'>('dashboard');
   const [guideInitialTab, setGuideInitialTab] = useState<'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math'>('overview');
   const [searchTerm, setSearchTerm] = useState('');
   const [isPomodoroOpen, setIsPomodoroOpen] = useState(false);
 
   const handleSetActiveTab = (
-    tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist',
+    tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr',
     subTab?: 'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math'
   ) => {
     setActiveTab(tab);
@@ -1079,7 +1080,7 @@ function App() {
   }, []);
 
   // --- FLUXO NAVEGAÇÃO SIDEBAR ---
-  const handleNavigateFromSidebar = (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist') => {
+  const handleNavigateFromSidebar = (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr') => {
     setActiveTab(tab);
     setGuideInitialTab('overview');
     setCurrentView('dashboard');
@@ -1333,6 +1334,24 @@ function App() {
             <Button 
               variant="ghost"
               className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
+                activeTab === 'cefr' 
+                  ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+              }`}
+              onClick={() => {
+                setActiveTab('cefr');
+                setCurrentView('dashboard');
+              }}
+            >
+              <div className="flex items-center gap-3">
+                <Target size={16} />
+                <span>Metas CEFR</span>
+              </div>
+            </Button>
+
+            <Button 
+              variant="ghost"
+              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                 activeTab === 'playlist' 
                   ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
@@ -1555,6 +1574,21 @@ function App() {
                     <div className="flex items-center gap-3">
                       <TrendingUp size={16} />
                       <span>Estatísticas</span>
+                    </div>
+                  </Button>
+
+                  <Button 
+                    variant="ghost"
+                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
+                      activeTab === 'cefr' 
+                        ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+                    }`}
+                    onClick={() => handleNavigateFromSidebar('cefr')}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Target size={16} />
+                      <span>Metas CEFR</span>
                     </div>
                   </Button>
 
@@ -1856,6 +1890,10 @@ function App() {
                 userName={userName}
                 userPhoto={userPhoto}
               />
+            )}
+
+            {activeTab === 'cefr' && (
+              <CefrPage geminiApiKey={geminiApiKey} />
             )}
 
             {activeTab === 'settings' && (
