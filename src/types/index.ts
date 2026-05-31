@@ -68,6 +68,7 @@ export interface Card {
   noteId?: string; // ID da Nota de origem
   clozeIndex?: number; // Índice c1, c2, etc (se Cloze)
   cardType?: 'forward' | 'reversed' | 'listening'; // Identificador de direção
+  cefrLevel?: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
 
   createdAt: number;
   updatedAt: number;

@@ -1,7 +1,9 @@
-import React from 'react';
-import { Plus, Flame, Trophy, Sparkles } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Plus, Flame, Trophy, Sparkles, Award } from 'lucide-react';
 import { Card as ShadcnCard } from '../components/ui/card';
 import { Progress } from '../components/ui/progress';
+import { db } from '../db/db';
+import { classifyLocal, classifyWithGemini } from '../utils/cefrClassifier';
 
 interface ProfilePageProps {
   streak: number;
@@ -24,6 +26,104 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
   userName,
   userPhoto
 }) => {
+  const [cefrCounts, setCefrCounts] = useState<Record<string, number>>({
+    A1: 0, A2: 0, B1: 0, B2: 0, C1: 0, C2: 0
+  });
+  const [totalLearned, setTotalLearned] = useState(0);
+  const [estimatedLevel, setEstimatedLevel] = useState('Iniciante');
+  const [estimatedLevelCode, setEstimatedLevelCode] = useState('-');
+
+  useEffect(() => {
+    const analyzeCards = async () => {
+      try {
+        const allCards = await db.cards.toArray();
+        // Cards marked as learned (at least 1 success repetition or active interval)
+        const studied = allCards.filter(c => c.repetitions > 0 || c.interval > 0);
+        setTotalLearned(studied.length);
+
+        const counts = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0, C2: 0 };
+        const unclassified: typeof studied = [];
+
+        // 1. Process with cached or local dictionary
+        for (const card of studied) {
+          if (card.cefrLevel) {
+            counts[card.cefrLevel as keyof typeof counts]++;
+          } else {
+            const localLvl = classifyLocal(card.front);
+            if (localLvl) {
+              card.cefrLevel = localLvl;
+              counts[localLvl]++;
+              // Save to cache asynchronously in Dexie
+              await db.cards.update(card.id, { cefrLevel: localLvl });
+            } else {
+              unclassified.push(card);
+            }
+          }
+        }
+
+        // Set counts from local/cached classification first
+        setCefrCounts({ ...counts });
+        updateEstimatedLevelState(counts);
+
+        // 2. Background query for unclassified cards via Gemini (if API Key is available)
+        const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
+        if (geminiApiKey.trim() && unclassified.length > 0) {
+          // Take first 20 unclassified cards to avoid huge prompts
+          const batch = unclassified.slice(0, 20);
+          const wordsToClassify = batch.map(c => c.front.toLowerCase());
+          
+          const resolvedMap = await classifyWithGemini(wordsToClassify, geminiApiKey);
+          
+          let updatedAny = false;
+          for (const card of batch) {
+            const wordKey = card.front.toLowerCase();
+            const resolvedLvl = resolvedMap[wordKey];
+            if (resolvedLvl) {
+              card.cefrLevel = resolvedLvl;
+              counts[resolvedLvl as keyof typeof counts]++;
+              await db.cards.update(card.id, { cefrLevel: resolvedLvl });
+              updatedAny = true;
+            }
+          }
+          
+          if (updatedAny) {
+            setCefrCounts({ ...counts });
+            updateEstimatedLevelState(counts);
+          }
+        }
+      } catch (err) {
+        console.error("CEFR calculation error:", err);
+      }
+    };
+
+    analyzeCards();
+  }, []);
+
+  const updateEstimatedLevelState = (counts: Record<string, number>) => {
+    const levels = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+    const descriptions: Record<string, string> = {
+      'A1': 'Iniciante (A1)',
+      'A2': 'Básico (A2)',
+      'B1': 'Intermediário I (B1)',
+      'B2': 'Intermediário II (B2)',
+      'C1': 'Avançado (C1)',
+      'C2': 'Proficiente (C2)',
+      'Iniciante': 'Iniciante'
+    };
+
+    let est = 'Iniciante';
+    // If user has at least 3 cards in a category, that represents their current active ceiling
+    for (let i = levels.length - 1; i >= 0; i--) {
+      const lvl = levels[i];
+      if (counts[lvl] >= 3) {
+        est = lvl;
+        break;
+      }
+    }
+    setEstimatedLevel(descriptions[est]);
+    setEstimatedLevelCode(est === 'Iniciante' ? '-' : est);
+  };
+
   return (
     <div className="space-y-6 w-full max-w-none px-2 md:px-6">
       {/* Perfil Compacto */}
@@ -54,6 +154,99 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
           <div className="flex justify-between text-[10px] text-muted-foreground font-bold">
             <span>{earnedXp % 100} / 100 XP</span>
             <span>Falta {xpNeededForNextLevel} XP para Nív. {userLevel + 1}</span>
+          </div>
+        </ShadcnCard>
+      </div>
+
+      {/* Nível de Proficiência CEFR */}
+      <div className="max-w-5xl mx-auto space-y-3">
+        <h2 className="font-extrabold text-sm text-foreground tracking-tight flex items-center gap-2">
+          <Award size={16} className="text-primary" /> Proficiência Vocabular (CEFR)
+        </h2>
+
+        <ShadcnCard className="bg-card/45 backdrop-blur-md border-border/60 p-5 rounded-2xl shadow-xl">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+            
+            {/* Bloco de Destaque do Nível */}
+            <div className="flex flex-col items-center justify-center text-center p-4 bg-muted/20 border border-border/30 rounded-xl space-y-2.5 h-full">
+              <span className="text-[9px] font-black uppercase text-muted-foreground tracking-wider">
+                Nível Estimado
+              </span>
+              <div className="w-16 h-16 rounded-full bg-primary/10 border-2 border-primary/20 flex items-center justify-center text-primary font-black text-2xl shadow-inner animate-pulse">
+                {estimatedLevelCode}
+              </div>
+              <div className="space-y-0.5">
+                <p className="text-xs font-black text-foreground">
+                  {estimatedLevel}
+                </p>
+                <p className="text-[9px] text-muted-foreground font-bold">
+                  {totalLearned} frases/termos aprendidos
+                </p>
+              </div>
+            </div>
+
+            {/* Progresso por Categoria CEFR */}
+            <div className="md:col-span-2 space-y-3.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                {/* A1 */}
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[10px] font-bold">
+                    <span className="text-foreground">A1 (Básico I)</span>
+                    <span className="text-muted-foreground">{cefrCounts.A1} cartas</span>
+                  </div>
+                  <Progress value={totalLearned > 0 ? (cefrCounts.A1 / totalLearned) * 100 : 0} className="h-1.5 bg-muted/60" />
+                </div>
+
+                {/* A2 */}
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[10px] font-bold">
+                    <span className="text-foreground">A2 (Básico II)</span>
+                    <span className="text-muted-foreground">{cefrCounts.A2} cartas</span>
+                  </div>
+                  <Progress value={totalLearned > 0 ? (cefrCounts.A2 / totalLearned) * 100 : 0} className="h-1.5 bg-muted/60" />
+                </div>
+
+                {/* B1 */}
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[10px] font-bold">
+                    <span className="text-foreground">B1 (Intermediário I)</span>
+                    <span className="text-muted-foreground">{cefrCounts.B1} cartas</span>
+                  </div>
+                  <Progress value={totalLearned > 0 ? (cefrCounts.B1 / totalLearned) * 100 : 0} className="h-1.5 bg-muted/60" />
+                </div>
+
+                {/* B2 */}
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[10px] font-bold">
+                    <span className="text-foreground">B2 (Intermediário II)</span>
+                    <span className="text-muted-foreground">{cefrCounts.B2} cartas</span>
+                  </div>
+                  <Progress value={totalLearned > 0 ? (cefrCounts.B2 / totalLearned) * 100 : 0} className="h-1.5 bg-muted/60" />
+                </div>
+
+                {/* C1 */}
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[10px] font-bold">
+                    <span className="text-foreground">C1 (Avançado I)</span>
+                    <span className="text-muted-foreground">{cefrCounts.C1} cartas</span>
+                  </div>
+                  <Progress value={totalLearned > 0 ? (cefrCounts.C1 / totalLearned) * 100 : 0} className="h-1.5 bg-muted/60" />
+                </div>
+
+                {/* C2 */}
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[10px] font-bold">
+                    <span className="text-foreground">C2 (Avançado II)</span>
+                    <span className="text-muted-foreground">{cefrCounts.C2} cartas</span>
+                  </div>
+                  <Progress value={totalLearned > 0 ? (cefrCounts.C2 / totalLearned) * 100 : 0} className="h-1.5 bg-muted/60" />
+                </div>
+              </div>
+              <p className="text-[8.5px] text-muted-foreground font-semibold leading-normal">
+                * As estimativas são baseadas nas cartas do seu baralho em que você já realizou revisões bem-sucedidas. Cartas novas ou em fase de re-aprendizado não são contabilizadas.
+              </p>
+            </div>
+
           </div>
         </ShadcnCard>
       </div>
