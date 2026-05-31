@@ -290,6 +290,14 @@ export const AppGuideDocs: React.FC<AppGuideDocsProps> = ({ initialTab = 'overvi
                     <span className="font-semibold text-foreground">Cancelar Edição de Frase</span>
                     <kbd className="px-2.5 py-1 bg-muted border border-border rounded-lg font-bold text-[10px] shadow-sm text-foreground">Esc</kbd>
                   </div>
+                  <div className="flex items-center justify-between p-3 border border-border bg-muted/5 rounded-xl text-xs col-span-1 md:col-span-2">
+                    <span className="font-semibold text-foreground">Abrir Ajuda de Pronúncia (IPA / Figurada)</span>
+                    <div className="flex gap-1.5 items-center">
+                      <kbd className="px-2.5 py-1 bg-muted border border-border rounded-lg font-bold text-[10px] shadow-sm text-foreground">Selecionar Texto</kbd>
+                      <span className="text-muted-foreground/60 text-[10px]">ou</span>
+                      <kbd className="px-2.5 py-1 bg-muted border border-border rounded-lg font-bold text-[10px] shadow-sm text-foreground">Botão Direito / Clique Longo (Modo Fala)</kbd>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -364,6 +372,16 @@ export const AppGuideDocs: React.FC<AppGuideDocsProps> = ({ initialTab = 'overvi
                   <span className="text-xs font-bold text-foreground block">🧘 Zen Mode (Modo Foco)</span>
                   <p className="text-xs text-muted-foreground leading-relaxed">
                     Esconda botões administrativos e distrações da tela ao clicar em "Zen Mode". O texto é reformatado com fontes ampliadas e espaçamentos amplos de e-readers, com temas de cores específicos para o conforto visual como **Sépia** ou **Dark Matte** (fundo cinza escuro fosco de baixíssimo contraste).
+                  </p>
+                </div>
+
+                <div className="p-4 bg-muted/10 border border-border rounded-xl space-y-2">
+                  <span className="text-xs font-bold text-foreground block">🗣️ Pronúncia Fonética e Aportuguesada (Balão Flutuante)</span>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Selecione qualquer palavra ou frase curta com o mouse/dedo para abrir o <strong>balão de pronúncia</strong>. Ela exibe a pronúncia oficial <strong>AFI / IPA</strong> (via API de Dicionário) e a <strong>Pronúncia Figurada Aportuguesada</strong> (ex: "compiúter" para <em>computer</em>, gerada via IA Gemini). A partir do balão, você pode adicionar a palavra diretamente como card no Anki.
+                  </p>
+                  <p className="text-[10px] text-muted-foreground leading-relaxed italic">
+                    Nota: No Modo de Treino de Fala (onde o clique do mouse marca a palavra), clique com o <strong>Botão Direito</strong> (ou <strong>pressione e segure</strong> na tela do celular) sobre qualquer palavra para ativar o balão de ajuda.
                   </p>
                 </div>
 

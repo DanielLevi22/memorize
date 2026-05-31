@@ -4,7 +4,7 @@ import {
   ArrowLeft, BookOpen, Plus, Trash2, Play, Pause, Square,
   Copy, Check, ChevronRight, FileText, Volume2, HelpCircle,
   Maximize2, Eye, EyeOff, Folder, FolderOpen, FolderPlus, Edit, Upload, Sparkles, Loader2, ExternalLink,
-  Mic, Keyboard
+  Mic, Keyboard, Pencil
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -21,6 +21,7 @@ interface DraftCard {
 }
 import { ReadingImportModal } from '../components/ReadingImportModal';
 import { KeyboardShortcutCheatsheet } from '../components/KeyboardShortcutCheatsheet';
+import { FloatingSelectionLookup } from '../components/FloatingSelectionLookup';
 import {
   Dialog,
   DialogContent,
@@ -89,6 +90,11 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   const [newCollectionDescription, setNewCollectionDescription] = useState('');
   const [textToDelete, setTextToDelete] = useState<string | null>(null);
 
+  // Reading text editing states
+  const [editingReading, setEditingReading] = useState<{ id: string; title: string; description?: string } | null>(null);
+  const [editReadingTitle, setEditReadingTitle] = useState('');
+  const [editReadingDescription, setEditReadingDescription] = useState('');
+
   // Collection editing states
   const [editingCollection, setEditingCollection] = useState<ReadingCollection | null>(null);
   const [editCollectionTitle, setEditCollectionTitle] = useState('');
@@ -117,6 +123,18 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   const [appendBlockErrorMsg, setAppendBlockErrorMsg] = useState('');
   const [appendBlockPdfBlob, setAppendBlockPdfBlob] = useState<Blob | null>(null);
   const [appendBlockIsPdfLoading, setAppendBlockIsPdfLoading] = useState(false);
+
+  // Suggested Title states
+  const [pdfSuggestedTitle, setPdfSuggestedTitle] = useState<string | null>(null);
+  const [pdfSuggestedTitleInput, setPdfSuggestedTitleInput] = useState('');
+  const [isTitleSuggestionModalOpen, setIsTitleSuggestionModalOpen] = useState(false);
+
+  // Selection phonetic lookup states
+  const readerContainerRef = useRef<HTMLDivElement>(null);
+  const isClickingTooltip = useRef(false);
+  const [lookupText, setLookupText] = useState('');
+  const [lookupPosition, setLookupPosition] = useState({ top: 0, left: 0 });
+  const [isLookupVisible, setIsLookupVisible] = useState(false);
 
   // Search global
   const [searchQuery, setSearchQuery] = useState('');
@@ -262,6 +280,48 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
       setPdfUrl(null);
     }
   }, [selectedText, activeReaderTab]);
+
+  // Monitor text selections for floating pronunciation lookup
+  useEffect(() => {
+    const handleMouseDown = (e: MouseEvent) => {
+      const tooltip = document.getElementById('floating-selection-lookup');
+      if (tooltip && tooltip.contains(e.target as Node)) {
+        isClickingTooltip.current = true;
+      } else {
+        isClickingTooltip.current = false;
+      }
+    };
+
+    const handleSelectionChange = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed) {
+        if (isClickingTooltip.current) return;
+        setIsLookupVisible(false);
+        return;
+      }
+
+      const text = selection.toString().trim();
+      if (text.length > 0 && text.length < 60) {
+        if (readerContainerRef.current && readerContainerRef.current.contains(selection.anchorNode)) {
+          const range = selection.getRangeAt(0);
+          const rect = range.getBoundingClientRect();
+          setLookupText(text);
+          setLookupPosition({
+            top: rect.top + window.scrollY - 8,
+            left: rect.left + rect.width / 2 + window.scrollX
+          });
+          setIsLookupVisible(true);
+        }
+      }
+    };
+
+    document.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('selectionchange', handleSelectionChange);
+    };
+  }, [selectedTextId]);
 
   // Keyboard shortcuts for reading and karaoke
   useEffect(() => {
@@ -573,7 +633,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
     window.speechSynthesis?.cancel();
     const utt = new SpeechSynthesisUtterance(text);
     utt.lang = 'en-US';
-    utt.rate = ttsRate;
+    utt.rate = playbackSpeed * ttsRate;
     if (ttsVoice) {
       const voices = window.speechSynthesis?.getVoices() ?? [];
       const matched = voices.find((v) => v.name === ttsVoice);
@@ -1094,6 +1154,25 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
     }
   };
 
+  const handleOpenEditReading = (e: React.MouseEvent, reading: ReadingText) => {
+    e.stopPropagation();
+    setEditingReading({ id: reading.id, title: reading.title, description: reading.description });
+    setEditReadingTitle(reading.title);
+    setEditReadingDescription(reading.description || '');
+  };
+
+  const handleSaveEditReading = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingReading || !editReadingTitle.trim()) return;
+    await db.readings.update(editingReading.id, {
+      title: editReadingTitle.trim(),
+      description: editReadingDescription.trim() || undefined,
+      updatedAt: Date.now()
+    });
+    toast.success('Texto atualizado!');
+    setEditingReading(null);
+  };
+
   const handleCreateCollection = async () => {
     if (!newCollectionTitle.trim()) return;
     const id = typeof crypto !== 'undefined' && crypto.randomUUID
@@ -1195,10 +1274,54 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
       }
       setAppendBlockOriginalText(text);
       setAppendBlockPdfBlob(file);
+
+      // Tentar obter a primeira linha não vazia do texto
+      const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+      let suggested = '';
+      if (lines.length > 0) {
+        // Encontra a primeira linha com tamanho razoável (ex: entre 3 e 80 caracteres)
+        for (const line of lines) {
+          if (line.length > 2 && line.length < 80) {
+            // Se a linha não começar com números de página ou caracteres de layout típicos
+            if (!/^(page|pág|p\.)\s*\d+/i.test(line) && !/^\d+$/i.test(line)) {
+              suggested = line;
+              break;
+            }
+          }
+        }
+      }
+      if (!suggested) {
+        // Se não encontrar no texto, usa o nome do arquivo limpo
+        const nameWithoutExt = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
+        suggested = nameWithoutExt.replace(/[_-]/g, ' ').trim();
+      }
+
+      if (suggested) {
+        setPdfSuggestedTitle(suggested);
+        setPdfSuggestedTitleInput(suggested);
+        setIsTitleSuggestionModalOpen(true);
+      }
     } catch (err: any) {
       setAppendBlockErrorMsg(`Erro ao processar PDF: ${err.message || 'Erro desconhecido'}`);
     } finally {
       setAppendBlockIsPdfLoading(false);
+    }
+  };
+
+  const handleConfirmSuggestedTitle = async () => {
+    if (!selectedTextId || !pdfSuggestedTitleInput.trim()) return;
+    try {
+      await db.readings.update(selectedTextId, {
+        title: pdfSuggestedTitleInput.trim(),
+        updatedAt: Date.now()
+      });
+      toast.success('Título do texto atualizado com sucesso!');
+    } catch (err: any) {
+      toast.error(`Erro ao atualizar o título: ${err.message}`);
+    } finally {
+      setIsTitleSuggestionModalOpen(false);
+      setPdfSuggestedTitle(null);
+      setPdfSuggestedTitleInput('');
     }
   };
 
@@ -1588,6 +1711,17 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
           onContextMenu={(e) => {
             if (isWordClickable) {
               e.preventDefault();
+              e.stopPropagation();
+              const cleanedWord = word.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"']/g, "").trim();
+              if (cleanedWord) {
+                const rect = e.currentTarget.getBoundingClientRect();
+                setLookupText(cleanedWord);
+                setLookupPosition({
+                  top: rect.top + window.scrollY - 8,
+                  left: rect.left + rect.width / 2 + window.scrollX
+                });
+                setIsLookupVisible(true);
+              }
             }
           }}
         >
@@ -1666,8 +1800,54 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   if (selectedText) {
     const masteredCount = selectedText.lines.filter((l) => l.mastered).length;
 
+    const speedSelector = (
+      <div className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground select-none">
+        <Volume2 size={14} className={
+          isZenMode && zenTheme === 'sepia'
+            ? 'text-[#5c4033]/70'
+            : isZenMode && zenTheme === 'dark-matte'
+            ? 'text-[#cbd5e1]/70'
+            : 'text-muted-foreground'
+        } />
+        <span className={
+          isZenMode && zenTheme === 'sepia'
+            ? 'text-[#5c4033]/70'
+            : isZenMode && zenTheme === 'dark-matte'
+            ? 'text-[#cbd5e1]/70'
+            : 'text-muted-foreground'
+        }>Velocidade:</span>
+        <div className="flex items-center gap-1">
+          {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((speed) => (
+            <button
+              key={speed}
+              onClick={() => setPlaybackSpeed(speed)}
+              className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer transition-all ${
+                playbackSpeed === speed
+                  ? (
+                      isZenMode && zenTheme === 'sepia'
+                        ? 'bg-[#8b5a2b] text-[#f4ecd8]'
+                        : isZenMode && zenTheme === 'dark-matte'
+                        ? 'bg-[#51afef] text-[#1a1c23]'
+                        : 'bg-primary text-primary-foreground'
+                    )
+                  : (
+                      isZenMode && zenTheme === 'sepia'
+                        ? 'hover:bg-[#8b5a2b]/10 text-[#5c4033]/70'
+                        : isZenMode && zenTheme === 'dark-matte'
+                        ? 'hover:bg-white/10 text-[#cbd5e1]/70'
+                        : 'hover:bg-muted text-muted-foreground'
+                    )
+              }`}
+            >
+              {speed}x
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+
     return (
-      <div className="space-y-0 w-full max-w-none">
+      <div ref={readerContainerRef} className="space-y-0 w-full max-w-none relative">
         {/* Header */}
         {!isZenMode && (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-2 md:px-6 py-4 border-b border-border">
@@ -2603,47 +2783,50 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                 {isPronunciationMode ? (
                   /* --- PRONUNCIATION CONTROLS --- */
                   <div className="flex items-center justify-between gap-4 w-full">
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleStartSpeechRecognition()}
-                        className={`p-3 rounded-full transition-colors cursor-pointer shadow-lg ${
-                          isListeningSpeech
-                            ? 'bg-red-600 text-white animate-pulse ring-4 ring-red-600/30'
-                            : (
-                                isZenMode && zenTheme === 'sepia'
-                                  ? 'bg-[#8b5a2b] text-[#f4ecd8] hover:bg-[#8b5a2b]/90'
-                                  : isZenMode && zenTheme === 'dark-matte'
-                                  ? 'bg-[#51afef] text-[#1a1c23] hover:bg-[#51afef]/90'
-                                  : 'bg-primary text-primary-foreground hover:bg-primary/90'
-                              )
-                        }`}
-                        title={isListeningSpeech ? 'Parar microfone' : 'Gravar pronúncia'}
-                      >
-                        <Mic size={18} />
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (activeLineIdx >= 0 && selectedText) {
-                            speakSentenceOrSelection(selectedText.lines[activeLineIdx].original);
-                          }
-                        }}
-                        className={`p-2 rounded-xl transition-colors cursor-pointer border ${
-                          isZenMode && zenTheme === 'sepia'
-                            ? 'border-[#8b5a2b]/30 hover:bg-[#8b5a2b]/10 text-[#5c4033]'
-                            : isZenMode && zenTheme === 'dark-matte'
-                            ? 'border-white/10 hover:bg-white/10 text-[#cbd5e1]'
-                            : 'border-border hover:bg-muted text-muted-foreground hover:text-foreground'
-                        }`}
-                        title="Ouvir frase atual"
-                        disabled={activeLineIdx < 0}
-                      >
-                        <Volume2 size={16} />
-                      </button>
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleStartSpeechRecognition()}
+                          className={`p-3 rounded-full transition-colors cursor-pointer shadow-lg ${
+                            isListeningSpeech
+                              ? 'bg-red-600 text-white animate-pulse ring-4 ring-red-600/30'
+                              : (
+                                  isZenMode && zenTheme === 'sepia'
+                                    ? 'bg-[#8b5a2b] text-[#f4ecd8] hover:bg-[#8b5a2b]/90'
+                                    : isZenMode && zenTheme === 'dark-matte'
+                                    ? 'bg-[#51afef] text-[#1a1c23] hover:bg-[#51afef]/90'
+                                    : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                                )
+                          }`}
+                          title={isListeningSpeech ? 'Parar microfone' : 'Gravar pronúncia'}
+                        >
+                          <Mic size={18} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (activeLineIdx >= 0 && selectedText) {
+                              speakSentenceOrSelection(selectedText.lines[activeLineIdx].original);
+                            }
+                          }}
+                          className={`p-2 rounded-xl transition-colors cursor-pointer border ${
+                            isZenMode && zenTheme === 'sepia'
+                              ? 'border-[#8b5a2b]/30 hover:bg-[#8b5a2b]/10 text-[#5c4033]'
+                              : isZenMode && zenTheme === 'dark-matte'
+                              ? 'border-white/10 hover:bg-white/10 text-[#cbd5e1]'
+                              : 'border-border hover:bg-muted text-muted-foreground hover:text-foreground'
+                          }`}
+                          title="Ouvir frase atual"
+                          disabled={activeLineIdx < 0}
+                        >
+                          <Volume2 size={16} />
+                        </button>
+                      </div>
+                      {speedSelector}
                     </div>
 
-                    <div className="flex-1 text-center hidden sm:flex items-center justify-center gap-1.5 text-xs font-bold text-muted-foreground select-none">
+                    <div className="flex-1 text-center hidden md:flex items-center justify-center gap-1.5 text-xs font-bold text-muted-foreground select-none">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      <span>Modo Pronúncia: leia a frase ativa. Avanço automático ao acertar.</span>
+                      <span>Modo Pronúncia: leia a frase ativa. (Dica: clique com botão direito ou segure para ver a transcrição/tradução)</span>
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -2664,28 +2847,31 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                 ) : readingPracticeMode === 'writing' ? (
                   /* --- WRITING PRACTICE CONTROLS --- */
                   <div className="flex items-center justify-between gap-4 w-full">
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          if (activeLineIdx >= 0 && selectedText) {
-                            speakText(selectedText.lines[activeLineIdx].original);
-                          }
-                        }}
-                        className={`p-3 rounded-full transition-colors cursor-pointer shadow-lg ${
-                          isZenMode && zenTheme === 'sepia'
-                            ? 'bg-[#8b5a2b] text-[#f4ecd8] hover:bg-[#8b5a2b]/90'
-                            : isZenMode && zenTheme === 'dark-matte'
-                            ? 'bg-[#51afef] text-[#1a1c23] hover:bg-[#51afef]/90'
-                            : 'bg-primary text-primary-foreground hover:bg-primary/90'
-                        }`}
-                        title="Ouvir frase atual"
-                        disabled={activeLineIdx < 0}
-                      >
-                        <Volume2 size={18} />
-                      </button>
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            if (activeLineIdx >= 0 && selectedText) {
+                              speakText(selectedText.lines[activeLineIdx].original);
+                            }
+                          }}
+                          className={`p-3 rounded-full transition-colors cursor-pointer shadow-lg ${
+                            isZenMode && zenTheme === 'sepia'
+                              ? 'bg-[#8b5a2b] text-[#f4ecd8] hover:bg-[#8b5a2b]/90'
+                              : isZenMode && zenTheme === 'dark-matte'
+                              ? 'bg-[#51afef] text-[#1a1c23] hover:bg-[#51afef]/90'
+                              : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                          }`}
+                          title="Ouvir frase atual"
+                          disabled={activeLineIdx < 0}
+                        >
+                          <Volume2 size={18} />
+                        </button>
+                      </div>
+                      {speedSelector}
                     </div>
 
-                    <div className="flex-1 text-center hidden sm:flex items-center justify-center gap-1.5 text-xs font-bold text-muted-foreground select-none">
+                    <div className="flex-1 text-center hidden md:flex items-center justify-center gap-1.5 text-xs font-bold text-muted-foreground select-none">
                       <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
                       <span>Modo Escrita: ouça o áudio e digite o que ouviu.</span>
                     </div>
@@ -2739,50 +2925,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                         <Square size={16} />
                       </button>
                     </div>
-
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground">
-                      <Volume2 size={14} className={
-                        isZenMode && zenTheme === 'sepia'
-                          ? 'text-[#5c4033]/70'
-                          : isZenMode && zenTheme === 'dark-matte'
-                          ? 'text-[#cbd5e1]/70'
-                          : 'text-muted-foreground'
-                      } />
-                      <span className={
-                        isZenMode && zenTheme === 'sepia'
-                          ? 'text-[#5c4033]/70'
-                          : isZenMode && zenTheme === 'dark-matte'
-                          ? 'text-[#cbd5e1]/70'
-                          : 'text-muted-foreground'
-                      }>Velocidade:</span>
-                      <div className="flex items-center gap-1">
-                        {[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((speed) => (
-                          <button
-                            key={speed}
-                            onClick={() => setPlaybackSpeed(speed)}
-                            className={`px-2 py-1 rounded-lg text-[10px] font-black cursor-pointer transition-all ${
-                              playbackSpeed === speed
-                                ? (
-                                    isZenMode && zenTheme === 'sepia'
-                                      ? 'bg-[#8b5a2b] text-[#f4ecd8]'
-                                      : isZenMode && zenTheme === 'dark-matte'
-                                      ? 'bg-[#51afef] text-[#1a1c23]'
-                                      : 'bg-primary text-primary-foreground'
-                                  )
-                                : (
-                                    isZenMode && zenTheme === 'sepia'
-                                      ? 'hover:bg-[#8b5a2b]/10 text-[#5c4033]/70'
-                                      : isZenMode && zenTheme === 'dark-matte'
-                                      ? 'hover:bg-white/10 text-[#cbd5e1]/70'
-                                      : 'hover:bg-muted text-muted-foreground'
-                                  )
-                            }`}
-                          >
-                            {speed}x
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                    {speedSelector}
                   </>
                 )}
               </div>
@@ -3336,6 +3479,55 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
           </DialogContent>
         </Dialog>
 
+        {/* Modal de Confirmação de Título Sugerido */}
+        <Dialog open={isTitleSuggestionModalOpen} onOpenChange={(open) => !open && setIsTitleSuggestionModalOpen(false)}>
+          <DialogContent className="bg-card border-border max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-foreground font-black">
+                <Sparkles className="text-primary animate-pulse" size={18} />
+                Usar Título Sugerido?
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 pt-2">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Foi detectado um título no PDF extraído. Deseja atualizar o título do texto atual (<strong>{selectedText?.title}</strong>) para o sugerido?
+              </p>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                  Título Sugerido do PDF
+                </label>
+                <input
+                  type="text"
+                  className="w-full bg-muted border border-border text-foreground px-4 py-2.5 rounded-xl text-sm outline-none focus:border-primary/50 font-semibold transition-colors"
+                  value={pdfSuggestedTitleInput}
+                  onChange={(e) => setPdfSuggestedTitleInput(e.target.value)}
+                  placeholder="Ex: Título do PDF..."
+                />
+              </div>
+              <DialogFooter className="flex justify-end gap-3 pt-3 border-t border-border/40 mt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setIsTitleSuggestionModalOpen(false);
+                    setPdfSuggestedTitle(null);
+                    setPdfSuggestedTitleInput('');
+                  }}
+                  className="rounded-xl font-bold text-xs"
+                >
+                  Manter Atual
+                </Button>
+                <Button
+                  onClick={handleConfirmSuggestedTitle}
+                  disabled={!pdfSuggestedTitleInput.trim()}
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl font-bold text-xs"
+                >
+                  Usar Novo Título
+                </Button>
+              </DialogFooter>
+            </div>
+          </DialogContent>
+        </Dialog>
+
         {activeReaderTab !== 'vitrine' && (
           <KeyboardShortcutCheatsheet
             positionClassName="fixed bottom-20 right-4"
@@ -3348,7 +3540,19 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
               { keys: ['D', 'M'], description: 'Marcar como Dominada' },
               { keys: ['E'], description: 'Editar frase ativa' },
               { keys: ['Esc'], description: 'Cancelar edição' },
+              { keys: ['Seleção de Texto'], description: 'Pronúncia IPA / Figurada' },
+              { keys: ['Botão Direito / Long Press'], description: 'Pronúncia no modo fala' },
             ]}
+          />
+        )}
+
+        {isLookupVisible && lookupText && (
+          <FloatingSelectionLookup
+            text={lookupText}
+            position={lookupPosition}
+            onClose={() => setIsLookupVisible(false)}
+            geminiApiKey={geminiApiKey}
+            readingTitle={selectedText.title}
           />
         )}
       </div>
@@ -3501,11 +3705,18 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
 
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       <button
+                        onClick={(e) => handleOpenEditReading(e, reading)}
+                        className="p-2 rounded-xl hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors cursor-pointer border border-border bg-card shadow-sm"
+                        title="Editar texto"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
                         onClick={(e) => { e.stopPropagation(); handleDeleteReading(reading.id); }}
-                        className="p-2 rounded-xl hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors cursor-pointer border border-border bg-card shadow-sm opacity-0 group-hover:opacity-100"
+                        className="p-2 rounded-xl hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors cursor-pointer border border-border bg-card shadow-sm"
                         title="Excluir texto"
                       >
-                        <Trash2 size={14} />
+                        <Trash2 size={13} />
                       </button>
                       <div className="p-2 rounded-xl text-muted-foreground group-hover:text-primary transition-colors">
                         <ChevronRight size={16} />
@@ -3701,6 +3912,100 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                 {associatedReadingsCount > 0 ? 'Excluir tudo' : 'Excluir pasta'}
               </Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Modal de Edição de Texto */}
+        <Dialog open={!!editingReading} onOpenChange={(open) => !open && setEditingReading(null)}>
+          <DialogContent className="sm:max-w-[460px] bg-card border border-border text-foreground p-6 rounded-2xl shadow-2xl">
+            <DialogHeader>
+              <DialogTitle className="text-base font-black tracking-tight text-foreground flex items-center gap-2">
+                <div className="p-1.5 bg-primary/10 text-primary rounded-lg">
+                  <Pencil size={15} />
+                </div>
+                Editar Texto
+              </DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground font-semibold">
+                Altere o título ou a descrição do texto. O conteúdo das frases não será alterado.
+              </DialogDescription>
+            </DialogHeader>
+
+            <form onSubmit={handleSaveEditReading} className="space-y-4 pt-2">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-muted-foreground block">Título *</label>
+                <input
+                  type="text"
+                  required
+                  value={editReadingTitle}
+                  onChange={(e) => setEditReadingTitle(e.target.value)}
+                  className="w-full bg-muted/40 border border-transparent hover:border-border focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 text-foreground rounded-xl h-10 px-3 text-sm font-semibold transition-all"
+                  placeholder="Título do texto"
+                  autoFocus
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-muted-foreground block">Descrição <span className="font-normal opacity-60">(opcional)</span></label>
+                <textarea
+                  value={editReadingDescription}
+                  onChange={(e) => setEditReadingDescription(e.target.value)}
+                  rows={3}
+                  className="w-full bg-muted/40 border border-transparent hover:border-border focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 text-foreground rounded-xl px-3 py-2.5 text-sm font-semibold transition-all resize-none"
+                  placeholder="Descrição ou anotação sobre este texto..."
+                />
+              </div>
+
+              <DialogFooter className="pt-1 flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEditingReading(null)}
+                  className="w-full sm:w-auto border border-border hover:bg-muted text-muted-foreground hover:text-foreground font-semibold h-10 text-xs rounded-xl cursor-pointer"
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={!editReadingTitle.trim()}
+                  className="w-full sm:w-auto flex-1 bg-primary hover:bg-primary/95 text-primary-foreground font-bold h-10 text-xs rounded-xl cursor-pointer disabled:opacity-50"
+                >
+                  Salvar
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Modal de Confirmação de Exclusão de Texto */}
+        <Dialog open={!!textToDelete} onOpenChange={(open) => !open && setTextToDelete(null)}>
+          <DialogContent className="sm:max-w-[400px] text-center flex flex-col items-center p-6 gap-6">
+            <div className="h-16 w-16 rounded-full bg-destructive/10 flex items-center justify-center text-destructive">
+              <Trash2 size={28} />
+            </div>
+            <DialogHeader className="space-y-2 flex flex-col items-center">
+              <DialogTitle className="text-xl font-extrabold text-foreground tracking-tight">
+                Excluir Texto
+              </DialogTitle>
+              <DialogDescription className="text-sm text-muted-foreground font-medium max-w-[280px]">
+                Tem certeza que deseja apagar este texto? Essa ação é permanente.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex flex-col sm:flex-row w-full gap-3 pt-2">
+              <Button
+                variant="outline"
+                className="flex-1 font-bold h-11 rounded-xl"
+                onClick={() => setTextToDelete(null)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                variant="destructive"
+                className="flex-1 font-bold h-11 rounded-xl shadow-sm"
+                onClick={confirmDeleteReading}
+              >
+                Sim, excluir
+              </Button>
+            </div>
           </DialogContent>
         </Dialog>
       </div>
@@ -4084,6 +4389,67 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
       </Dialog>
 
       {/* Modal de Confirmação de Exclusão de Texto */}
+      {/* Modal de Edição de Texto */}
+      <Dialog open={!!editingReading} onOpenChange={(open) => !open && setEditingReading(null)}>
+        <DialogContent className="sm:max-w-[460px] bg-card border border-border text-foreground p-6 rounded-2xl shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-base font-black tracking-tight text-foreground flex items-center gap-2">
+              <div className="p-1.5 bg-primary/10 text-primary rounded-lg">
+                <Pencil size={15} />
+              </div>
+              Editar Texto
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground font-semibold">
+              Altere o título ou a descrição do texto. O conteúdo das frases não será alterado.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleSaveEditReading} className="space-y-4 pt-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-muted-foreground block">Título *</label>
+              <input
+                type="text"
+                required
+                value={editReadingTitle}
+                onChange={(e) => setEditReadingTitle(e.target.value)}
+                className="w-full bg-muted/40 border border-transparent hover:border-border focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 text-foreground rounded-xl h-10 px-3 text-sm font-semibold transition-all"
+                placeholder="Título do texto"
+                autoFocus
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-muted-foreground block">Descrição <span className="font-normal opacity-60">(opcional)</span></label>
+              <textarea
+                value={editReadingDescription}
+                onChange={(e) => setEditReadingDescription(e.target.value)}
+                rows={3}
+                className="w-full bg-muted/40 border border-transparent hover:border-border focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 text-foreground rounded-xl px-3 py-2.5 text-sm font-semibold transition-all resize-none"
+                placeholder="Descrição ou anotação sobre este texto..."
+              />
+            </div>
+
+            <DialogFooter className="pt-1 flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setEditingReading(null)}
+                className="w-full sm:w-auto border border-border hover:bg-muted text-muted-foreground hover:text-foreground font-semibold h-10 text-xs rounded-xl cursor-pointer"
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={!editReadingTitle.trim()}
+                className="w-full sm:w-auto flex-1 bg-primary hover:bg-primary/95 text-primary-foreground font-bold h-10 text-xs rounded-xl cursor-pointer disabled:opacity-50"
+              >
+                Salvar
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={!!textToDelete} onOpenChange={(open) => !open && setTextToDelete(null)}>
         <DialogContent className="sm:max-w-[400px] text-center flex flex-col items-center p-6 gap-6">
           <div className="h-16 w-16 rounded-full bg-destructive/10 flex items-center justify-center text-destructive">

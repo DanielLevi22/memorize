@@ -17,8 +17,9 @@ import {
   Image as ImageIcon,
   FolderHeart,
   FolderPlus,
-  PlayCircle,
-  Info
+  Info,
+  Pencil,
+  Settings2
 } from 'lucide-react';
 import { db } from '../db/db';
 import type { Playlist, AudioTrack } from '../types';
@@ -40,6 +41,9 @@ export const PlaylistPage: React.FC = () => {
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
+  // playCount tracks how many times the current track has played
+  const [playCount, setPlayCount] = useState(1);
+  // isLooping: global session override — current track repeats forever, ignoring per-track repeatTimes
   const [isLooping, setIsLooping] = useState(false);
   
   // Revokable Object URLs for memory management
@@ -56,10 +60,42 @@ export const PlaylistPage: React.FC = () => {
   const [newTrackTitle, setNewTrackTitle] = useState('');
   const [newTrackDesc, setNewTrackDesc] = useState('');
   const [newTrackFile, setNewFile] = useState<File | null>(null);
+  const [newTrackRepeatTimes, setNewTrackRepeatTimes] = useState<number>(1);
   const [isUploading, setIsUploading] = useState(false);
+
+  // Edit track modal
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editTrack, setEditTrack] = useState<AudioTrack | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDesc, setEditDesc] = useState('');
+  const [editRepeatTimes, setEditRepeatTimes] = useState<number>(1);
+
+  // Generic confirmation modal
+  const [confirmModal, setConfirmModal] = useState<{
+    open: boolean;
+    title: string;
+    description: string;
+    confirmLabel?: string;
+    onConfirm: () => void;
+  }>({
+    open: false,
+    title: '',
+    description: '',
+    onConfirm: () => {}
+  });
+
+  const openConfirm = (title: string, description: string, onConfirm: () => void, confirmLabel = 'Excluir') => {
+    setConfirmModal({ open: true, title, description, confirmLabel, onConfirm });
+  };
+
+  const closeConfirm = () => {
+    setConfirmModal(prev => ({ ...prev, open: false }));
+  };
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const progressIntervalRef = useRef<number | null>(null);
+  // Ref to always read latest isLooping inside audio event closures (avoids stale state)
+  const isLoopingRef = useRef(false);
 
   // Load playlists from DB
   const loadPlaylists = async () => {
@@ -111,6 +147,11 @@ export const PlaylistPage: React.FC = () => {
     };
   }, []);
 
+  // Keep the ref in sync with the state so closures always read current value
+  useEffect(() => {
+    isLoopingRef.current = isLooping;
+  }, [isLooping]);
+
   useEffect(() => {
     if (selectedPlaylist) {
       loadTracks(selectedPlaylist.id);
@@ -150,6 +191,9 @@ export const PlaylistPage: React.FC = () => {
       setIsPlaying(true);
 
       audio.play().catch((err) => {
+        // AbortError = play() foi interrompido por outro play()/pause() — comportamento normal
+        // durante reinício/loop. Não é um erro real, o áudio toca normalmente.
+        if (err?.name === 'AbortError') return;
         console.error('Play error:', err);
         toast.error('Não foi possível reproduzir este áudio.');
         setIsPlaying(false);
@@ -160,13 +204,29 @@ export const PlaylistPage: React.FC = () => {
         setDuration(audio.duration);
       };
 
+      // Reset play count when starting a new track
+      setPlayCount(1);
+
       audio.onended = () => {
-        if (isLooping) {
+        // Global loop override takes priority — reads live value via ref (no stale closure)
+        if (isLoopingRef.current) {
           audio.currentTime = 0;
           audio.play().catch(e => console.warn(e));
-        } else {
-          handleNextTrack(track);
+          return;
         }
+        // Per-track repeatTimes logic
+        const trackRepeat = track.repeatTimes ?? 1;
+        setPlayCount(prev => {
+          const next = prev + 1;
+          if (trackRepeat === 0 || next <= trackRepeat) {
+            audio.currentTime = 0;
+            audio.play().catch(e => console.warn(e));
+            return next;
+          } else {
+            handleNextTrack(track);
+            return 1;
+          }
+        });
       };
 
       progressIntervalRef.current = window.setInterval(() => {
@@ -308,67 +368,60 @@ export const PlaylistPage: React.FC = () => {
   };
 
   // Delete Playlist (Album)
-  const handleDeletePlaylist = async (playlist: Playlist, e: React.MouseEvent) => {
+  const handleDeletePlaylist = (playlist: Playlist, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm(`Deseja realmente excluir o álbum "${playlist.name}"? Isso apagará permanentemente todos os áudios salvos dentro dele.`)) {
-      return;
-    }
-
-    try {
-      // 1. Delete all tracks belonging to this playlist
-      const playlistTracks = await db.audioTracks.where('playlistId').equals(playlist.id).toArray();
-      const trackIds = playlistTracks.map(t => t.id);
-      
-      if (trackIds.length > 0) {
-        await db.audioTracks.bulkDelete(trackIds);
+    openConfirm(
+      `Excluir álbum "${playlist.name}"?`,
+      `Esta ação é permanente e irá apagar o álbum e todos os áudios salvos dentro dele. Não é possível desfazer.`,
+      async () => {
+        try {
+          const playlistTracks = await db.audioTracks.where('playlistId').equals(playlist.id).toArray();
+          const trackIds = playlistTracks.map(t => t.id);
+          if (trackIds.length > 0) await db.audioTracks.bulkDelete(trackIds);
+          await db.playlists.delete(playlist.id);
+          if (currentTrack && trackIds.includes(currentTrack.id)) {
+            cleanupAudio();
+            setCurrentTrack(null);
+            setIsPlaying(false);
+            setProgress(0);
+            setDuration(0);
+          }
+          toast.success('Álbum e suas faixas excluídos.');
+          if (selectedPlaylist?.id === playlist.id) setSelectedPlaylist(null);
+          loadPlaylists();
+        } catch (err) {
+          console.error(err);
+          toast.error('Erro ao excluir álbum.');
+        }
       }
-
-      // 2. Delete the playlist itself
-      await db.playlists.delete(playlist.id);
-
-      // 3. Stop player if it was playing from this playlist
-      if (currentTrack && trackIds.includes(currentTrack.id)) {
-        cleanupAudio();
-        setCurrentTrack(null);
-        setIsPlaying(false);
-        setProgress(0);
-        setDuration(0);
-      }
-
-      toast.success('Álbum e suas faixas excluídos.');
-      
-      // Reload playlists and select the next available one
-      if (selectedPlaylist?.id === playlist.id) {
-        setSelectedPlaylist(null);
-      }
-      
-      loadPlaylists();
-    } catch (err) {
-      console.error(err);
-      toast.error('Erro ao excluir álbum.');
-    }
+    );
   };
 
   // Delete Individual Track
-  const handleDeleteTrack = async (id: string, e: React.MouseEvent) => {
+  const handleDeleteTrack = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    try {
-      if (currentTrack?.id === id) {
-        cleanupAudio();
-        setCurrentTrack(null);
-        setIsPlaying(false);
-        setProgress(0);
-        setDuration(0);
+    const track = tracks.find(t => t.id === id);
+    openConfirm(
+      `Excluir faixa${track ? ` "${track.title}"` : ''}?`,
+      'O arquivo de áudio será removido permanentemente do álbum. Esta ação não pode ser desfeita.',
+      async () => {
+        try {
+          if (currentTrack?.id === id) {
+            cleanupAudio();
+            setCurrentTrack(null);
+            setIsPlaying(false);
+            setProgress(0);
+            setDuration(0);
+          }
+          await db.audioTracks.delete(id);
+          toast.success('Faixa excluída.');
+          if (selectedPlaylist) loadTracks(selectedPlaylist.id);
+        } catch (err) {
+          console.error(err);
+          toast.error('Erro ao excluir faixa de áudio.');
+        }
       }
-      await db.audioTracks.delete(id);
-      toast.success('Faixa excluída.');
-      if (selectedPlaylist) {
-        loadTracks(selectedPlaylist.id);
-      }
-    } catch (e) {
-      console.error(e);
-      toast.error('Erro ao excluir faixa de áudio.');
-    }
+    );
   };
 
   // Upload Track Submit
@@ -388,12 +441,13 @@ export const PlaylistPage: React.FC = () => {
         title: newTrackTitle.trim(),
         description: newTrackDesc.trim() || undefined,
         audioFile: newTrackFile,
+        repeatTimes: 1, // default: play once
         createdAt: Date.now(),
         updatedAt: Date.now()
       };
 
       await db.audioTracks.add(newTrack);
-      toast.success('Áudio adicionado ao álbum com sucesso!');
+      toast.success('Áudio adicionado! Configure as repetições pelo ícone de engrenagem.');
       
       setNewTrackTitle('');
       setNewTrackDesc('');
@@ -408,6 +462,42 @@ export const PlaylistPage: React.FC = () => {
       setIsUploading(false);
     }
   };
+
+  // Open track settings modal
+  const handleOpenTrackSettings = (track: AudioTrack, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditTrack(track);
+    setEditTitle(track.title);
+    setEditDesc(track.description || '');
+    setEditRepeatTimes(track.repeatTimes ?? 1);
+    setIsEditOpen(true);
+  };
+
+  // Save track settings
+  const handleSaveTrackSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editTrack || !editTitle.trim()) return;
+    try {
+      await db.audioTracks.update(editTrack.id, {
+        title: editTitle.trim(),
+        description: editDesc.trim() || undefined,
+        repeatTimes: editRepeatTimes,
+        updatedAt: Date.now()
+      });
+      // If this is the currently playing track, update currentTrack state too
+      if (currentTrack?.id === editTrack.id) {
+        setCurrentTrack(prev => prev ? { ...prev, title: editTitle.trim(), description: editDesc.trim() || undefined, repeatTimes: editRepeatTimes } : prev);
+      }
+      toast.success('Configurações da faixa salvas!');
+      setIsEditOpen(false);
+      setEditTrack(null);
+      if (selectedPlaylist) loadTracks(selectedPlaylist.id);
+    } catch (err) {
+      console.error(err);
+      toast.error('Erro ao salvar configurações.');
+    }
+  };
+
 
   // Helper: Generates beautiful consistent gradient from title string
   const getGradientFromTitle = (title: string) => {
@@ -438,22 +528,23 @@ export const PlaylistPage: React.FC = () => {
           background: transparent;
         }
         .custom-slider::-webkit-slider-runnable-track {
-          background: rgba(255, 255, 255, 0.08);
+          background: linear-gradient(
+            to right,
+            hsl(var(--primary)) var(--slider-fill, 0%),
+            rgba(255, 255, 255, 0.08) var(--slider-fill, 0%)
+          );
           height: 5px;
           border-radius: 9999px;
-          transition: background 0.15s ease;
-        }
-        .custom-slider:hover::-webkit-slider-runnable-track {
-          background: rgba(255, 255, 255, 0.12);
+          transition: none;
         }
         .custom-slider::-webkit-slider-thumb {
           -webkit-appearance: none;
           appearance: none;
           background: hsl(var(--primary));
-          width: 12px;
-          height: 12px;
+          width: 14px;
+          height: 14px;
           border-radius: 9999px;
-          margin-top: -3.5px;
+          margin-top: -4.5px;
           cursor: pointer;
           box-shadow: 0 0 10px hsl(var(--primary) / 0.6);
           transition: transform 0.1s ease, background 0.15s ease;
@@ -467,10 +558,15 @@ export const PlaylistPage: React.FC = () => {
           height: 5px;
           border-radius: 9999px;
         }
+        .custom-slider::-moz-range-progress {
+          background: hsl(var(--primary));
+          height: 5px;
+          border-radius: 9999px;
+        }
         .custom-slider::-moz-range-thumb {
           background: hsl(var(--primary));
-          width: 12px;
-          height: 12px;
+          width: 14px;
+          height: 14px;
           border: none;
           border-radius: 9999px;
           cursor: pointer;
@@ -486,6 +582,13 @@ export const PlaylistPage: React.FC = () => {
         }
         .animate-spin-slow {
           animation: spin-slow 20s linear infinite;
+        }
+        @keyframes spin-record {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        .animate-spin-record {
+          animation: spin-record 4s linear infinite;
         }
       `}} />
 
@@ -578,15 +681,33 @@ export const PlaylistPage: React.FC = () => {
                     >
                       <div className="flex items-center gap-3 min-w-0">
                         {/* Album Art Thumb */}
-                        {coverSrc ? (
-                          <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-border/40 shadow-sm">
-                            <img src={coverSrc} alt={pl.name} className="w-full h-full object-cover" />
-                          </div>
-                        ) : (
-                          <div className={`w-10 h-10 rounded-lg shrink-0 bg-gradient-to-br flex items-center justify-center text-[10px] text-zinc-50 font-black shadow-inner ${getGradientFromTitle(pl.name)}`}>
-                            {pl.name.substring(0, 2).toUpperCase()}
-                          </div>
-                        )}
+                        {/* Vinyl disc or cover art — spins when a track from this album is playing */}
+                        {(() => {
+                          const isThisPlaying = isPlaying && currentTrack?.playlistId === pl.id;
+                          return coverSrc ? (
+                            <div className={`w-10 h-10 rounded-full overflow-hidden shrink-0 border-2 shadow-sm transition-all duration-300 relative ${
+                              isThisPlaying
+                                ? 'border-primary shadow-primary/30 animate-spin-record'
+                                : 'border-border/40'
+                            }`}>
+                              <img src={coverSrc} alt={pl.name} className="w-full h-full object-cover" />
+                              {/* Central hole */}
+                              <div className="absolute inset-0 m-auto w-2 h-2 rounded-full bg-card border border-border/60" style={{width:'8px',height:'8px',top:'50%',left:'50%',transform:'translate(-50%,-50%)'}} />
+                            </div>
+                          ) : (
+                            <div className={`w-10 h-10 rounded-full shrink-0 bg-gradient-to-br flex items-center justify-center text-[10px] text-zinc-50 font-black shadow-inner border-2 relative transition-all duration-300 ${
+                              isThisPlaying
+                                ? `border-primary shadow-primary/30 animate-spin-record ${getGradientFromTitle(pl.name)}`
+                                : `border-transparent ${getGradientFromTitle(pl.name)}`
+                            }`}>
+                              {isThisPlaying ? '' : pl.name.substring(0, 2).toUpperCase()}
+                              {/* Central hole when playing */}
+                              {isThisPlaying && (
+                                <div className="absolute w-2 h-2 rounded-full bg-card border border-white/20" />
+                              )}
+                            </div>
+                          );
+                        })()}
                         
                         <div className="flex flex-col min-w-0">
                           <span className={`text-xs font-extrabold truncate ${isSelected ? 'text-primary' : 'text-foreground'}`}>
@@ -714,11 +835,29 @@ export const PlaylistPage: React.FC = () => {
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2.5 shrink-0">
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {/* Repeat badge */}
+                            {(track.repeatTimes ?? 1) !== 1 && (
+                              <span className="text-[8px] font-black text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
+                                <Repeat size={7} />
+                                {track.repeatTimes === 0 ? '∞' : `${track.repeatTimes}×`}
+                              </span>
+                            )}
+
                             <span className="text-[8px] font-mono font-bold text-muted-foreground bg-muted/60 border border-border/40 px-2 py-0.5 rounded-lg">
                               {(track.audioFile.size / (1024 * 1024)).toFixed(1)} MB
                             </span>
                             
+                            {/* Settings gear button */}
+                            <button
+                              type="button"
+                              onClick={(e) => handleOpenTrackSettings(track, e)}
+                              className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg cursor-pointer transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+                              title="Configurações da faixa"
+                            >
+                              <Settings2 size={12} />
+                            </button>
+
                             <button
                               type="button"
                               onClick={(e) => handleDeleteTrack(track.id, e)}
@@ -727,7 +866,6 @@ export const PlaylistPage: React.FC = () => {
                             >
                               <Trash2 size={12} />
                             </button>
-                            <PlayCircle size={14} className="text-muted-foreground/30 group-hover:text-primary transition-colors" />
                           </div>
                         </div>
                       );
@@ -818,15 +956,34 @@ export const PlaylistPage: React.FC = () => {
 
             {/* Barra de Progresso Customizada (Interativa com Scrubbing) */}
             <div className="w-full space-y-1.5 relative px-1 z-10">
-              <input
-                type="range"
-                min="0"
-                max={duration || 100}
-                value={progress}
-                onChange={(e) => handleScrub(parseFloat(e.target.value))}
-                disabled={!currentTrack}
-                className="w-full h-1.5 rounded-lg appearance-none cursor-pointer outline-none transition-all disabled:opacity-30 custom-slider"
-              />
+              {/* Visual track container */}
+              <div className="relative w-full h-5 flex items-center group">
+                {/* Track background */}
+                <div className="absolute w-full h-[5px] rounded-full bg-white/10" />
+                {/* Fill (progresso) */}
+                <div
+                  className="absolute h-[5px] rounded-full bg-primary pointer-events-none"
+                  style={{ width: duration ? `${Math.min((progress / duration) * 100, 100)}%` : '0%' }}
+                />
+                {/* Thumb */}
+                {currentTrack && (
+                  <div
+                    className="absolute w-3.5 h-3.5 rounded-full bg-primary shadow-lg shadow-primary/60 -translate-x-1/2 pointer-events-none transition-transform group-hover:scale-125"
+                    style={{ left: duration ? `${Math.min((progress / duration) * 100, 100)}%` : '0%' }}
+                  />
+                )}
+                {/* Invisible range input on top para interação nativa */}
+                <input
+                  type="range"
+                  min="0"
+                  max={duration || 100}
+                  value={progress}
+                  step={0.1}
+                  onChange={(e) => handleScrub(parseFloat(e.target.value))}
+                  disabled={!currentTrack}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                />
+              </div>
               <div className="flex items-center justify-between text-[9px] font-mono text-muted-foreground/80 font-bold">
                 <span>{formatTime(progress)}</span>
                 <span className="flex items-center gap-1">
@@ -836,8 +993,24 @@ export const PlaylistPage: React.FC = () => {
               </div>
             </div>
 
+
             {/* Controles de Playback Premium */}
-            <div className="flex items-center justify-center gap-5 w-full relative z-10">
+            <div className="flex items-center justify-center gap-3 w-full relative z-10">
+              {/* Loop toggle — compact, left of skip back */}
+              <button
+                type="button"
+                onClick={() => setIsLooping(prev => !prev)}
+                disabled={!currentTrack}
+                title={isLooping ? 'Desativar loop' : 'Ativar loop (repetir faixa sempre)'}
+                className={`p-2 rounded-xl cursor-pointer transition-all duration-200 disabled:opacity-30 border flex items-center justify-center ${
+                  isLooping
+                    ? 'bg-primary/15 border-primary/40 text-primary shadow-sm shadow-primary/20'
+                    : 'bg-muted/50 hover:bg-muted border-border/40 text-muted-foreground hover:text-primary'
+                }`}
+              >
+                <Repeat size={13} className={isLooping ? 'animate-pulse' : ''} />
+              </button>
+
               <button
                 type="button"
                 onClick={() => handlePrevTrack()}
@@ -867,33 +1040,40 @@ export const PlaylistPage: React.FC = () => {
               >
                 <SkipForward size={15} />
               </button>
-            </div>
 
-            {/* Ajustes de Loop e Reinício */}
-            <div className="grid grid-cols-2 gap-2 w-full pt-3.5 border-t border-border/40 relative z-10">
-              <button
-                type="button"
-                onClick={() => setIsLooping(!isLooping)}
-                disabled={!currentTrack}
-                className={`flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-[9px] font-bold border transition-all duration-200 cursor-pointer ${
-                  isLooping 
-                    ? 'bg-primary/10 border-primary/30 text-primary shadow-sm shadow-primary/5 font-black' 
-                    : 'bg-muted/40 hover:bg-muted border-transparent text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <Repeat size={12} className={isLooping ? 'animate-spin' : ''} /> 
-                {isLooping ? 'Loop Ativo' : 'Repetir Faixa'}
-              </button>
-
+              {/* Reiniciar — compact, right of skip forward */}
               <button
                 type="button"
                 onClick={() => handleScrub(0)}
                 disabled={!currentTrack}
-                className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-[9px] font-bold bg-muted/40 hover:bg-muted border border-transparent text-muted-foreground hover:text-foreground cursor-pointer active:scale-95 transition-all"
+                title="Reiniciar faixa"
+                className="p-2 bg-muted/50 hover:bg-muted border border-border/40 text-muted-foreground hover:text-primary rounded-xl cursor-pointer transition-all duration-200 disabled:opacity-30 flex items-center justify-center"
               >
-                <RotateCcw size={12} /> Reiniciar
+                <RotateCcw size={13} />
               </button>
             </div>
+
+            {/* Status de loop / repetição da faixa atual */}
+            {currentTrack && (
+              <div className="w-full pt-3 border-t border-border/40 relative z-10">
+                {isLooping ? (
+                  <div className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-primary/10 border border-primary/25">
+                    <Repeat size={11} className="text-primary animate-pulse shrink-0" />
+                    <span className="text-[9px] font-black text-primary">Loop ativo — faixa repetindo infinitamente</span>
+                  </div>
+                ) : (() => {
+                  const rt = currentTrack.repeatTimes ?? 1;
+                  return (
+                    <div className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-muted/40 border border-border/30">
+                      <Repeat size={10} className="text-muted-foreground shrink-0" />
+                      <span className="text-[9px] font-semibold text-muted-foreground">
+                        {rt === 0 ? 'Faixa em loop infinito (config. da faixa)' : rt === 1 ? 'Tocando uma vez' : `Repetição ${playCount} de ${rt}`}
+                      </span>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
 
             {/* Seletor de Velocidade */}
             <div className="w-full space-y-1.5 text-left relative pt-1 z-10">
@@ -1159,6 +1339,152 @@ export const PlaylistPage: React.FC = () => {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Modal de Configurações da Faixa */}
+      <Dialog open={isEditOpen} onOpenChange={(open) => { if (!open) { setIsEditOpen(false); setEditTrack(null); } }}>
+        <DialogContent className="sm:max-w-[480px] bg-card border border-border text-foreground p-6 rounded-2xl shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-base font-black tracking-tight text-foreground flex items-center gap-2">
+              <div className="p-1.5 bg-primary/10 text-primary rounded-lg">
+                <Settings2 size={16} />
+              </div>
+              Configurações da Faixa
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground font-semibold">
+              Edite o nome, descrição e quantas vezes esta faixa deve tocar automaticamente antes de avançar.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleSaveTrackSettings} className="space-y-5 pt-3">
+            {/* Título */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-muted-foreground block">Título da Faixa *</label>
+              <Input
+                type="text"
+                required
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                className="bg-muted/40 border-transparent hover:border-border text-foreground focus-visible:bg-background focus-visible:ring-primary/20 focus-visible:border-primary rounded-xl h-10 transition-all text-xs font-semibold"
+              />
+            </div>
+
+            {/* Descrição */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-muted-foreground block">Descrição / Marcador</label>
+              <Input
+                type="text"
+                placeholder="Ex: Podcast de Listening, Aula 5..."
+                value={editDesc}
+                onChange={(e) => setEditDesc(e.target.value)}
+                className="bg-muted/40 border-transparent hover:border-border text-foreground focus-visible:bg-background focus-visible:ring-primary/20 focus-visible:border-primary rounded-xl h-10 transition-all text-xs font-semibold"
+              />
+            </div>
+
+            {/* Repetições */}
+            <div className="space-y-3 p-4 bg-muted/30 border border-border/40 rounded-2xl">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-black text-foreground flex items-center gap-1.5">
+                    <Repeat size={13} className="text-primary" />
+                    Repetições automáticas
+                  </p>
+                  <p className="text-[9px] text-muted-foreground font-semibold mt-0.5">
+                    Quantas vezes esta faixa toca antes de avançar para a próxima
+                  </p>
+                </div>
+                <span className="text-lg font-black text-primary tabular-nums">
+                  {editRepeatTimes === 0 ? '∞' : `${editRepeatTimes}×`}
+                </span>
+              </div>
+
+              {/* Selector de opções */}
+              <div className="grid grid-cols-6 gap-1.5">
+                {[1, 2, 3, 5, 10, 0].map(n => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setEditRepeatTimes(n)}
+                    className={`py-2.5 rounded-xl text-[10px] font-black border transition-all duration-200 cursor-pointer ${
+                      editRepeatTimes === n
+                        ? 'bg-primary text-primary-foreground border-primary shadow-md shadow-primary/20'
+                        : 'bg-muted/60 hover:bg-muted border-border/40 text-muted-foreground hover:text-foreground'
+                    }`}
+                    title={n === 0 ? 'Loop infinito' : `Tocar ${n} vez${n > 1 ? 'es' : ''}`}
+                  >
+                    {n === 0 ? '∞' : `${n}×`}
+                  </button>
+                ))}
+              </div>
+
+              {/* Descrição dinâmica */}
+              <p className="text-[9px] text-center text-muted-foreground font-semibold leading-relaxed">
+                {editRepeatTimes === 0
+                  ? '🔁 A faixa vai repetir infinitamente até você trocar manualmente.'
+                  : editRepeatTimes === 1
+                  ? '▶️ A faixa toca uma vez e avança para a próxima automaticamente.'
+                  : `🔁 A faixa vai tocar ${editRepeatTimes} vezes consecutivas antes de avançar.`}
+              </p>
+            </div>
+
+            <DialogFooter className="pt-1 flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => { setIsEditOpen(false); setEditTrack(null); }}
+                className="w-full sm:w-auto border border-border hover:bg-muted text-muted-foreground hover:text-foreground font-semibold h-10 text-xs rounded-xl cursor-pointer"
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={!editTitle.trim()}
+                className="w-full sm:w-auto flex-1 bg-primary hover:bg-primary/95 text-primary-foreground font-bold h-10 text-xs rounded-xl cursor-pointer disabled:opacity-50"
+              >
+                Salvar Configurações
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Confirmação de Exclusão */}
+      <Dialog open={confirmModal.open} onOpenChange={(open) => { if (!open) closeConfirm(); }}>
+        <DialogContent className="sm:max-w-[420px] bg-card border border-border text-foreground p-6 rounded-2xl shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-base font-black tracking-tight text-foreground flex items-center gap-2">
+              <div className="p-1.5 bg-destructive/10 text-destructive rounded-lg">
+                <Trash2 size={16} />
+              </div>
+              {confirmModal.title}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground font-semibold leading-relaxed pt-1">
+              {confirmModal.description}
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="pt-2 flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={closeConfirm}
+              className="w-full sm:w-auto border border-border hover:bg-muted text-muted-foreground hover:text-foreground font-semibold h-10 text-xs rounded-xl cursor-pointer"
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                confirmModal.onConfirm();
+                closeConfirm();
+              }}
+              className="w-full sm:w-auto flex-1 bg-destructive hover:bg-destructive/90 text-white font-bold h-10 text-xs rounded-xl cursor-pointer shadow-md shadow-destructive/20"
+            >
+              {confirmModal.confirmLabel ?? 'Excluir'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
+
   );
 };

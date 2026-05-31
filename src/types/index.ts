@@ -236,6 +236,8 @@ export interface AudioTrack {
   title: string; // Título da faixa/aula
   description?: string; // Descrição opcional (ex: Aula 1, Podcast, etc.)
   audioFile: Blob; // Arquivo de áudio (MP3/WAV/etc.)
+  repeatTimes?: number; // Quantidade de repetições: 0 = infinito, 1 = 1x (padrão), 2+ = N vezes
   createdAt: number;
   updatedAt: number;
 }
+

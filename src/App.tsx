@@ -1344,7 +1344,7 @@ function App() {
             >
               <div className="flex items-center gap-3">
                 <Headphones size={16} />
-                <span>Playlist Ouvinte</span>
+                <span>Playlist</span>
               </div>
             </Button>
 
@@ -1569,7 +1569,7 @@ function App() {
                   >
                     <div className="flex items-center gap-3">
                       <Headphones size={16} />
-                      <span>Playlist Ouvinte</span>
+                      <span>Playlist</span>
                     </div>
                   </Button>
 
