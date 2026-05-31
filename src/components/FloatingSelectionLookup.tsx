@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Sparkles, Volume2, Plus, X, Loader2, Check } from 'lucide-react';
+import { Plus, X, Loader2, Check } from 'lucide-react';
 import { db } from '../db/db';
 import { Button } from './ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { syncNoteCards } from '../utils/siblings';
 import { toast } from 'sonner';
-import type { Note, Card } from '../types';
+import type { Note } from '../types';
 
 interface FloatingSelectionLookupProps {
   text: string;

@@ -159,6 +159,7 @@ export interface DeckPreset {
 export interface ReadingText {
   id: string;                   // UUID
   title: string;                // Título do texto
+  description?: string;         // Descrição opcional do texto
   fullTextOriginal: string;     // Texto completo no idioma original
   fullTextTranslated: string;   // Texto completo traduzido
   rawPdfText?: string;          // Texto bruto original do PDF (inclui notas, explicações e formatação original)
@@ -230,6 +231,14 @@ export interface Playlist {
 }
 
 /** Uma faixa de áudio completa enviada pelo usuário para um álbum */
+export interface TranscriptionLine {
+  id: string;
+  text: string;
+  translation?: string; // Tradução opcional da frase/letra
+  startTime: number;    // Tempo de início em segundos (ex: 12.5)
+  difficulty?: 'none' | 'easy' | 'hard'; // Nível de dificuldade para foco visual
+}
+
 export interface AudioTrack {
   id: string; // UUID
   playlistId: string; // ID da playlist correspondente
@@ -237,6 +246,7 @@ export interface AudioTrack {
   description?: string; // Descrição opcional (ex: Aula 1, Podcast, etc.)
   audioFile: Blob; // Arquivo de áudio (MP3/WAV/etc.)
   repeatTimes?: number; // Quantidade de repetições: 0 = infinito, 1 = 1x (padrão), 2+ = N vezes
+  transcriptionLines?: TranscriptionLine[]; // Linhas sincronizadas de texto/transcrição
   createdAt: number;
   updatedAt: number;
 }

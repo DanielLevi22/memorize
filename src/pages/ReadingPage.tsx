@@ -125,7 +125,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   const [appendBlockIsPdfLoading, setAppendBlockIsPdfLoading] = useState(false);
 
   // Suggested Title states
-  const [pdfSuggestedTitle, setPdfSuggestedTitle] = useState<string | null>(null);
+  const [, setPdfSuggestedTitle] = useState<string | null>(null);
   const [pdfSuggestedTitleInput, setPdfSuggestedTitleInput] = useState('');
   const [isTitleSuggestionModalOpen, setIsTitleSuggestionModalOpen] = useState(false);
 

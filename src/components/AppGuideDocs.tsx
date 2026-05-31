@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { BookOpen, Keyboard, Info, Lightbulb, Zap, Laptop, Sliders, Brain } from 'lucide-react';
+import { BookOpen, Keyboard, Info, Lightbulb, Zap, Laptop, Sliders, Brain, Headphones } from 'lucide-react';
 import { Card } from './ui/card';
 import { SrsAlgorithmsDocs } from './SrsAlgorithmsDocs';
 
 interface AppGuideDocsProps {
-  initialTab?: 'overview' | 'study_modes' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math';
+  initialTab?: 'overview' | 'study_modes' | 'shortcuts' | 'reading' | 'playlist_transcription' | 'srs_presets' | 'srs_math';
 }
 
 export const AppGuideDocs: React.FC<AppGuideDocsProps> = ({ initialTab = 'overview' }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'study_modes' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'overview' | 'study_modes' | 'shortcuts' | 'reading' | 'playlist_transcription' | 'srs_presets' | 'srs_math'>(initialTab);
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -71,6 +71,17 @@ export const AppGuideDocs: React.FC<AppGuideDocsProps> = ({ initialTab = 'overvi
         >
           <BookOpen size={14} />
           Leitura & PDF
+        </button>
+        <button
+          onClick={() => setActiveTab('playlist_transcription')}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-all duration-200 ${
+            activeTab === 'playlist_transcription'
+              ? 'bg-background text-primary shadow-sm font-bold'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Headphones size={14} />
+          Playlist & Transcrição
         </button>
         <button
           onClick={() => setActiveTab('srs_presets')}
@@ -390,6 +401,81 @@ export const AppGuideDocs: React.FC<AppGuideDocsProps> = ({ initialTab = 'overvi
                   <p className="text-xs text-muted-foreground leading-relaxed">
                     Nunca mais perca o ponto onde parou. O leitor grava automaticamente a última linha que você focou ao sair do texto. Ao abri-lo novamente, o app realiza uma rolagem suave e foca exatamente nessa frase.
                   </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: PLAYLIST & TRANSCRIÇÃO */}
+          {activeTab === 'playlist_transcription' && (
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <span className="text-[10px] font-black uppercase text-primary bg-primary/10 px-2 py-0.5 rounded tracking-wider">
+                  Estudo Auditivo Ativo
+                </span>
+                <h3 className="text-base font-bold text-foreground">Como usar Transcrições e Letras Sincronizadas na Playlist</h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  A seção de <strong>Playlist</strong> permite que você gerencie seus áudios de estudo (aulas, podcasts, músicas) e os sincronize linha por linha com textos ou traduções para praticar a escuta de forma imersiva.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div className="p-4 bg-muted/10 border border-border rounded-xl space-y-2.5">
+                  <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                    🎵 1. Abrir a Transcrição (Estilo Karaokê)
+                  </span>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Dentro de qualquer álbum de áudio, você verá a lista de faixas cadastradas.
+                  </p>
+                  <ul className="list-disc pl-4 text-xs text-muted-foreground space-y-1.5">
+                    <li>Passe o mouse ou toque sobre uma faixa e clique no ícone de documento (<kbd className="px-1.5 py-0.5 bg-muted rounded border text-[10px]">FileText</kbd>) para abrir o painel de transcrição.</li>
+                    <li>As faixas que já possuem alguma transcrição salva exibirão um selo verde <span className="text-[9px] bg-emerald-500/10 text-emerald-600 px-1 rounded font-bold border border-emerald-500/25">T</span>.</li>
+                  </ul>
+                </div>
+
+                <div className="p-4 bg-muted/10 border border-border rounded-xl space-y-2.5">
+                  <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                    🤖 2. Criar Transcrições Automaticamente com IA
+                  </span>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Se a sua faixa não tiver letra nem tradução, você pode criá-la instantaneamente usando Inteligência Artificial:
+                  </p>
+                  <ul className="list-disc pl-4 text-xs text-muted-foreground space-y-1.5">
+                    <li>Abra a transcrição da faixa e vá para a aba <strong>Sincronizar / Editar</strong>.</li>
+                    <li>Clique no botão roxo <strong>✨ Transcrever com IA</strong>.</li>
+                    <li>O sistema enviará o áudio ao modelo <strong>Gemini 2.5 Flash</strong> (usando sua API key configurada nas Opções), que fará a transcrição exata linha por linha, a marcação de tempo automática de início de cada frase e a tradução para o português.</li>
+                  </ul>
+                </div>
+
+                <div className="p-4 bg-muted/10 border border-border rounded-xl space-y-2.5">
+                  <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                    ⏱️ 3. Importar ou Sincronizar Manualmente (Sincronizador Live)
+                  </span>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Caso prefira um controle manual ou já tenha a letra:
+                  </p>
+                  <ul className="list-disc pl-4 text-xs text-muted-foreground space-y-1.5">
+                    <li><strong>Importar LRC:</strong> Se você tiver o arquivo de legenda no formato standard `.lrc` (ex: <code>[00:12.30] Hello world</code>), basta colar o conteúdo na aba <em>Sincronizar / Editar</em> e clicar em <strong>Importar LRC</strong>.</li>
+                    <li><strong>Sincronizador Live:</strong> Se você colar apenas o texto puro (uma frase por linha), pode clicar em <strong>Sincronizar Live (Passo 2)</strong>. Dê Play no áudio e, à medida que ouvir o locutor falar cada linha, aperte a tecla <kbd className="px-1.5 py-0.5 bg-muted rounded border text-[10px]">Espaço</kbd>, <kbd className="px-1.5 py-0.5 bg-muted rounded border text-[10px]">Enter</kbd> ou clique em <strong>Marcar Tempo</strong>. Isso marcará o timestamp inicial de cada frase de forma interativa.</li>
+                  </ul>
+                </div>
+
+                <div className="p-4 bg-muted/10 border border-border rounded-xl space-y-2.5">
+                  <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                    🎧 4. Praticar com Recursos de Listening
+                  </span>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Ao reproduzir o áudio na aba de visualização da transcrição, você tem recursos exclusivos de estudo:
+                  </p>
+                  <ul className="list-disc pl-4 text-xs text-muted-foreground space-y-1.5">
+                    <li><strong>Navegação por Cliques:</strong> A transcrição rola automaticamente mantendo a frase atual no centro. Você pode <strong>clicar em qualquer frase</strong> do texto para pular o áudio diretamente para o momento em que ela é dita.</li>
+                    <li><strong>Loop de Frase (Loop Frase):</strong> Ative o botão <span className="text-amber-600 dark:text-amber-400 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded text-[10px] border border-amber-500/20">🔁 Loop Frase</span> no topo da transcrição para que a frase atual se repita infinitamente, ajudando você a treinar a escuta e pronúncia daquele trecho específico.</li>
+                    <li><strong>Modo Ditado (Auto-Pause):</strong> Ative o botão <span className="text-sky-600 dark:text-sky-400 font-bold bg-sky-500/10 px-1.5 py-0.5 rounded text-[10px] border border-sky-500/20">🎙️ Modo Ditado</span> no topo. O áudio pausará automaticamente ao final de cada frase falada. Você pode tentar repetir ou escrever o ditado e dar Play/Espaço novamente para ouvir a próxima.</li>
+                    <li><strong>Marcadores de Dificuldade (Pontos Coloridos):</strong> Passe o mouse/toque no canto esquerdo de qualquer linha para revelar um círculo e clique para alternar o nível: `Padrão` &rarr; `Fácil (Verde)` &rarr; `Difícil (Vermelho)`. As linhas com marcação ganham bordas e fundos sombreados para foco visual.</li>
+                    <li><strong>Exportar LRC:</strong> Clique no botão <kbd className="px-1.5 py-0.5 bg-muted rounded border text-[10px]">Exportar LRC</kbd> no topo para fazer download do arquivo `.lrc` sincronizado com os tempos e traduções das frases.</li>
+                    <li><strong>Avanço e Retrocesso Fino:</strong> Use os botões de <strong>retroceder ou avançar 5s</strong> no Media Player da lateral direita para repetir termos ou pular trechos de silêncio rapidamente.</li>
+                    <li><strong>Velocidade de Áudio:</strong> Controle o ritmo da fala nas opções do Media Player (de <code>0.5x</code> para diálogos rápidos até <code>2.0x</code> para desafios avançados).</li>
+                  </ul>
                 </div>
               </div>
             </div>
