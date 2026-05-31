@@ -25,7 +25,8 @@ import {
   ArrowLeft,
   Languages,
   BookOpen,
-  Sparkles
+  Sparkles,
+  Keyboard
 } from 'lucide-react';
 import { db } from '../db/db';
 import type { Playlist, AudioTrack, TranscriptionLine } from '../types';
@@ -116,6 +117,11 @@ export const PlaylistPage: React.FC = () => {
   const progressIntervalRef = useRef<number | null>(null);
   // Ref to always read latest isLooping inside audio event closures (avoids stale state)
   const isLoopingRef = useRef(false);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameIdRef = useRef<number | null>(null);
 
   // Load playlists from DB
   const loadPlaylists = async () => {
@@ -180,8 +186,116 @@ export const PlaylistPage: React.FC = () => {
     }
   }, [selectedPlaylist]);
 
+  // Start visualizer loop when playing and canvas is available
+  useEffect(() => {
+    if (isPlaying && canvasRef.current && analyserRef.current) {
+      startDrawing();
+    } else {
+      cleanupVisualizer();
+    }
+    return () => cleanupVisualizer();
+  }, [isPlaying, canvasRef.current]);
+
+  const cleanupVisualizer = () => {
+    if (animationFrameIdRef.current) {
+      cancelAnimationFrame(animationFrameIdRef.current);
+      animationFrameIdRef.current = null;
+    }
+  };
+
+  const setupVisualizer = (audioElement: HTMLAudioElement) => {
+    cleanupVisualizer();
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      const audioContext = audioContextRef.current;
+      
+      if (!analyserRef.current) {
+        analyserRef.current = audioContext.createAnalyser();
+        analyserRef.current.fftSize = 128;
+      }
+      const analyser = analyserRef.current;
+
+      const source = audioContext.createMediaElementSource(audioElement);
+      source.connect(analyser);
+      analyser.connect(audioContext.destination);
+
+      if (audioContext.state === 'suspended') {
+        audioElement.addEventListener('play', () => {
+          audioContext.resume();
+        }, { once: true });
+      }
+    } catch (err) {
+      console.warn("Visualizer setup failed:", err);
+    }
+  };
+
+  const startDrawing = () => {
+    if (!canvasRef.current || !analyserRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const analyser = analyserRef.current;
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    const draw = () => {
+      if (!canvasRef.current || !analyserRef.current) return;
+      animationFrameIdRef.current = requestAnimationFrame(draw);
+
+      analyser.getByteFrequencyData(dataArray);
+
+      const width = canvas.width;
+      const height = canvas.height;
+      ctx.clearRect(0, 0, width, height);
+
+      const centerX = width / 2;
+      const centerY = height / 2;
+      const radius = 66;
+
+      const numBars = 60;
+      const barWidth = 2.5;
+
+      for (let i = 0; i < numBars; i++) {
+        const angle = (i / numBars) * Math.PI * 2;
+        const dataIdx = Math.floor((i / numBars) * bufferLength * 0.7);
+        const val = dataArray[dataIdx] || 0;
+        const barLength = (val / 255) * 22;
+
+        const xStart = centerX + Math.cos(angle) * radius;
+        const yStart = centerY + Math.sin(angle) * radius;
+        const xEnd = centerX + Math.cos(angle) * (radius + barLength);
+        const yEnd = centerY + Math.sin(angle) * (radius + barLength);
+
+        ctx.beginPath();
+        ctx.moveTo(xStart, yStart);
+        ctx.lineTo(xEnd, yEnd);
+        ctx.lineWidth = barWidth;
+        ctx.lineCap = 'round';
+
+        const alpha = 0.35 + (val / 255) * 0.65;
+        ctx.strokeStyle = `rgba(139, 92, 246, ${alpha})`;
+        ctx.stroke();
+      }
+
+      let sum = 0;
+      for (let i = 0; i < bufferLength; i++) sum += dataArray[i];
+      const avg = sum / bufferLength;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, radius - 1, 0, Math.PI * 2);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = `rgba(139, 92, 246, ${0.1 + (avg / 255) * 0.4})`;
+      ctx.stroke();
+    };
+
+    draw();
+  };
+
   // Cleanup current playing audio
   const cleanupAudio = () => {
+    cleanupVisualizer();
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current = null;
@@ -209,6 +323,7 @@ export const PlaylistPage: React.FC = () => {
       audio.playbackRate = playbackSpeed;
       audioRef.current = audio;
       setIsPlaying(true);
+      setupVisualizer(audio);
 
       audio.play().catch((err) => {
         // AbortError = play() foi interrompido por outro play()/pause() — comportamento normal
@@ -253,7 +368,7 @@ export const PlaylistPage: React.FC = () => {
         if (audioRef.current) {
           setProgress(audioRef.current.currentTime);
         }
-      }, 250);
+      }, 100);
 
       // Lockscreen and Control Panel Metadata Integration (Media Session API)
       if (typeof window !== 'undefined' && 'mediaSession' in navigator) {
@@ -658,6 +773,33 @@ export const PlaylistPage: React.FC = () => {
     }
   };
 
+  const undoLastStamp = () => {
+    if (syncingLineIdx < tempLines.length && tempLines[syncingLineIdx].startTime > 0) {
+      setTempLines(prev => {
+        const updated = [...prev];
+        updated[syncingLineIdx] = {
+          ...updated[syncingLineIdx],
+          startTime: 0
+        };
+        return updated;
+      });
+      return;
+    }
+
+    if (syncingLineIdx <= 0) return;
+    
+    const prevIdx = syncingLineIdx - 1;
+    setSyncingLineIdx(prevIdx);
+    setTempLines(prev => {
+      const updated = [...prev];
+      updated[prevIdx] = {
+        ...updated[prevIdx],
+        startTime: 0
+      };
+      return updated;
+    });
+  };
+
   const adjustLineTime = (index: number, amount: number) => {
     setTempLines(prev => {
       const updated = [...prev];
@@ -867,10 +1009,22 @@ Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", 
     }
   }, [progress, activeTranscriptionTrack]);
 
-  // Auto-scroll active line in view
+  // Auto-scroll active line in view (smooth centered inside the scroll container only)
   useEffect(() => {
-    if (activeLineRef.current) {
-      activeLineRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (activeLineRef.current && scrollContainerRef.current) {
+      const container = scrollContainerRef.current;
+      const element = activeLineRef.current;
+      
+      const containerHeight = container.clientHeight;
+      const elementHeight = element.offsetHeight;
+      const elementTop = element.offsetTop;
+      
+      const targetScrollTop = elementTop - (containerHeight / 2) + (elementHeight / 2);
+      
+      container.scrollTo({
+        top: targetScrollTop,
+        behavior: 'smooth'
+      });
     }
   }, [activeLineIdx]);
 
@@ -996,6 +1150,9 @@ Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", 
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           stampCurrentTime();
+        } else if (e.key === 'Backspace') {
+          e.preventDefault();
+          undoLastStamp();
         }
       }
     };
@@ -1003,7 +1160,41 @@ Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [activeTranscriptionTrack, transcriptionTab, syncingLineIdx, tempLines]);
+  }, [activeTranscriptionTrack, transcriptionTab, syncingLineIdx, tempLines, undoLastStamp]);
+
+  const renderHighlightedText = (text: string, startTime: number, endTime: number) => {
+    const words = text.split(/\s+/);
+    const lineDuration = endTime - startTime;
+    
+    if (lineDuration <= 0 || progress < startTime || progress > endTime) {
+      return <span>{text}</span>;
+    }
+    
+    const lineProgress = progress - startTime;
+    const percentage = Math.min(1, Math.max(0, lineProgress / lineDuration));
+    const activeWordIndex = Math.floor(percentage * words.length);
+    
+    return (
+      <span className="inline-flex flex-wrap justify-center gap-x-1.5 gap-y-0.5">
+        {words.map((word, wIdx) => {
+          const isWordActive = wIdx <= activeWordIndex;
+          return (
+            <span
+              key={wIdx}
+              className={`transition-all duration-200 ${
+                isWordActive 
+                  ? 'text-primary font-black scale-105 drop-shadow-[0_0_8px_hsl(var(--primary)/0.35)]' 
+                  : 'text-foreground/80'
+              }`}
+            >
+              {word}
+            </span>
+          );
+        })}
+      </span>
+    );
+  };
+
   const renderTranscriptionPanel = () => {
     if (!activeTranscriptionTrack) return null;
 
@@ -1159,7 +1350,7 @@ Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", 
               <div className="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-card/30 to-transparent pointer-events-none z-10" />
 
               {/* Contêiner de Letras Roláveis */}
-              <div className="flex-1 overflow-y-auto px-6 space-y-5 py-8 select-none scrollbar-thin">
+              <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-6 space-y-5 py-8 select-none scrollbar-thin relative">
                 {activeTranscriptionTrack.transcriptionLines?.map((line, idx) => {
                   const isActive = activeLineIdx === idx;
                   return (
@@ -1207,7 +1398,15 @@ Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", 
                       )}
 
                       <p className={`transition-all ${isActive ? 'text-sm sm:text-base' : 'text-xs sm:text-sm'}`}>
-                        {line.text}
+                        {isActive ? (
+                          (() => {
+                            const nextLine = activeTranscriptionTrack.transcriptionLines?.[idx + 1];
+                            const endOfLine = nextLine ? nextLine.startTime : duration;
+                            return renderHighlightedText(line.text, line.startTime, endOfLine);
+                          })()
+                        ) : (
+                          line.text
+                        )}
                       </p>
                       {showTranslation && line.translation && (
                         <p className={`text-[10px] sm:text-xs font-medium mt-1 leading-normal transition-opacity ${isActive ? 'text-primary/75' : 'text-muted-foreground/40'}`}>
@@ -1323,6 +1522,19 @@ Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", 
                       {isPlaying ? <Pause size={12} fill="currentColor" /> : <Play size={12} className="ml-0.5" fill="currentColor" />}
                     </button>
                   </div>
+                </div>
+
+                {/* Atalhos do Teclado */}
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[9px] font-semibold text-muted-foreground bg-muted/20 px-3.5 py-2 rounded-xl border border-border/30">
+                  <span className="font-black uppercase tracking-wider text-[8px] text-primary flex items-center gap-1">
+                    <Keyboard size={10} /> Atalhos:
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <kbd className="bg-muted border border-border/60 px-1 py-0.5 rounded text-[8.5px] font-mono shadow-sm">Espaço</kbd> ou <kbd className="bg-muted border border-border/60 px-1 py-0.5 rounded text-[8.5px] font-mono shadow-sm">Enter</kbd> Marcar frase e avançar
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <kbd className="bg-muted border border-border/60 px-1 py-0.5 rounded text-[8.5px] font-mono shadow-sm">Backspace</kbd> Desfazer e voltar frase
+                  </span>
                 </div>
 
                 {/* Tabela/Lista para ajuste manual e tradução */}
@@ -1893,7 +2105,14 @@ Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", 
 
                 {/* Capa de Vinil Grande */}
                 <div className="relative flex items-center justify-center w-full z-10 pt-1">
-                  <div className={`w-32 h-32 rounded-full bg-zinc-950 border-4 border-zinc-800 shadow-2xl flex items-center justify-center transition-all duration-500 relative ring-4 ring-primary/5 ${
+                  {/* Visualizador de Ondas Sonoras */}
+                  <canvas
+                    ref={canvasRef}
+                    width={200}
+                    height={200}
+                    className="absolute pointer-events-none z-0"
+                  />
+                  <div className={`w-32 h-32 rounded-full bg-zinc-950 border-4 border-zinc-800 shadow-2xl flex items-center justify-center transition-all duration-500 relative ring-4 ring-primary/5 z-10 ${
                     isPlaying ? 'scale-105 shadow-primary/15 animate-spin-slow' : 'scale-95 opacity-80'
                   }`}>
                     <div className="absolute inset-2 rounded-full border border-zinc-700/40 pointer-events-none" />
