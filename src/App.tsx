@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { 
-  Flame, Plus, Sparkles, Menu, User, Target,
+  Flame, Plus, Sparkles, Menu, User, Layers,
   Search, Settings, Sun, Moon,
   ChevronLeft, LayoutDashboard, TrendingUp, ClipboardList,
   BookOpen, Info, MessageSquare, Timer, RefreshCw, Cloud, Headphones,
@@ -10,7 +10,7 @@ import {
 
 // Banco de Dados e Types
 import { db, seedInitialData, ensureDefaultPreset, defaultPreset } from './db/db';
-import type { Deck, Card, Note, DeckPreset } from './types';
+import type { Deck, Card, Note, DeckPreset, CefrExam } from './types';
 
 // Utilitários
 import { calculateNextReview } from './utils/srs';
@@ -28,7 +28,10 @@ import { HistoryPage } from './pages/HistoryPage';
 import { ReadingPage } from './pages/ReadingPage';
 import { ConversationPage } from './pages/ConversationPage';
 import { PlaylistPage } from './pages/PlaylistPage';
-import { CefrPage } from './pages/CefrPage';
+import { DecksPage } from './pages/DecksPage';
+import { ExamsPage } from './pages/ExamsPage';
+import { ExamArenaPage } from './pages/ExamArenaPage';
+import { AiDiagnosticArenaPage } from './pages/AiDiagnosticArenaPage';
 import { Toaster, toast } from 'sonner';
 import { calculateDailyRequirements, recalculateSchedule } from './utils/cefrJourney';
 
@@ -88,19 +91,20 @@ function App() {
   });
 
   // --- ESTADOS DE CONTROLE DE TELA ---
-  const [currentView, setCurrentView] = useState<'dashboard' | 'study' | 'congrats'>('dashboard');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'study' | 'congrats' | 'exam' | 'diagnostic'>('dashboard');
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
+  const [activeExam, setActiveExam] = useState<CefrExam | null>(null);
   
   // --- ESTADO DA SIDEBAR E NAVEGAÇÃO INTERNA ---
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDesktopSidebarOpen, setIsDesktopSidebarOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams'>('dashboard');
   const [guideInitialTab, setGuideInitialTab] = useState<'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math'>('overview');
   const [searchTerm, setSearchTerm] = useState('');
   const [isPomodoroOpen, setIsPomodoroOpen] = useState(false);
 
   const handleSetActiveTab = (
-    tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr',
+    tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams',
     subTab?: 'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math'
   ) => {
     setActiveTab(tab);
@@ -1115,7 +1119,7 @@ function App() {
   }, []);
 
   // --- FLUXO NAVEGAÇÃO SIDEBAR ---
-  const handleNavigateFromSidebar = (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr') => {
+  const handleNavigateFromSidebar = (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams') => {
     setActiveTab(tab);
     setGuideInitialTab('overview');
     setCurrentView('dashboard');
@@ -1244,9 +1248,8 @@ function App() {
     <div className="app-container min-h-screen flex flex-row bg-background text-foreground relative font-sans w-full">
       <Toaster position="bottom-right" richColors />
       
-      {/* 1. SIDEBAR FIXA PARA DESKTOP (md:flex) */}
       <aside className={`hidden md:flex flex-col border-r border-border bg-card h-screen sticky top-0 justify-between shrink-0 transition-all duration-300 ${
-        isDesktopSidebarOpen && !isReadingZenMode ? 'w-[260px] p-6 opacity-100' : 'w-0 p-0 border-r-0 opacity-0 overflow-hidden'
+        isDesktopSidebarOpen && !isReadingZenMode && currentView === 'dashboard' ? 'w-[260px] p-6 opacity-100' : 'w-0 p-0 border-r-0 opacity-0 overflow-hidden'
       }`}>
         <div className="space-y-6">
           {/* User Profile Header & Collapse Button */}
@@ -1310,6 +1313,24 @@ function App() {
                   {totalDue}
                 </span>
               )}
+            </Button>
+
+            <Button 
+              variant="ghost"
+              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
+                activeTab === 'exams' 
+                  ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+              }`}
+              onClick={() => {
+                setActiveTab('exams');
+                setCurrentView('dashboard');
+              }}
+            >
+              <div className="flex items-center gap-3">
+                <ClipboardList size={16} />
+                <span>Exames & Diagnóstico</span>
+              </div>
             </Button>
 
             <Button 
@@ -1379,8 +1400,8 @@ function App() {
               }}
             >
               <div className="flex items-center gap-3">
-                <Target size={16} />
-                <span>Metas CEFR</span>
+                <Layers size={16} />
+                <span>Baralhos (SRS)</span>
               </div>
             </Button>
 
@@ -1570,6 +1591,21 @@ function App() {
                   <Button 
                     variant="ghost"
                     className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
+                      activeTab === 'exams' 
+                        ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+                    }`}
+                    onClick={() => handleNavigateFromSidebar('exams')}
+                  >
+                    <div className="flex items-center gap-3">
+                      <ClipboardList size={16} />
+                      <span>Exames & Diagnóstico</span>
+                    </div>
+                  </Button>
+
+                  <Button 
+                    variant="ghost"
+                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                       activeTab === 'reading' 
                         ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
                         : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
@@ -1622,8 +1658,8 @@ function App() {
                     onClick={() => handleNavigateFromSidebar('cefr')}
                   >
                     <div className="flex items-center gap-3">
-                      <Target size={16} />
-                      <span>Metas CEFR</span>
+                      <Layers size={16} />
+                      <span>Baralhos (SRS)</span>
                     </div>
                   </Button>
 
@@ -1865,6 +1901,24 @@ function App() {
                 getDeckStudyableCounts={getDeckStudyableCounts}
                 readingStats={readingStats}
                 handleGoToReading={handleGoToReading}
+                onNavigateToExams={(level) => {
+                  localStorage.setItem('memorize_cefr_selected_exam_level', level);
+                  setActiveTab('exams');
+                }}
+              />
+            )}
+
+            {/* TAB: EXAMES & DIAGNÓSTICOS */}
+            {activeTab === 'exams' && (
+              <ExamsPage
+                cards={cards}
+                onStartExam={(exam) => {
+                  setActiveExam(exam);
+                  setCurrentView('exam');
+                }}
+                onStartDiagnostic={() => {
+                  setCurrentView('diagnostic');
+                }}
               />
             )}
 
@@ -1928,7 +1982,22 @@ function App() {
             )}
 
             {activeTab === 'cefr' && (
-              <CefrPage geminiApiKey={geminiApiKey} />
+              <DecksPage
+                decks={decks}
+                cards={cards}
+                activeDeckMenuId={activeDeckMenuId}
+                setActiveDeckMenuId={setActiveDeckMenuId}
+                handleOpenNewDeckModal={handleOpenNewDeckModal}
+                setIsImportModalOpen={setIsImportModalOpen}
+                handleStartStudy={handleStartStudy}
+                handleOpenAddCardModal={handleOpenAddCardModal}
+                handleOpenEditDeckModal={handleOpenEditDeckModal}
+                handleOpenDeckOptionsModal={handleOpenDeckOptionsModal}
+                handleExportDeck={handleExportDeck}
+                handleDeleteDeck={handleDeleteDeck}
+                handleOpenAiModal={() => setIsAiModalOpen(true)}
+                getDeckStudyableCounts={getDeckStudyableCounts}
+              />
             )}
 
             {activeTab === 'settings' && (
@@ -2041,6 +2110,57 @@ function App() {
                 setCurrentView('dashboard');
                 setSelectedDeckId(null);
                 setCramSessionCards(null);
+              }}
+            />
+          </main>
+        )}
+
+        {/* 5. TELA: ARENA DE EXAME (FULLSCREEN DEDICADA) */}
+        {currentView === 'exam' && activeExam && (
+          <main className="flex-1 p-0 overflow-y-auto w-full flex flex-col justify-start">
+            <ExamArenaPage
+              exam={activeExam}
+              geminiApiKey={geminiApiKey}
+              onSubmitAttempt={async (attempt) => {
+                // 1. Salvar tentativa no banco de dados Dexie
+                const timestamp = Date.now();
+                const id = typeof crypto !== 'undefined' && crypto.randomUUID 
+                  ? crypto.randomUUID() 
+                  : Math.random().toString(36).substring(2, 15);
+                const newAttempt = { ...attempt, id, timestamp };
+                await db.cefrExamAttempts.add(newAttempt);
+                
+                // 2. Regras de desbloqueio de nível
+                if (newAttempt.passed) {
+                  const levelsKeys = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+                  const currentUnlocked = localStorage.getItem('memorize_cefr_unlocked_level') || 'A1';
+                  const currentUnlockedIndex = levelsKeys.indexOf(currentUnlocked);
+                  const examLevelIndex = levelsKeys.indexOf(newAttempt.level);
+                  if (examLevelIndex >= currentUnlockedIndex) {
+                    const nextLvlIndex = examLevelIndex + 1;
+                    const nextLevelCode = nextLvlIndex < levelsKeys.length ? levelsKeys[nextLvlIndex] : 'C2';
+                    localStorage.setItem('memorize_cefr_unlocked_level', nextLevelCode);
+                    toast.success(`Parabéns! Você desbloqueou o nível ${nextLevelCode}!`);
+                  }
+                }
+              }}
+              onClose={() => {
+                setCurrentView('dashboard');
+                setActiveTab('exams');
+                setActiveExam(null);
+              }}
+            />
+          </main>
+        )}
+
+        {/* 6. TELA: ARENA DE DIAGNÓSTICO (FULLSCREEN DEDICADA) */}
+        {currentView === 'diagnostic' && (
+          <main className="flex-1 p-0 overflow-y-auto w-full flex flex-col justify-start">
+            <AiDiagnosticArenaPage
+              geminiApiKey={geminiApiKey}
+              onClose={() => {
+                setCurrentView('dashboard');
+                setActiveTab('exams');
               }}
             />
           </main>

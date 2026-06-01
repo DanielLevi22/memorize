@@ -127,7 +127,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
   return (
     <div className="space-y-6 w-full max-w-none px-2 md:px-6">
       {/* Perfil Compacto */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-5xl mx-auto">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-none">
         <ShadcnCard className="bg-card border-border p-4 text-center flex flex-row items-center gap-4 rounded-2xl shadow-sm md:col-span-1 justify-center md:justify-start">
           <div className="w-12 h-12 rounded-full overflow-hidden border border-border shadow-md shrink-0 bg-muted flex items-center justify-center">
             {userPhoto ? (
@@ -159,7 +159,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
       </div>
 
       {/* Nível de Proficiência CEFR */}
-      <div className="max-w-5xl mx-auto space-y-3">
+      <div className="max-w-none space-y-3">
         <h2 className="font-extrabold text-sm text-foreground tracking-tight flex items-center gap-2">
           <Award size={16} className="text-primary" /> Proficiência Vocabular (CEFR)
         </h2>
@@ -252,7 +252,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
       </div>
 
       {/* Seção Conquistas */}
-      <div className="space-y-3 max-w-5xl mx-auto border-t border-border/40 pt-6">
+      <div className="space-y-3 max-w-none border-t border-border/40 pt-6">
         <h2 className="font-extrabold text-sm text-foreground tracking-tight">🏅 Minhas Conquistas</h2>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
