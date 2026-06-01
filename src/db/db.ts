@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { Deck, Card, Note, Revision, DeckPreset, ReadingText, ReadingSession, ReadingCollection, ChatMessage, AudioTrack, Playlist } from '../types';
+import type { Deck, Card, Note, Revision, DeckPreset, ReadingText, ReadingSession, ReadingCollection, ChatMessage, AudioTrack, Playlist, CefrExam, CefrExamAttempt } from '../types';
 
 class MemorizeDatabase extends Dexie {
   decks!: Table<Deck>;
@@ -13,6 +13,8 @@ class MemorizeDatabase extends Dexie {
   chatMessages!: Table<ChatMessage>;
   audioTracks!: Table<AudioTrack>;
   playlists!: Table<Playlist>;
+  cefrExams!: Table<CefrExam>;
+  cefrExamAttempts!: Table<CefrExamAttempt>;
 
   constructor() {
     super('MemorizeDatabase');
@@ -164,14 +166,40 @@ class MemorizeDatabase extends Dexie {
         }
       }
     });
+
+    this.version(10).stores({
+      decks: 'id, name, createdAt, updatedAt, presetId',
+      cards: 'id, deckId, dueDate, [deckId+dueDate], noteId, createdAt, updatedAt',
+      revisions: 'id, cardId, timestamp',
+      presets: 'id, name',
+      readings: 'id, title, createdAt, collectionId',
+      readingSessions: 'id, readingId, timestamp',
+      readingCollections: 'id, title, createdAt',
+      notes: 'id, deckId, createdAt',
+      chatMessages: 'id, partnerId, timestamp',
+      audioTracks: 'id, playlistId, title, createdAt',
+      playlists: 'id, name, createdAt',
+      cefrExams: 'id, level',
+      cefrExamAttempts: 'id, examId, level, timestamp'
+    });
   }
 }
 
+import { cefrExamsSeedData } from './cefrExamSeed';
+
 export const db = new MemorizeDatabase();
+
+export async function seedCefrExams() {
+  const examCount = await db.cefrExams.count();
+  if (examCount === 0) {
+    await db.cefrExams.bulkAdd(cefrExamsSeedData);
+  }
+}
 
 // --- FUNÇÕES AUXILIARES DE INICIALIZAÇÃO DE DADOS MOCK ---
 // Útil para o primeiro carregamento, dando uma boa experiência ao usuário
 export async function seedInitialData() {
+  await seedCefrExams();
   const deckCount = await db.decks.count();
   if (deckCount > 0) return; // Se já existirem dados, não faz o seed
 

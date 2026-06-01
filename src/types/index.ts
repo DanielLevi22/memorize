@@ -252,3 +252,38 @@ export interface AudioTrack {
   updatedAt: number;
 }
 
+export interface CefrExam {
+  id: string;
+  level: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
+  title: string;
+  description: string;
+  questions: {
+    id: string;
+    section: 'reading' | 'listening';
+    audioText?: string; // Para leitura via TTS na seção de listening
+    questionText: string;
+    options: string[]; // Múltipla escolha
+    correctAnswer: string;
+  }[];
+  writingPrompt: {
+    topic: string;
+    instructions: string;
+    minWords: number;
+    maxWords: number;
+  };
+}
+
+export interface CefrExamAttempt {
+  id: string;
+  examId: string;
+  level: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2';
+  timestamp: number;
+  readingScore: number; // Porcentagem
+  listeningScore: number; // Porcentagem
+  writingScore: number; // Porcentagem de 0 a 100 avaliada por IA
+  overallScore: number; // Ponderado
+  passed: boolean;
+  aiFeedback?: string; // Retorno do Gemini sobre a redação
+}
+
+
