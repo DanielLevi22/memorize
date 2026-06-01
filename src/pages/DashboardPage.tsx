@@ -4,6 +4,7 @@ import { Card as ShadcnCard } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import type { Deck, Card } from '../types';
+import { CefrAlertBanner } from '../components/CefrAlertBanner';
 
 interface DashboardPageProps {
   decks: Deck[] | undefined;
@@ -69,6 +70,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
   return (
     <div className="space-y-6 w-full max-w-none px-2 md:px-6">
+      <CefrAlertBanner 
+        cards={cards}
+        cardsStudiedToday={stats.count}
+        minutesStudiedToday={Math.round(stats.minutes + readingStats.minutes)}
+      />
+
       {/* Stats Overview */}
       <section className="grid grid-cols-3 gap-3">
         <ShadcnCard className="bg-card border-border text-center p-3.5 rounded-2xl shadow-sm">

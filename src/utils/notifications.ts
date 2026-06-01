@@ -93,3 +93,17 @@ export async function setupNotifications(dueCount: number): Promise<void> {
     await checkAndNotify(dueCount);
   }
 }
+
+/** Dispara uma notificação local direta (usada para alertas da jornada CEFR) */
+export function triggerLocalNotification(title: string, body: string) {
+  if (!('Notification' in window)) return;
+  if (Notification.permission !== 'granted') return;
+
+  new Notification(title, {
+    body,
+    icon: '/pwa-192.png',
+    badge: '/pwa-192.png',
+    tag: 'cefr-alert'
+  });
+}
+

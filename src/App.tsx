@@ -30,6 +30,7 @@ import { ConversationPage } from './pages/ConversationPage';
 import { PlaylistPage } from './pages/PlaylistPage';
 import { CefrPage } from './pages/CefrPage';
 import { Toaster, toast } from 'sonner';
+import { calculateDailyRequirements, recalculateSchedule } from './utils/cefrJourney';
 
 // Componentes do Projeto
 import { DeckModal } from './components/DeckModal';
@@ -48,7 +49,7 @@ import { PomodoroWidget } from './components/PomodoroWidget';
 import { getTagColors } from './utils/tagColors';
 
 // Utilitários
-import { setupNotifications, requestNotificationPermission, getNotificationPermission, clearAppBadge } from './utils/notifications';
+import { setupNotifications, requestNotificationPermission, getNotificationPermission, clearAppBadge, triggerLocalNotification } from './utils/notifications';
 
 // Sincronização e Criptografia com Google Drive
 import { requestAccessToken, findBackupFile, downloadBackupFile, createBackupFile, updateBackupFile, revokeToken, getDriveUserProfile } from './utils/drive';
@@ -335,12 +336,46 @@ function App() {
   const presets = useLiveQuery(() => db.presets.toArray());
   const readingSessions = useLiveQuery(() => db.readingSessions?.toArray());
 
-  // --- EFFECT DE TEMA E INITIAL SEED ---
   useEffect(() => {
     seedInitialData().then(() => ensureDefaultPreset());
     const streakData = getStreak();
     setStreak(streakData.currentStreak);
   }, []);
+
+  // --- EFFECT DE NOTIFICAÇÃO DA JORNADA CEFR ---
+  useEffect(() => {
+    if (!cards) return;
+    const targetLevel = localStorage.getItem('memorize_cefr_target_level');
+    if (!targetLevel) return;
+
+    const startLevel = localStorage.getItem('memorize_cefr_start_level') || 'A1';
+    const totalDays = Number(localStorage.getItem('memorize_cefr_target_days') || '90');
+    const journeyStart = Number(localStorage.getItem('memorize_cefr_journey_start') || Date.now());
+
+    // Verificar se já notificou hoje
+    const todayStr = new Date().toISOString().split('T')[0];
+    const lastNotified = localStorage.getItem('memorize_cefr_last_notified_date');
+    if (lastNotified === todayStr) return;
+
+    const studiedCards = cards.filter(c => c.repetitions > 0 || c.interval > 0);
+    const currentCardsCount = studiedCards.length;
+
+    const daysElapsed = Math.floor((Date.now() - journeyStart) / (24 * 60 * 60 * 1000));
+    
+    // Obter metas iniciais vs recalculadas
+    const initial = calculateDailyRequirements(0, startLevel as any, targetLevel as any, totalDays);
+    const currentPlan = recalculateSchedule(currentCardsCount, startLevel as any, targetLevel as any, totalDays, daysElapsed);
+
+    const isDelayed = currentPlan.dailyCardsTarget > initial.dailyCardsTarget || currentPlan.dailyMinutesTarget > initial.dailyMinutesTarget;
+
+    if (isDelayed) {
+      localStorage.setItem('memorize_cefr_last_notified_date', todayStr);
+      triggerLocalNotification(
+        '📈 Meta CEFR recalculada!',
+        `Você acumulou conteúdo. Sua nova meta diária é de ${currentPlan.dailyCardsTarget} cards e ${currentPlan.dailyMinutesTarget} min.`
+      );
+    }
+  }, [cards]);
 
   useEffect(() => {
     const root = window.document.documentElement;
