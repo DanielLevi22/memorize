@@ -78,11 +78,23 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   const decks = useLiveQuery(() => db.decks.orderBy('name').toArray()) || [];
   
   
-  const [selectedTextId, setSelectedTextId] = useState<string | null>(null);
+  const [selectedTextId, setSelectedTextId] = useState<string | null>(() => {
+    return localStorage.getItem('memorize_active_reading_id') || null;
+  });
+
+  useEffect(() => {
+    if (selectedTextId) {
+      localStorage.setItem('memorize_active_reading_id', selectedTextId);
+    } else {
+      localStorage.removeItem('memorize_active_reading_id');
+    }
+  }, [selectedTextId]);
+
   const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
   const [activeReaderTab, setActiveReaderTab] = useState<'lineByLine' | 'textAudio' | 'vitrine'>('lineByLine');
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [copiedLineIdx, setCopiedLineIdx] = useState<number | null>(null);
+  const [selectedLevelFilter, setSelectedLevelFilter] = useState<'all' | 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2'>('all');
 
   // Collection creation states
   const [isCreatingCollection, setIsCreatingCollection] = useState(false);
@@ -3676,11 +3688,22 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0 space-y-2">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <FileText size={14} className="text-primary flex-shrink-0" />
                         <h3 className="text-sm font-bold text-foreground truncate group-hover:text-primary transition-colors">
                           {reading.title}
                         </h3>
+                        {reading.cefrLevel && (
+                          <span className={`text-[8.5px] font-extrabold uppercase px-1.5 py-0.5 rounded border leading-none shrink-0 ${
+                            reading.cefrLevel === 'A1' || reading.cefrLevel === 'A2'
+                              ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-600 dark:text-emerald-400 font-extrabold'
+                              : reading.cefrLevel === 'B1' || reading.cefrLevel === 'B2'
+                                ? 'bg-primary/10 border-primary/25 text-primary font-extrabold'
+                                : 'bg-violet-500/10 border-violet-500/25 text-violet-600 dark:text-violet-400 font-extrabold'
+                          }`}>
+                            {reading.cefrLevel}
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-muted-foreground line-clamp-1 leading-relaxed">
                         {preview}...
@@ -4083,6 +4106,27 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
         )}
       </div>
 
+      {/* CEFR Level Filters */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 shrink-0 scrollbar-none animate-fadeIn">
+        <span className="text-[10px] font-black uppercase text-muted-foreground mr-1.5 shrink-0">Filtrar CEFR:</span>
+        {(['all', 'A1', 'A2', 'B1', 'B2', 'C1', 'C2'] as const).map((lvl) => {
+          const isSelected = selectedLevelFilter === lvl;
+          return (
+            <button
+              key={lvl}
+              onClick={() => setSelectedLevelFilter(lvl)}
+              className={`px-3 py-1.5 rounded-xl text-[10px] font-black border transition-all cursor-pointer ${
+                isSelected
+                  ? 'bg-primary border-primary text-primary-foreground font-black'
+                  : 'bg-muted/40 hover:bg-muted border-border/80 text-muted-foreground hover:text-foreground font-semibold'
+              }`}
+            >
+              {lvl === 'all' ? 'TODOS' : lvl}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Search results */}
       {searchQuery.trim().length >= 2 && (
         <div className="space-y-2 animate-fadeIn">
@@ -4104,11 +4148,22 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 space-y-1">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <FileText size={12} className="text-primary flex-shrink-0" />
                         <span className="text-[10px] font-black text-primary uppercase tracking-wider truncate">
                           {reading.title}
                         </span>
+                        {reading.cefrLevel && (
+                          <span className={`text-[7.5px] font-black uppercase px-1.2 py-0.2 rounded border leading-none shrink-0 ${
+                            reading.cefrLevel === 'A1' || reading.cefrLevel === 'A2'
+                              ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-600 dark:text-emerald-400 font-extrabold'
+                              : reading.cefrLevel === 'B1' || reading.cefrLevel === 'B2'
+                                ? 'bg-primary/10 border-primary/25 text-primary font-extrabold'
+                                : 'bg-violet-500/10 border-violet-500/25 text-violet-600 dark:text-violet-400 font-extrabold'
+                          }`}>
+                            {reading.cefrLevel}
+                          </span>
+                        )}
                       </div>
                       <p className="text-sm font-semibold text-foreground leading-relaxed">
                         {highlightMatch(line.original, searchQuery)}
@@ -4128,99 +4183,185 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
         </div>
       )}
 
-      {collections.length > 0 ? (
-        <div className="space-y-6">
-          {/* Folders Section */}
-          <div className="space-y-3">
-            <h3 className="text-xs uppercase font-black tracking-wider text-muted-foreground/80 pl-1">
-              Coleções ({collections.length})
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 animate-fadeIn">
-              {collections.map((col) => {
-                const colReadings = readings?.filter(r => r.collectionId === col.id) || [];
-                const totalTexts = colReadings.length;
-                const totalLines = colReadings.reduce((sum, r) => sum + r.lines.length, 0);
-                const masteredLines = colReadings.reduce((sum, r) => sum + r.lines.filter(l => l.mastered).length, 0);
-                const progress = totalLines > 0 ? Math.round((masteredLines / totalLines) * 100) : 0;
-                
-                return (
-                  <div
-                    key={col.id}
-                    onClick={() => setSelectedCollectionId(col.id)}
-                    className="bg-card border border-border rounded-2xl p-4 hover:border-primary/30 transition-all duration-200 cursor-pointer group shadow-sm flex flex-col justify-between min-h-[140px] relative animate-fadeIn"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-start gap-3 min-w-0">
-                        <div className="p-3 bg-amber-500/10 dark:bg-amber-500/20 text-amber-500 rounded-xl group-hover:scale-105 transition-transform duration-200 flex-shrink-0">
-                          <Folder className="w-5 h-5 fill-amber-500/20" />
+      {selectedLevelFilter === 'all' ? (
+        collections.length > 0 ? (
+          <div className="space-y-6">
+            {/* Folders Section */}
+            <div className="space-y-3">
+              <h3 className="text-xs uppercase font-black tracking-wider text-muted-foreground/80 pl-1">
+                Coleções ({collections.length})
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 animate-fadeIn">
+                {collections.map((col) => {
+                  const colReadings = readings?.filter(r => r.collectionId === col.id) || [];
+                  const totalTexts = colReadings.length;
+                  const totalLines = colReadings.reduce((sum, r) => sum + r.lines.length, 0);
+                  const masteredLines = colReadings.reduce((sum, r) => sum + r.lines.filter(l => l.mastered).length, 0);
+                  const progress = totalLines > 0 ? Math.round((masteredLines / totalLines) * 100) : 0;
+                  
+                  return (
+                    <div
+                      key={col.id}
+                      onClick={() => setSelectedCollectionId(col.id)}
+                      className="bg-card border border-border rounded-2xl p-4 hover:border-primary/30 transition-all duration-200 cursor-pointer group shadow-sm flex flex-col justify-between min-h-[140px] relative animate-fadeIn"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-3 min-w-0">
+                          <div className="p-3 bg-amber-500/10 dark:bg-amber-500/20 text-amber-500 rounded-xl group-hover:scale-105 transition-transform duration-200 flex-shrink-0">
+                            <Folder className="w-5 h-5 fill-amber-500/20" />
+                          </div>
+                          <div className="min-w-0">
+                            <h4 className="text-sm font-bold text-foreground truncate group-hover:text-primary transition-colors leading-tight">
+                              {col.title}
+                            </h4>
+                            {col.description && (
+                              <p className="text-[11px] text-muted-foreground line-clamp-1 mt-1 font-medium leading-normal">
+                                {col.description}
+                              </p>
+                            )}
+                          </div>
                         </div>
-                        <div className="min-w-0">
-                          <h4 className="text-sm font-bold text-foreground truncate group-hover:text-primary transition-colors leading-tight">
-                            {col.title}
-                          </h4>
-                          {col.description && (
-                            <p className="text-[11px] text-muted-foreground line-clamp-1 mt-1 font-medium leading-normal">
-                              {col.description}
-                            </p>
-                          )}
+                        
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={(e) => handleOpenEditCollection(e, col)}
+                            className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer border border-border bg-card shadow-sm"
+                            title="Editar Coleção"
+                          >
+                            <Edit size={12} />
+                          </button>
+                          <button
+                            onClick={(e) => handleOpenDeleteCollection(e, col)}
+                            className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors cursor-pointer border border-border bg-card shadow-sm"
+                            title="Excluir Coleção"
+                          >
+                            <Trash2 size={12} />
+                          </button>
                         </div>
                       </div>
-                      
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={(e) => handleOpenEditCollection(e, col)}
-                          className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer border border-border bg-card shadow-sm"
-                          title="Editar Coleção"
-                        >
-                          <Edit size={12} />
-                        </button>
-                        <button
-                          onClick={(e) => handleOpenDeleteCollection(e, col)}
-                          className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors cursor-pointer border border-border bg-card shadow-sm"
-                          title="Excluir Coleção"
-                        >
-                          <Trash2 size={12} />
-                        </button>
+
+                      <div className="mt-4 space-y-2">
+                        <div className="flex items-center justify-between text-[10px] font-black text-muted-foreground">
+                          <span>{totalTexts} texto{totalTexts !== 1 ? 's' : ''}</span>
+                          {totalTexts > 0 && <span>{progress}% concluído</span>}
+                        </div>
+                        {totalTexts > 0 ? (
+                          <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+                              style={{ width: `${progress}%` }}
+                            />
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground/60 italic font-semibold pl-0.5 block">Coleção vazia</span>
+                        )}
                       </div>
                     </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-card border border-border rounded-2xl p-12 text-center space-y-3 shadow-sm">
+            <BookOpen size={40} className="mx-auto text-muted-foreground/30" />
+            <h3 className="text-sm font-bold text-foreground">Nenhuma coleção adicionada</h3>
+            <p className="text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">
+              Crie uma coleção para organizar seus textos de estudos.
+            </p>
+            <div className="flex justify-center gap-3 mt-4">
+              <Button
+                onClick={() => setIsCreatingCollection(true)}
+                className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold rounded-xl cursor-pointer gap-1.5"
+              >
+                <FolderPlus size={14} /> Criar Coleção
+              </Button>
+            </div>
+          </div>
+        )
+      ) : (
+        /* RENDER FLAT LIST OF LEVEL-MATCHED READINGS */
+        <div className="space-y-3 animate-fadeIn">
+          <h3 className="text-xs uppercase font-black tracking-wider text-muted-foreground/80 pl-1">
+            Textos de Nível {selectedLevelFilter}
+          </h3>
+          {(() => {
+            const filteredReadings = readings?.filter(r => r.cefrLevel === selectedLevelFilter) || [];
+            if (filteredReadings.length === 0) {
+              return (
+                <div className="bg-card border border-border rounded-2xl p-12 text-center space-y-3 shadow-sm">
+                  <BookOpen size={40} className="mx-auto text-muted-foreground/30" />
+                  <p className="text-sm font-bold text-foreground">Nenhum texto encontrado</p>
+                  <p className="text-xs text-muted-foreground">Não há textos cadastrados no nível {selectedLevelFilter} ainda.</p>
+                </div>
+              );
+            }
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {filteredReadings.map((reading) => {
+                  const masteredCount = reading.lines.filter((l) => l.mastered).length;
+                  const totalLines = reading.lines.length;
+                  const progress = totalLines > 0 ? Math.round((masteredCount / totalLines) * 100) : 0;
+                  const preview = reading.lines[0]?.original || reading.fullTextOriginal.slice(0, 80);
 
-                    <div className="mt-4 space-y-2">
-                      <div className="flex items-center justify-between text-[10px] font-black text-muted-foreground">
-                        <span>{totalTexts} texto{totalTexts !== 1 ? 's' : ''}</span>
-                        {totalTexts > 0 && <span>{progress}% concluído</span>}
+                  return (
+                    <div
+                      key={reading.id}
+                      className="bg-card border border-border rounded-2xl p-4 hover:border-primary/30 transition-all duration-200 cursor-pointer group shadow-sm flex flex-col justify-between"
+                      onClick={() => setSelectedTextId(reading.id)}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0 space-y-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <FileText size={14} className="text-primary flex-shrink-0" />
+                            <h4 className="text-sm font-bold text-foreground truncate group-hover:text-primary transition-colors">
+                              {reading.title}
+                            </h4>
+                            <span className="text-[8.5px] font-extrabold uppercase px-1.5 py-0.5 rounded border leading-none shrink-0 bg-emerald-500/10 border-emerald-500/25 text-emerald-600 dark:text-emerald-400">
+                              {reading.cefrLevel}
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
+                            {preview}...
+                          </p>
+                        </div>
+                        
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                          <button
+                            onClick={(e) => handleOpenEditReading(e, reading)}
+                            className="p-1.5 rounded-lg hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors cursor-pointer border border-border bg-card shadow-sm"
+                            title="Editar texto"
+                          >
+                            <Pencil size={12} />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDeleteReading(reading.id); }}
+                            className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors cursor-pointer border border-border bg-card shadow-sm"
+                            title="Excluir texto"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
                       </div>
-                      {totalTexts > 0 ? (
+
+                      <div className="mt-4 space-y-2 border-t border-border/20 pt-3">
+                        <div className="flex items-center justify-between text-[10px] font-black text-muted-foreground">
+                          <span>{new Date(reading.createdAt).toLocaleDateString('pt-BR')}</span>
+                          <span>{masteredCount}/{totalLines} frases ({progress}%)</span>
+                        </div>
                         <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
                           <div
                             className="h-full bg-emerald-500 rounded-full transition-all duration-300"
                             style={{ width: `${progress}%` }}
                           />
                         </div>
-                      ) : (
-                        <span className="text-[10px] text-muted-foreground/60 italic font-semibold pl-0.5 block">Coleção vazia</span>
-                      )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="bg-card border border-border rounded-2xl p-12 text-center space-y-3 shadow-sm">
-          <BookOpen size={40} className="mx-auto text-muted-foreground/30" />
-          <h3 className="text-sm font-bold text-foreground">Nenhuma coleção adicionada</h3>
-          <p className="text-xs text-muted-foreground max-w-sm mx-auto leading-relaxed">
-            Crie uma coleção para organizar seus textos de estudos.
-          </p>
-          <div className="flex justify-center gap-3 mt-4">
-            <Button
-              onClick={() => setIsCreatingCollection(true)}
-              className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold rounded-xl cursor-pointer gap-1.5"
-            >
-              <FolderPlus size={14} /> Criar Coleção
-            </Button>
-          </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       )}
 

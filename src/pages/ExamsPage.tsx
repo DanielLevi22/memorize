@@ -3,13 +3,15 @@ import { Award, CheckCircle2, Lock, Sparkles, Compass, ClipboardList, ChevronDow
 import { Card as ShadcnCard } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Progress } from '../components/ui/progress';
-import { db } from '../db/db';
+import { db, createA1VocabularyDeck } from '../db/db';
+import { useLiveQuery } from 'dexie-react-hooks';
 import type { CefrExam, CefrExamAttempt, Card as AppCard } from '../types';
 
 interface ExamsPageProps {
   cards: AppCard[] | undefined;
   onStartExam: (exam: CefrExam) => void;
   onStartDiagnostic: () => void;
+  onGoToReading: () => void;
 }
 
 const levelDetailsData = {
@@ -25,6 +27,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({
   cards,
   onStartExam,
   onStartDiagnostic,
+  onGoToReading,
 }) => {
   const levelsKeys = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
 
@@ -44,6 +47,9 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({
   const [selectedExam, setSelectedExam] = useState<CefrExam | null>(null);
   const [attempts, setAttempts] = useState<CefrExamAttempt[]>([]);
   const [expandedAttemptId, setExpandedAttemptId] = useState<string | null>(null);
+
+  const hasA1Deck = useLiveQuery(() => db.decks.get('essential-a1-vocabulary'));
+  const levelReadings = useLiveQuery(() => db.readings.where('cefrLevel').equals(selectedDetailLevel).toArray(), [selectedDetailLevel]);
 
   // Sync with localStorage changes
   useEffect(() => {
@@ -268,6 +274,88 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({
                   <p className="text-[9px] text-muted-foreground italic border-t border-border/20 pt-1.5 mt-1.5">
                     * Média para aprovação: 60%. Duração livre.
                   </p>
+                </div>
+              </div>
+            </div>
+            
+            {/* 🎒 Trilha de Estudos Recomendados */}
+            <div className="border-t border-border/20 pt-4 space-y-3 shrink-0">
+              <span className="text-[10px] uppercase font-black text-primary flex items-center gap-1.5">
+                <Sparkles size={12} className="text-primary" /> Trilha de Estudos Recomendados ({selectedDetailLevel})
+              </span>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Leituras Sugeridas */}
+                <div className="bg-muted/10 border border-border/30 rounded-xl p-3.5 space-y-2 flex flex-col justify-between">
+                  <div>
+                    <span className="text-[9px] font-black text-muted-foreground uppercase block border-b border-border/20 pb-1 flex items-center gap-1">
+                      📖 Leituras Sugeridas ({selectedDetailLevel})
+                    </span>
+                    {levelReadings && levelReadings.length > 0 ? (
+                      <div className="space-y-1.5 max-h-[110px] overflow-y-auto pr-1 mt-1.5">
+                        {levelReadings.map(r => (
+                          <div key={r.id} className="flex items-center justify-between gap-2 bg-card border border-border/40 p-2 rounded-lg text-[9.5px] font-semibold hover:border-primary/30 transition-colors">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-foreground truncate font-bold">{r.title}</p>
+                              <p className="text-muted-foreground text-[8px] truncate font-medium">{r.description}</p>
+                            </div>
+                            <Button
+                              size="xs"
+                              onClick={() => {
+                                localStorage.setItem('memorize_active_reading_id', r.id);
+                                onGoToReading();
+                              }}
+                              className="bg-primary/10 hover:bg-primary/20 text-primary text-[8px] h-6 px-2.5 rounded-md cursor-pointer shrink-0 border-none font-bold"
+                            >
+                              Ler
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[9px] text-muted-foreground italic font-medium mt-2 pl-0.5">Nenhum texto sugerido para este nível no momento.</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Vocabulário Recomendado */}
+                <div className="bg-muted/10 border border-border/30 rounded-xl p-3.5 space-y-2 flex flex-col justify-between min-h-[120px]">
+                  <div>
+                    <span className="text-[9px] font-black text-muted-foreground uppercase block border-b border-border/20 pb-1">
+                      🗂️ Vocabulário & Baralhos
+                    </span>
+                    {selectedDetailLevel === 'A1' ? (
+                      <p className="text-[9.5px] text-foreground/80 leading-normal font-medium mt-2">
+                        {hasA1Deck ? (
+                          <span className="text-emerald-500 font-extrabold flex items-center gap-1 bg-emerald-500/10 p-1.5 rounded-lg border border-emerald-500/25 justify-center">
+                            ✓ Baralho A1 Essencial criado!
+                          </span>
+                        ) : (
+                          "Para começar do zero, adicione o baralho essencial A1 de 20 cards offline (saudações e pronomes básicos)."
+                        )}
+                      </p>
+                    ) : (
+                      <p className="text-[9.5px] text-muted-foreground leading-normal font-medium mt-2">
+                        Use o leitor para coletar palavras de nível {selectedDetailLevel} ou use o gerador de IA na aba de Baralhos para estudar temas específicos.
+                      </p>
+                    )}
+                  </div>
+
+                  {selectedDetailLevel === 'A1' && !hasA1Deck && (
+                    <Button
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          await createA1VocabularyDeck();
+                        } catch (err) {
+                          console.error(err);
+                        }
+                      }}
+                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-zinc-50 font-bold text-[9px] h-7.5 rounded-lg cursor-pointer mt-2.5 shadow-sm shadow-indigo-500/25 border-none"
+                    >
+                      Gerar Baralho A1 Offline
+                    </Button>
+                  )}
                 </div>
               </div>
             </div>

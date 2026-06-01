@@ -168,6 +168,7 @@ export interface ReadingText {
   lines: ReadingLine[];         // Frases separadas (array inline)
   lastLineIndex?: number;       // Última linha lida/ativa (para auto-bookmark)
   collectionId?: string;        // ID da coleção/pasta à qual o texto pertence
+  cefrLevel?: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2'; // Nível CEFR associado ao texto
   createdAt: number;            // timestamp MS
   updatedAt: number;            // timestamp MS
 }

@@ -1919,6 +1919,7 @@ function App() {
                 onStartDiagnostic={() => {
                   setCurrentView('diagnostic');
                 }}
+                onGoToReading={handleGoToReading}
               />
             )}
 

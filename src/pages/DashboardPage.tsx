@@ -7,6 +7,8 @@ import { calculateDailyRequirements } from '../utils/cefrJourney';
 import type { CefrLevelCode } from '../utils/cefrJourney';
 import type { Deck, Card } from '../types';
 import { CefrAlertBanner } from '../components/CefrAlertBanner';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db, createA1VocabularyDeck } from '../db/db';
 
 interface DashboardPageProps {
   decks: Deck[] | undefined;
@@ -93,6 +95,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     return localStorage.getItem('memorize_hide_quickstart') !== 'true';
   });
 
+  const hasA1Deck = useLiveQuery(() => db.decks.get('essential-a1-vocabulary'));
+  const levelReadings = useLiveQuery(() => db.readings.where('cefrLevel').equals(selectedDetailLevel).toArray(), [selectedDetailLevel]);
+
   // Sync with localStorage changes
   useEffect(() => {
     const handleStorageSync = () => {
@@ -146,6 +151,85 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         cardsStudiedToday={stats.count}
         minutesStudiedToday={Math.round(stats.minutes + readingStats.minutes)}
       />
+
+      {/* Onboarding Assistant for Absolute Beginners */}
+      {(cards === undefined || cards.length < 15) && (
+        <ShadcnCard className="bg-gradient-to-r from-violet-500/10 via-indigo-500/10 to-card border-2 border-primary/20 p-5 rounded-2xl shadow-xl space-y-4 relative overflow-hidden animate-in fade-in slide-in-from-top-4 duration-300">
+          <div className="absolute -top-6 -right-6 w-24 h-24 bg-primary/10 rounded-full blur-2xl pointer-events-none" />
+          
+          <div className="flex items-center gap-3">
+            <span className="p-2.5 bg-primary/20 text-primary rounded-xl text-md animate-bounce">🎒</span>
+            <div className="space-y-0.5">
+              <h3 className="font-extrabold text-sm text-foreground flex items-center gap-2">
+                Trilha do Iniciante: Como chegar no nível A1?
+              </h3>
+              <p className="text-[10px] text-muted-foreground font-semibold">
+                Você começou agora e não tem cartões para estudar. Siga estes passos simples para iniciar sua jornada:
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 pt-1">
+            <div className="bg-card border border-border/50 p-4 rounded-xl flex flex-col justify-between space-y-2.5">
+              <div>
+                <p className="text-[9.5px] font-black text-primary uppercase">Passo 1</p>
+                <h4 className="font-bold text-[10.5px] text-foreground mt-0.5">Vocabulário A1 Essencial</h4>
+                <p className="text-[9px] text-muted-foreground leading-normal font-medium mt-1">
+                  Crie o baralho básico de 20 cards offline (saudações e pronomes) para iniciar suas primeiras revisões diárias.
+                </p>
+              </div>
+              {!hasA1Deck ? (
+                <Button
+                  size="xs"
+                  onClick={async () => {
+                    await createA1VocabularyDeck();
+                  }}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-zinc-50 font-bold text-[8.5px] h-7 w-full rounded-lg mt-2 cursor-pointer shadow-sm shadow-indigo-500/20"
+                >
+                  Criar Baralho A1
+                </Button>
+              ) : (
+                <span className="text-[8.5px] font-bold text-emerald-500 flex items-center justify-center gap-1 mt-2.5 bg-emerald-500/10 py-1.5 rounded-lg border border-emerald-500/25">
+                  ✓ Baralho Criado
+                </span>
+              )}
+            </div>
+
+            <div className="bg-card border border-border/50 p-4 rounded-xl flex flex-col justify-between space-y-2.5">
+              <div>
+                <p className="text-[9.5px] font-black text-primary uppercase">Passo 2</p>
+                <h4 className="font-bold text-[10.5px] text-foreground mt-0.5">Primeira Leitura Ativa</h4>
+                <p className="text-[9px] text-muted-foreground leading-normal font-medium mt-1">
+                  Abra o texto de diálogo simples "Meeting a New Friend (A1)" para ler com tradução e extrair novos cards.
+                </p>
+              </div>
+              <Button
+                size="xs"
+                onClick={() => {
+                  localStorage.setItem('memorize_active_reading_id', 'seed-reading-a1-friend');
+                  handleGoToReading();
+                }}
+                className="bg-primary/10 hover:bg-primary/20 text-primary font-bold text-[8.5px] h-7 w-full rounded-lg mt-2 cursor-pointer border border-primary/25"
+              >
+                Ler Texto A1
+              </Button>
+            </div>
+
+            <div className="bg-card border border-border/50 p-4 rounded-xl flex flex-col justify-between space-y-2.5">
+              <div>
+                <p className="text-[9.5px] font-black text-primary uppercase">Passo 3</p>
+                <h4 className="font-bold text-[10.5px] text-foreground mt-0.5">Treino de Memorização (SRS)</h4>
+                <p className="text-[9px] text-muted-foreground leading-normal font-medium mt-1">
+                  Acesse seus baralhos e revise os cards criados. O sistema usará repetição espaçada para fixar na memória.
+                </p>
+              </div>
+              <div className="text-[8.5px] font-extrabold text-muted-foreground text-center py-2 bg-muted/40 rounded-lg">
+                Vá em "Baralhos" para revisar
+              </div>
+            </div>
+          </div>
+        </ShadcnCard>
+      )}
 
       {showQuickStart && (
         <ShadcnCard className="bg-gradient-to-r from-indigo-500/10 via-purple-500/10 to-pink-500/10 border border-indigo-500/25 p-5 rounded-2xl shadow-lg relative overflow-hidden animate-in fade-in slide-in-from-top-4 duration-300">
@@ -334,6 +418,88 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 <p className="text-foreground/75 leading-relaxed font-semibold pl-1">
                   Este nível requer {requirements.dailyMinutesTarget} min de treino de repetição espaçada e {requirements.dailyCardsTarget} novos cards/dia para concluir a meta de {selectedLevelDetails.vocabGoal} cards.
                 </p>
+              </div>
+            </div>
+            
+            {/* 🎒 Trilha de Estudos Recomendados */}
+            <div className="border-t border-border/20 pt-4 space-y-3 shrink-0">
+              <span className="text-[10px] uppercase font-black text-primary flex items-center gap-1.5">
+                <Sparkles size={12} className="text-primary" /> Trilha de Estudos Recomendados ({selectedDetailLevel})
+              </span>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Leituras Sugeridas */}
+                <div className="bg-muted/10 border border-border/30 rounded-xl p-3.5 space-y-2 flex flex-col justify-between">
+                  <div>
+                    <span className="text-[9px] font-black text-muted-foreground uppercase block border-b border-border/20 pb-1 flex items-center gap-1">
+                      📖 Leituras Sugeridas ({selectedDetailLevel})
+                    </span>
+                    {levelReadings && levelReadings.length > 0 ? (
+                      <div className="space-y-1.5 max-h-[110px] overflow-y-auto pr-1 mt-1.5">
+                        {levelReadings.map(r => (
+                          <div key={r.id} className="flex items-center justify-between gap-2 bg-card border border-border/40 p-2 rounded-lg text-[9.5px] font-semibold hover:border-primary/30 transition-colors">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-foreground truncate font-bold">{r.title}</p>
+                              <p className="text-muted-foreground text-[8px] truncate font-medium">{r.description}</p>
+                            </div>
+                            <Button
+                              size="xs"
+                              onClick={() => {
+                                localStorage.setItem('memorize_active_reading_id', r.id);
+                                handleGoToReading();
+                              }}
+                              className="bg-primary/10 hover:bg-primary/20 text-primary text-[8px] h-6 px-2.5 rounded-md cursor-pointer shrink-0 border-none font-bold"
+                            >
+                              Ler
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[9px] text-muted-foreground italic font-medium mt-2 pl-0.5">Nenhum texto sugerido para este nível no momento.</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Vocabulário Recomendado */}
+                <div className="bg-muted/10 border border-border/30 rounded-xl p-3.5 space-y-2 flex flex-col justify-between min-h-[120px]">
+                  <div>
+                    <span className="text-[9px] font-black text-muted-foreground uppercase block border-b border-border/20 pb-1">
+                      🗂️ Vocabulário & Baralhos
+                    </span>
+                    {selectedDetailLevel === 'A1' ? (
+                      <p className="text-[9.5px] text-foreground/80 leading-normal font-medium mt-2">
+                        {hasA1Deck ? (
+                          <span className="text-emerald-500 font-extrabold flex items-center gap-1 bg-emerald-500/10 p-1.5 rounded-lg border border-emerald-500/25 justify-center">
+                            ✓ Baralho A1 Essencial criado!
+                          </span>
+                        ) : (
+                          "Para começar do zero, adicione o baralho essencial A1 de 20 cards offline (saudações e pronomes básicos)."
+                        )}
+                      </p>
+                    ) : (
+                      <p className="text-[9.5px] text-muted-foreground leading-normal font-medium mt-2">
+                        Use o leitor para coletar palavras de nível {selectedDetailLevel} ou use o gerador de IA na aba de Baralhos para estudar temas específicos.
+                      </p>
+                    )}
+                  </div>
+
+                  {selectedDetailLevel === 'A1' && !hasA1Deck && (
+                    <Button
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          await createA1VocabularyDeck();
+                        } catch (err) {
+                          console.error(err);
+                        }
+                      }}
+                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-zinc-50 font-bold text-[9px] h-7.5 rounded-lg cursor-pointer mt-2.5 shadow-sm shadow-indigo-500/25 border-none"
+                    >
+                      Gerar Baralho A1 Offline
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
 

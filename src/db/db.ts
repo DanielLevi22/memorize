@@ -182,10 +182,27 @@ class MemorizeDatabase extends Dexie {
       cefrExams: 'id, level',
       cefrExamAttempts: 'id, examId, level, timestamp'
     });
+
+    this.version(11).stores({
+      decks: 'id, name, createdAt, updatedAt, presetId',
+      cards: 'id, deckId, dueDate, [deckId+dueDate], noteId, createdAt, updatedAt',
+      revisions: 'id, cardId, timestamp',
+      presets: 'id, name',
+      readings: 'id, title, cefrLevel, createdAt, collectionId',
+      readingSessions: 'id, readingId, timestamp',
+      readingCollections: 'id, title, createdAt',
+      notes: 'id, deckId, createdAt',
+      chatMessages: 'id, partnerId, timestamp',
+      audioTracks: 'id, playlistId, title, createdAt',
+      playlists: 'id, name, createdAt',
+      cefrExams: 'id, level',
+      cefrExamAttempts: 'id, examId, level, timestamp'
+    });
   }
 }
 
 import { cefrExamsSeedData } from './cefrExamSeed';
+import { cefrReadingsSeedData } from './cefrReadingsSeed';
 
 export const db = new MemorizeDatabase();
 
@@ -195,12 +212,102 @@ export async function seedCefrExams() {
   await db.cefrExams.bulkAdd(cefrExamsSeedData);
 }
 
+export async function seedCefrReadings() {
+  // Sequeia leituras padrão CEFR sem limpar leituras customizadas do usuário
+  for (const reading of cefrReadingsSeedData) {
+    const existing = await db.readings.get(reading.id);
+    if (!existing) {
+      await db.readings.put(reading);
+    }
+  }
+}
+
+export async function createA1VocabularyDeck() {
+  const deckId = 'essential-a1-vocabulary';
+  const deckExists = await db.decks.get(deckId);
+  if (!deckExists) {
+    await db.decks.add({
+      id: deckId,
+      name: '🇬🇧 Vocabulário Essencial A1',
+      description: 'Cartões com vocabulário essencial, saudações e pronomes básicos para o nível A1.',
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    });
+  }
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const a1Cards = [
+    { front: 'Hello / Hi', back: 'Olá / Oi', context: 'Hello! My name is John.' },
+    { front: 'Good morning', back: 'Bom dia', context: 'Good morning, family!' },
+    { front: 'Please', back: 'Por favor', context: 'Can you help me, please?' },
+    { front: 'Thank you', back: 'Obrigado', context: 'Thank you for the coffee.' },
+    { front: 'Goodbye / Bye', back: 'Tchau / Adeus', context: 'Goodbye, see you tomorrow!' },
+    { front: 'My name is...', back: 'Meu nome é...', context: 'Hello, my name is Sarah.' },
+    { front: 'Where is the bathroom?', back: 'Onde fica o banheiro?', context: 'Excuse me, where is the bathroom?' },
+    { front: 'How much is this?', back: 'Quanto custa isto?', context: 'How much is this book?' },
+    { front: 'Water', back: 'Água', context: 'Can I have some water, please?' },
+    { front: 'Food', back: 'Comida / Alimento', context: 'I like delicious food.' },
+    { front: 'I need help', back: 'Preciso de ajuda', context: 'I need help with my English.' },
+    { front: 'What time is it?', back: 'Que horas são?', context: 'Excuse me, what time is it?' },
+    { front: 'Yes', back: 'Sim', context: 'Yes, I want to learn English.' },
+    { front: 'No', back: 'Não', context: 'No, thank you.' },
+    { front: 'Excuse me', back: 'Com licença / Desculpe', context: 'Excuse me, can I pass?' },
+    { front: 'Nice to meet you', back: 'Prazer em conhecer você', context: 'Nice to meet you, Mary.' },
+    { front: 'Where are you from?', back: 'De onde você é?', context: 'Hello, where are you from?' },
+    { front: 'I like...', back: 'Eu gosto de...', context: 'I like to study English.' },
+    { front: 'Today', back: 'Hoje', context: 'Today is a beautiful day.' },
+    { front: 'House', back: 'Casa', context: 'I live in a small house.' }
+  ];
+
+  const cardsToInsert = [];
+  for (let i = 0; i < a1Cards.length; i++) {
+    const cardData = a1Cards[i];
+    const cardId = `a1-vocab-${i}`;
+    const cardExists = await db.cards.get(cardId);
+    if (!cardExists) {
+      const noteId = `a1-note-${i}`;
+      await db.notes.put({
+        id: noteId,
+        deckId: deckId,
+        type: 'basic',
+        fields: [cardData.front, cardData.back],
+        tags: ['A1', 'vocabulário'],
+        context: cardData.context,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      });
+
+      cardsToInsert.push({
+        id: cardId,
+        deckId: deckId,
+        noteId: noteId,
+        front: cardData.front,
+        back: cardData.back,
+        context: cardData.context,
+        cefrLevel: 'A1' as const,
+        interval: 0,
+        ease: 2.5,
+        repetitions: 0,
+        lapses: 0,
+        dueDate: todayStr,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      });
+    }
+  }
+
+  if (cardsToInsert.length > 0) {
+    await db.cards.bulkAdd(cardsToInsert);
+  }
+}
+
 // --- FUNÇÕES AUXILIARES DE INICIALIZAÇÃO DE DADOS MOCK ---
 // Útil para o primeiro carregamento, dando uma boa experiência ao usuário
 export async function seedInitialData() {
   await seedCefrExams();
+  await seedCefrReadings();
   const deckCount = await db.decks.count();
-  if (deckCount > 0) return; // Se já existirem dados, não faz o seed
+  if (deckCount > 0) return; // Se já existirem dados, não faz o seed de decks
 
   const defaultDeckId = 'essential-phrasal-verbs';
   const todayStr = new Date().toISOString().split('T')[0];
