@@ -7,6 +7,9 @@ vi.mock('./db', async (importOriginal) => {
   
   const mockExamsStore: any[] = [];
   const mockCefrExams = {
+    clear: vi.fn().mockImplementation(async () => {
+      mockExamsStore.length = 0;
+    }),
     count: vi.fn().mockImplementation(async () => mockExamsStore.length),
     bulkAdd: vi.fn().mockImplementation(async (items) => {
       mockExamsStore.push(...items);
@@ -21,12 +24,9 @@ vi.mock('./db', async (importOriginal) => {
       ...actual.db,
       cefrExams: mockCefrExams
     },
-    // We export seedCefrExams from here but override or bind to mock db
     seedCefrExams: async () => {
-      const examCount = await mockCefrExams.count();
-      if (examCount === 0) {
-        await mockCefrExams.bulkAdd(cefrExamsSeedData);
-      }
+      await mockCefrExams.clear();
+      await mockCefrExams.bulkAdd(cefrExamsSeedData);
     }
   };
 });
@@ -43,19 +43,22 @@ describe('CEFR Database Seeding', () => {
 
     await seedCefrExams();
 
-    // Deve chamar o bulkAdd para inserir os simulados
+    // Deve limpar e chamar o bulkAdd para inserir os simulados
+    expect(db.cefrExams.clear).toHaveBeenCalledTimes(1);
     expect(db.cefrExams.bulkAdd).toHaveBeenCalledWith(cefrExamsSeedData);
     expect(db.cefrExams.bulkAdd).toHaveBeenCalledTimes(1);
   });
 
-  it('não deve semear os exames se o banco de dados já contiver exames', async () => {
+  it('deve atualizar/re-semear os exames mesmo se o banco de dados já contiver exames', async () => {
     // mock count() retorna 6 (exames já semeados)
     // @ts-ignore
     db.cefrExams.count.mockImplementationOnce(async () => 6);
 
     await seedCefrExams();
 
-    // Não deve chamar bulkAdd
-    expect(db.cefrExams.bulkAdd).not.toHaveBeenCalled();
+    // Deve limpar e chamar o bulkAdd para atualizar os simulados
+    expect(db.cefrExams.clear).toHaveBeenCalledTimes(1);
+    expect(db.cefrExams.bulkAdd).toHaveBeenCalledWith(cefrExamsSeedData);
+    expect(db.cefrExams.bulkAdd).toHaveBeenCalledTimes(1);
   });
 });

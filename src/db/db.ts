@@ -190,10 +190,9 @@ import { cefrExamsSeedData } from './cefrExamSeed';
 export const db = new MemorizeDatabase();
 
 export async function seedCefrExams() {
-  const examCount = await db.cefrExams.count();
-  if (examCount === 0) {
-    await db.cefrExams.bulkAdd(cefrExamsSeedData);
-  }
+  // Limpa e repovora os exames para forçar a atualização das provas com o novo pool de questões completo.
+  await db.cefrExams.clear();
+  await db.cefrExams.bulkAdd(cefrExamsSeedData);
 }
 
 // --- FUNÇÕES AUXILIARES DE INICIALIZAÇÃO DE DADOS MOCK ---
