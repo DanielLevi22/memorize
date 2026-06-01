@@ -136,4 +136,62 @@ interface CefrExamAttempt {
   passed: boolean;
   aiFeedback?: string; // Retorno do Gemini sobre a redação
 }
+
+---
+
+## 6. Fluxo de Aprendizagem do Usuário (Exemplo Prático: Iniciante -> B2 em 6 Meses)
+
+Abaixo está o mapeamento da jornada passo a passo que o usuário percorre no sistema:
+
+### Passo 1: Definição do Objetivo (Setup da Jornada)
+1. O usuário (Iniciante - A1) abre a tela **Metas CEFR**.
+2. Ele configura a sua meta:
+   - **Nível de Proficiência Alvo:** `B2`
+   - **Prazo:** `6 Meses` (180 dias)
+3. O sistema calcula a lacuna baseada em seu nível atual e exibe:
+   - Vocabulário necessário: **4.000 cartas** (Meta do B2).
+   - Horas de estudo estimadas restantes: **600 horas**.
+   - **Metas Diárias Calculadas:** Aprender **22 novos cards por dia** e estudar por **40 minutos por dia**.
+
+### Passo 2: Rotina Diária de Estudos (Estudo Ativo)
+1. **Visualização das Metas:** No Dashboard principal, um widget dinâmico exibe o progresso diário:
+   - `[ ] Novos Cards de Hoje: 0 / 22`
+   - `[ ] Minutos de Estudo de Hoje: 0 / 40 min`
+2. **Ciclo de Aquisição de Vocabulário:**
+   - O aluno acessa o **Reader**, lê artigos em inglês compatíveis com seu nível atual, clica em termos desconhecidos para ver a tradução e os adiciona como cards.
+   - Ele também pode usar o **Gerador de Cards da IA** nas metas CEFR para sugerir frases baseadas nas estruturas gramaticais indicadas para seu nível.
+3. **Ciclo de Memorização (SRS):**
+   - O aluno revisa os cards acumulados. Cada segundo gasto avaliando um card é computado no tempo diário.
+   - O classificador em segundo plano analisa os novos cards criados/estudados e os categoriza no IndexedDB como nível A1, A2, etc.
+   - O aluno também estuda com a **Playlist** no Modo Ditado para treinar o *listening* e a escrita das frases, acumulando mais minutos de estudo.
+
+### Passo 3: Desbloqueio e Aprovação nos Exames CEFR (Progressão)
+A progressão é sequencial. O usuário não pula diretamente para o B2, ele deve provar a consolidação de cada nível intermediário:
+
+```
+[Iniciante A0] 
+      │ (Estudar 500 cards)
+      ▼
+[Destravar Exame A1] ──(Passar com >= 60%)──► [Nível A1 Concluído]
+                                                     │ (Estudar +500 cards)
+                                                     ▼
+                                            [Destravar Exame A2] ──(Passar com >= 60%)──► [Nível A2 Concluído]
+                                                                                                 │ ...
+                                                                                                 ▼
+                                                                                        [Exame B1] ──► [Exame B2]
+```
+
+1. **Atingindo a Meta Lexical:** Ao acumular **500 cartas ativas** classificadas no nível A1 ou inferior, o sistema notifica o usuário que o **Exame Simulado A1** está disponível.
+2. **Realização do Exame:** O usuário clica em "Realizar Exame A1" e faz a prova estruturada:
+   - Lê trechos e responde questões gramaticais (*Reading*).
+   - Escuta áudios gerados por TTS e responde sobre a compreensão (*Listening*).
+   - Escreve um pequeno texto sob demanda que é corrigido pela API do Gemini (*Writing*).
+3. **Resultado:**
+   - **Se aprovado (Nota >= 60%):** O usuário desbloqueia oficialmente o status de nível A1. Ele recebe uma tela de parabenização premium (confetes) e a trilha para o exame A2 é liberada (exigindo atingir 1.000 cartas).
+   - **Se reprovado:** O sistema exibe um feedback detalhado da IA sugerindo quais cartas ou tópicos de gramática revisar e sugere que ele continue estudando antes de tentar o exame novamente após 24 horas.
+
+### Passo 4: O "Pulo de Nível" para Usuários Experientes
+* Se um usuário já possui inglês intermediário (ex: B1) mas seu baralho no app é novo, ele pode ir direto na aba **Metas CEFR** e clicar em **"Fazer Exame de Nivelamento B1"**.
+* Caso passe no teste com nota >= 70%, o sistema marca os níveis A1 e A2 como "Dominados por Exame" e redefine os cálculos de metas diárias partindo da premissa de que ele já possui a base conceitual de B1.
+
 ```
