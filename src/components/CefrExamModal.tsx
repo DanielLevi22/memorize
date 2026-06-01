@@ -5,6 +5,7 @@ import { Volume2, BookOpen, Headphones, PenTool, Award, Sparkles, Loader2, Alert
 import type { CefrExam, CefrExamAttempt } from '../types';
 import { toast } from 'sonner';
 import { calculateExamScore, getPassingCut } from '../utils/cefrExamHelper';
+import { evaluateWritingWithGemini } from '../utils/cefrWritingEvaluator';
 
 interface CefrExamModalProps {
   isOpen: boolean;
@@ -100,59 +101,29 @@ export const CefrExamModal: React.FC<CefrExamModalProps> = ({
     setCurrentStep(prev => Math.max(0, prev - 1));
   };
 
-  // Envio final (Feature 4 simula o envio e calcula o resultado básico das objetivas)
+  // Envio final (Corrigido por IA via Gemini se houver API Key)
   const handleSubmit = async () => {
     setIsSubmitting(true);
 
     try {
-      // 2. Nota da redação (Para a Feature 4, usaremos 100% como placeholder se não houver GeminiApiKey)
       let writingScore = 100;
-      let aiFeedback = 'Simulação de avaliação offline. A correção inteligente por IA será acionada na próxima feature.';
+      let aiFeedback = 'Simulação de avaliação offline. A correção inteligente por IA exige uma chave de API do Gemini configurada.';
 
       const apiKey = localStorage.getItem('memorize_gemini_api_key') || geminiApiKey;
 
       if (apiKey && apiKey.trim()) {
         try {
-          const promptText = `Você é um avaliador de proficiência em inglês especializado em certificações CEFR.
-Examine a seguinte redação escrita por um aluno no nível ${exam.level}.
-
-Proposta de Escrita:
-"${exam.writingPrompt.instructions}"
-
-Texto do Aluno:
-"${writingContent}"
-
-Avalie o texto segundo critérios de vocabulário, gramática, coerência e adequação ao tema.
-Você deve retornar OBRIGATORIAMENTE um JSON puro (sem markdown, sem tags, sem \`\`\`json) contendo os campos:
-1. "score": Uma nota numérica inteira de 0 a 100 correspondente à qualidade do texto para o nível do exame.
-2. "feedback": Um parágrafo curto e construtivo em português com conselhos de melhoria.
-
-Exemplo de formato esperado:
-{"score": 75, "feedback": "Bom domínio vocabular, porém cometeu pequenos deslizes na concordância..."}`;
-
-          const res = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: [{ parts: [{ text: promptText }] }]
-              })
-            }
+          const evalResult = await evaluateWritingWithGemini(
+            exam.level,
+            exam.writingPrompt.instructions,
+            writingContent,
+            apiKey
           );
-
-          if (res.ok) {
-            const data = await res.json();
-            const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-            const cleanJsonStr = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-            const parsed = JSON.parse(cleanJsonStr);
-            if (typeof parsed.score === 'number') {
-              writingScore = parsed.score;
-              aiFeedback = parsed.feedback;
-            }
-          }
+          writingScore = evalResult.score;
+          aiFeedback = evalResult.feedback;
         } catch (err) {
           console.warn('Erro ao chamar API do Gemini para correção de redação:', err);
+          toast.error('Erro na chamada da IA do Gemini. Usando nota padrão temporária.');
         }
       }
 
