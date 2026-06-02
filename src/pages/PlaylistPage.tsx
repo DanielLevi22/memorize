@@ -54,6 +54,8 @@ export const PlaylistPage: React.FC<PlaylistPageProps> = ({ onPlayTrackInKaraoke
   const [newTrackDesc, setNewTrackDesc] = useState('');
   const [newTrackFile, setNewFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadMode, setUploadMode] = useState<'file' | 'youtube'>('file');
+  const [youtubeUrl, setYoutubeUrl] = useState('');
 
   // Edit track modal
   const [isEditOpen, setIsEditOpen] = useState(false);
@@ -285,19 +287,85 @@ export const PlaylistPage: React.FC<PlaylistPageProps> = ({ onPlayTrackInKaraoke
       toast.error('Selecione ou crie um álbum primeiro.');
       return;
     }
-    if (!newTrackTitle.trim() || !newTrackFile) {
-      toast.error('Forneça um título e o arquivo de áudio.');
-      return;
-    }
 
     try {
       setIsUploading(true);
+      let fileToSave: File | null = null;
+      let finalTitle = newTrackTitle.trim();
+
+      if (uploadMode === 'file') {
+        if (!newTrackFile) {
+          toast.error('Selecione o arquivo de áudio.');
+          setIsUploading(false);
+          return;
+        }
+        if (!finalTitle) {
+          toast.error('Forneça um título.');
+          setIsUploading(false);
+          return;
+        }
+        fileToSave = newTrackFile;
+      } else {
+        // YouTube mode
+        if (!youtubeUrl.trim()) {
+          toast.error('Forneça o link do vídeo do YouTube.');
+          setIsUploading(false);
+          return;
+        }
+
+        // Call cobalt API
+        const toastId = toast.loading('Processando link do YouTube via Cobalt...');
+        const response = await fetch('https://api.cobalt.tools/api/json', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            url: youtubeUrl.trim(),
+            audioFormat: 'mp3',
+            audioOnly: true
+          })
+        });
+
+        if (!response.ok) {
+          toast.dismiss(toastId);
+          throw new Error('Falha ao conectar com o serviço de conversão do Cobalt.');
+        }
+
+        const data = await response.json();
+        if (!data || !data.url) {
+          toast.dismiss(toastId);
+          throw new Error('Erro na resposta do Cobalt ou link inválido.');
+        }
+
+        toast.loading('Fazendo download do áudio convertido...', { id: toastId });
+        const fileResponse = await fetch(data.url);
+        if (!fileResponse.ok) {
+          toast.dismiss(toastId);
+          throw new Error('Falha ao baixar o arquivo de áudio convertido.');
+        }
+
+        const blob = await fileResponse.blob();
+        const filename = data.filename || 'youtube_audio.mp3';
+        fileToSave = new File([blob], filename, { type: 'audio/mpeg' });
+
+        if (!finalTitle) {
+          finalTitle = filename.substring(0, filename.lastIndexOf('.')) || filename;
+        }
+        toast.dismiss(toastId);
+      }
+
+      if (!fileToSave) {
+        throw new Error('Arquivo não gerado.');
+      }
+
       const newTrack: AudioTrack = {
         id: crypto.randomUUID(),
         playlistId: selectedPlaylist.id,
-        title: newTrackTitle.trim(),
+        title: finalTitle,
         description: newTrackDesc.trim() || undefined,
-        audioFile: newTrackFile,
+        audioFile: fileToSave,
         createdAt: Date.now(),
         updatedAt: Date.now()
       };
@@ -308,10 +376,12 @@ export const PlaylistPage: React.FC<PlaylistPageProps> = ({ onPlayTrackInKaraoke
       setNewTrackTitle('');
       setNewTrackDesc('');
       setNewFile(null);
+      setYoutubeUrl('');
+      setUploadMode('file');
       loadTracks(selectedPlaylist.id);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      toast.error('Erro ao fazer upload do arquivo.');
+      toast.error(err.message || 'Erro ao adicionar a faixa.');
     } finally {
       setIsUploading(false);
     }
@@ -777,17 +847,26 @@ export const PlaylistPage: React.FC<PlaylistPageProps> = ({ onPlayTrackInKaraoke
       </Dialog>
 
       {/* Modal Dialog: Upload Áudio */}
-      <Dialog open={isUploadOpen} onOpenChange={setIsUploadOpen}>
+      <Dialog open={isUploadOpen} onOpenChange={(open) => {
+        setIsUploadOpen(open);
+        if (!open) {
+          setNewTrackTitle('');
+          setNewTrackDesc('');
+          setNewFile(null);
+          setYoutubeUrl('');
+          setUploadMode('file');
+        }
+      }}>
         <DialogContent className="sm:max-w-[460px] bg-card border border-border text-foreground p-6 rounded-2xl shadow-2xl">
           <DialogHeader>
             <DialogTitle className="text-base font-black tracking-tight text-foreground flex items-center gap-2">
               <div className="p-1.5 bg-primary/10 text-primary rounded-lg">
                 <Music size={16} />
               </div>
-              Upload de Áudio para o Álbum
+              Adicionar Faixa de Áudio
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground font-semibold">
-              Selecione um arquivo de áudio (MP3 ou WAV) e atribua um título.
+              Selecione um arquivo local ou faça o download diretamente a partir do YouTube.
             </DialogDescription>
           </DialogHeader>
 
@@ -804,14 +883,40 @@ export const PlaylistPage: React.FC<PlaylistPageProps> = ({ onPlayTrackInKaraoke
               />
             </div>
 
+            {/* Segment Toggle */}
+            <div className="grid grid-cols-2 gap-2 bg-muted/40 p-1 rounded-xl border border-border/30 mb-2">
+              <button
+                type="button"
+                onClick={() => setUploadMode('file')}
+                className={`py-1.5 rounded-lg text-xs font-bold transition-all duration-200 cursor-pointer ${
+                  uploadMode === 'file'
+                    ? 'bg-primary text-primary-foreground shadow-sm shadow-primary/10'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                Arquivo Local
+              </button>
+              <button
+                type="button"
+                onClick={() => setUploadMode('youtube')}
+                className={`py-1.5 rounded-lg text-xs font-bold transition-all duration-200 cursor-pointer ${
+                  uploadMode === 'youtube'
+                    ? 'bg-primary text-primary-foreground shadow-sm shadow-primary/10'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                Link do YouTube 🎬
+              </button>
+            </div>
+
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-muted-foreground block">
-                Título da Faixa *
+                Título da Faixa {uploadMode === 'file' ? '*' : '(Opcional)'}
               </label>
               <Input
                 type="text"
-                required
-                placeholder="Ex: Diálogo 01 - Apresentações"
+                required={uploadMode === 'file'}
+                placeholder={uploadMode === 'file' ? "Ex: Diálogo 01 - Apresentações" : "Título personalizado (ou título do vídeo se vazio)"}
                 value={newTrackTitle}
                 onChange={(e) => setNewTrackTitle(e.target.value)}
                 className="bg-muted/40 border-transparent hover:border-border text-foreground focus-visible:bg-background focus-visible:ring-primary/20 focus-visible:border-primary rounded-xl h-10 transition-all text-xs font-semibold"
@@ -831,18 +936,41 @@ export const PlaylistPage: React.FC<PlaylistPageProps> = ({ onPlayTrackInKaraoke
               />
             </div>
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-muted-foreground block">
-                Arquivo de Áudio *
-              </label>
-              <Input
-                type="file"
-                accept="audio/*"
-                required
-                onChange={(e) => setNewFile(e.target.files?.[0] || null)}
-                className="bg-muted/40 border-transparent hover:border-border text-foreground focus-visible:bg-background focus-visible:ring-primary/20 focus-visible:border-primary rounded-xl h-10 transition-all text-xs font-semibold pt-2"
-              />
-            </div>
+            {uploadMode === 'file' ? (
+              <div className="space-y-1.5 animate-fadeIn">
+                <label className="text-xs font-bold text-muted-foreground block">
+                  Arquivo de Áudio *
+                </label>
+                <Input
+                  type="file"
+                  accept="audio/*"
+                  required={uploadMode === 'file'}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] || null;
+                    setNewFile(file);
+                    if (file && !newTrackTitle.trim()) {
+                      const nameWithoutExt = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
+                      setNewTrackTitle(nameWithoutExt);
+                    }
+                  }}
+                  className="bg-muted/40 border-transparent hover:border-border text-foreground focus-visible:bg-background focus-visible:ring-primary/20 focus-visible:border-primary rounded-xl h-10 transition-all text-xs font-semibold pt-2"
+                />
+              </div>
+            ) : (
+              <div className="space-y-1.5 animate-fadeIn">
+                <label className="text-xs font-bold text-muted-foreground block">
+                  Link do YouTube *
+                </label>
+                <Input
+                  type="text"
+                  placeholder="Ex: https://www.youtube.com/watch?v=..."
+                  required={uploadMode === 'youtube'}
+                  value={youtubeUrl}
+                  onChange={(e) => setYoutubeUrl(e.target.value)}
+                  className="bg-muted/40 border-transparent hover:border-border text-foreground focus-visible:bg-background focus-visible:ring-primary/20 focus-visible:border-primary rounded-xl h-10 transition-all text-xs font-semibold"
+                />
+              </div>
+            )}
 
             <DialogFooter className="pt-2">
               <Button
@@ -859,7 +987,7 @@ export const PlaylistPage: React.FC<PlaylistPageProps> = ({ onPlayTrackInKaraoke
                 className="bg-primary hover:bg-primary/90 text-primary-foreground font-extrabold rounded-xl text-xs h-10 px-5 cursor-pointer shadow-lg shadow-primary/15 flex items-center gap-1.5"
               >
                 {isUploading ? <RefreshCw size={12} className="animate-spin" /> : null}
-                {isUploading ? 'Salvando...' : 'Adicionar Faixa'}
+                {isUploading ? 'Processando...' : 'Adicionar Faixa'}
               </Button>
             </DialogFooter>
           </form>
