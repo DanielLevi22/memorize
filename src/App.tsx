@@ -5,7 +5,7 @@ import {
   Search, Settings, Sun, Moon,
   ChevronLeft, LayoutDashboard, TrendingUp, ClipboardList,
   BookOpen, Info, MessageSquare, Timer, RefreshCw, Cloud, Headphones,
-  Lock, Key, Eye, EyeOff
+  Lock, Key, Eye, EyeOff, Mic
 } from 'lucide-react';
 
 // Banco de Dados e Types
@@ -29,6 +29,7 @@ import { HistoryPage } from './pages/HistoryPage';
 import { ReadingPage } from './pages/ReadingPage';
 import { ConversationPage } from './pages/ConversationPage';
 import { PlaylistPage } from './pages/PlaylistPage';
+import { KaraokePage } from './pages/KaraokePage';
 import { DecksPage } from './pages/DecksPage';
 import { ExamsPage } from './pages/ExamsPage';
 import { ExamArenaPage } from './pages/ExamArenaPage';
@@ -99,13 +100,14 @@ function App() {
   // --- ESTADO DA SIDEBAR E NAVEGAÇÃO INTERNA ---
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDesktopSidebarOpen, setIsDesktopSidebarOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke'>('dashboard');
+  const [activeKaraokeTrackId, setActiveKaraokeTrackId] = useState<string | null>(null);
   const [guideInitialTab, setGuideInitialTab] = useState<'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math'>('overview');
   const [searchTerm, setSearchTerm] = useState('');
   const [isPomodoroOpen, setIsPomodoroOpen] = useState(false);
 
   const handleSetActiveTab = (
-    tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams',
+    tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke',
     subTab?: 'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math'
   ) => {
     setActiveTab(tab);
@@ -1159,7 +1161,7 @@ function App() {
   }, []);
 
   // --- FLUXO NAVEGAÇÃO SIDEBAR ---
-  const handleNavigateFromSidebar = (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams') => {
+  const handleNavigateFromSidebar = (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke') => {
     setActiveTab(tab);
     setGuideInitialTab('overview');
     setCurrentView('dashboard');
@@ -1465,6 +1467,24 @@ function App() {
 
             <Button 
               variant="ghost"
+              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
+                activeTab === 'karaoke' 
+                  ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+              }`}
+              onClick={() => {
+                setActiveTab('karaoke');
+                setCurrentView('dashboard');
+              }}
+            >
+              <div className="flex items-center gap-3">
+                <Mic size={16} />
+                <span>Karaokê e Estúdio</span>
+              </div>
+            </Button>
+
+            <Button 
+              variant="ghost"
               className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                 activeTab === 'cards' 
                   ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
@@ -1715,6 +1735,21 @@ function App() {
                     <div className="flex items-center gap-3">
                       <Headphones size={16} />
                       <span>Playlist</span>
+                    </div>
+                  </Button>
+
+                  <Button 
+                    variant="ghost"
+                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
+                      activeTab === 'karaoke' 
+                        ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+                    }`}
+                    onClick={() => handleNavigateFromSidebar('karaoke')}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Mic size={16} />
+                      <span>Karaokê e Estúdio</span>
                     </div>
                   </Button>
 
@@ -2093,7 +2128,20 @@ function App() {
             )}
 
             {activeTab === 'playlist' && (
-              <PlaylistPage />
+              <PlaylistPage 
+                onPlayTrackInKaraoke={(trackId) => {
+                  setActiveKaraokeTrackId(trackId);
+                  setActiveTab('karaoke');
+                }}
+              />
+            )}
+
+            {activeTab === 'karaoke' && (
+              <KaraokePage
+                initialTrackId={activeKaraokeTrackId}
+                onClearTrack={() => setActiveKaraokeTrackId(null)}
+                setActiveTab={setActiveTab}
+              />
             )}
             {/* TAB 7: GUIA E AJUDA */}
             {activeTab === 'guide' && (

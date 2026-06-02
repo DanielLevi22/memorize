@@ -238,6 +238,7 @@ export interface TranscriptionLine {
   text: string;
   translation?: string; // Tradução opcional da frase/letra
   startTime: number;    // Tempo de início em segundos (ex: 12.5)
+  endTime?: number;     // Tempo de término em segundos (opcional)
   difficulty?: 'none' | 'easy' | 'hard'; // Nível de dificuldade para foco visual
 }
 

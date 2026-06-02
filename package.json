@@ -25,7 +25,6 @@
     "framer-motion": "^12.40.0",
     "jszip": "^3.10.1",
     "lucide-react": "^1.16.0",
-    "onnxruntime-node": "^1.26.0",
     "pdfjs-dist": "^5.6.205",
     "radix-ui": "^1.4.3",
     "react": "^19.2.6",
