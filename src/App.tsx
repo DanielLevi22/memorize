@@ -18,6 +18,7 @@ import { resolveDeckPreset } from './utils/presets';
 import { getStreak, recordStudy } from './utils/streak';
 import { getDeckStudyableCards as calculateDeckStudyableCards } from './utils/limits';
 import { syncNoteCards } from './utils/siblings';
+import { classifyLocal, classifyWithGemini } from './utils/cefrClassifier';
 
 // Páginas do Projeto
 import { DashboardPage } from './pages/DashboardPage';
@@ -622,6 +623,22 @@ function App() {
     audioBlob: Blob | null,
     tags: string[]
   ) => {
+    // Helper function to classify and save card level asynchronously in the background
+    const classifyCardAsync = async (card: Card) => {
+      const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
+      if (geminiApiKey.trim()) {
+        try {
+          const resolvedMap = await classifyWithGemini([card.front.toLowerCase()], geminiApiKey);
+          const resolvedLvl = resolvedMap[card.front.toLowerCase()];
+          if (resolvedLvl) {
+            await db.cards.update(card.id, { cefrLevel: resolvedLvl });
+          }
+        } catch (err) {
+          console.error("Async Gemini classification failed:", err);
+        }
+      }
+    };
+
     if (cardToEdit) {
       // 1. Editar Nota e Sincronizar Cartões
       const note = await db.notes.get(cardToEdit.noteId);
@@ -641,9 +658,23 @@ function App() {
         const { toAdd, toUpdate, toDelete } = syncNoteCards(updatedNote, existingCards);
 
         if (toAdd.length > 0) {
+          for (const card of toAdd) {
+            const localLvl = classifyLocal(card.front);
+            if (localLvl) {
+              card.cefrLevel = localLvl;
+            } else {
+              classifyCardAsync(card);
+            }
+          }
           await db.cards.bulkAdd(toAdd);
         }
         for (const card of toUpdate) {
+          const localLvl = classifyLocal(card.front);
+          if (localLvl) {
+            card.cefrLevel = localLvl;
+          } else {
+            classifyCardAsync(card);
+          }
           await db.cards.put(card);
         }
         if (toDelete.length > 0) {
@@ -672,6 +703,14 @@ function App() {
 
       const { toAdd } = syncNoteCards(newNote, []);
       if (toAdd.length > 0) {
+        for (const card of toAdd) {
+          const localLvl = classifyLocal(card.front);
+          if (localLvl) {
+            card.cefrLevel = localLvl;
+          } else {
+            classifyCardAsync(card);
+          }
+        }
         await db.cards.bulkAdd(toAdd);
       }
 
@@ -895,6 +934,7 @@ function App() {
       front: c.front,
       back: c.back,
       context: c.context,
+      cefrLevel: classifyLocal(c.front) || undefined,
       interval: 0,
       ease: 2.5,
       repetitions: 0,
@@ -1294,7 +1334,7 @@ function App() {
           <nav className="flex flex-col gap-2">
             <Button 
               variant="ghost"
-              className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
+              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                 activeTab === 'dashboard' 
                   ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
@@ -1308,11 +1348,6 @@ function App() {
                 <LayoutDashboard size={16} />
                 <span>Dashboard</span>
               </div>
-              {totalDue > 0 && (
-                <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full shadow-sm ${activeTab === 'dashboard' ? 'bg-background text-primary' : 'bg-rose-500 text-white shadow-rose-500/20'}`}>
-                  {totalDue}
-                </span>
-              )}
             </Button>
 
             <Button 
@@ -1389,7 +1424,7 @@ function App() {
 
             <Button 
               variant="ghost"
-              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
+              className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                 activeTab === 'cefr' 
                   ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
@@ -1403,6 +1438,11 @@ function App() {
                 <Layers size={16} />
                 <span>Baralhos (SRS)</span>
               </div>
+              {totalDue > 0 && (
+                <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full shadow-sm ${activeTab === 'cefr' ? 'bg-background text-primary' : 'bg-rose-500 text-white shadow-rose-500/20'}`}>
+                  {totalDue}
+                </span>
+              )}
             </Button>
 
             <Button 
@@ -1570,7 +1610,7 @@ function App() {
                 <nav className="flex flex-col gap-2">
                   <Button 
                     variant="ghost"
-                    className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
+                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                       activeTab === 'dashboard' 
                         ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
                         : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
@@ -1581,11 +1621,6 @@ function App() {
                       <LayoutDashboard size={16} />
                       <span>Dashboard</span>
                     </div>
-                    {totalDue > 0 && (
-                      <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full shadow-sm ${activeTab === 'dashboard' ? 'bg-background text-primary' : 'bg-rose-500 text-white shadow-rose-500/20'}`}>
-                        {totalDue}
-                      </span>
-                    )}
                   </Button>
 
                   <Button 
@@ -1650,7 +1685,7 @@ function App() {
 
                   <Button 
                     variant="ghost"
-                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
+                    className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                       activeTab === 'cefr' 
                         ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
                         : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
@@ -1661,6 +1696,11 @@ function App() {
                       <Layers size={16} />
                       <span>Baralhos (SRS)</span>
                     </div>
+                    {totalDue > 0 && (
+                      <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full shadow-sm ${activeTab === 'cefr' ? 'bg-background text-primary' : 'bg-rose-500 text-white shadow-rose-500/20'}`}>
+                        {totalDue}
+                      </span>
+                    )}
                   </Button>
 
                   <Button 

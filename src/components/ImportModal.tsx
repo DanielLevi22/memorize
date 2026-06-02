@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import type { Deck, Card } from '../types';
 import { db } from '../db/db';
 import { parseCSV } from '../utils/csv';
+import { classifyLocal } from '../utils/cefrClassifier';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -422,6 +423,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
           back: backVal.trim(),
           context: colMappings.context !== -1 && row[colMappings.context] ? row[colMappings.context].trim() : '',
           audio: audioBlob,
+          cefrLevel: classifyLocal(frontVal.trim()) || undefined,
           interval: isNaN(srsInterval) ? 0 : srsInterval,
           ease: isNaN(srsEase) ? 2.5 : srsEase,
           repetitions: isNaN(srsRepetitions) ? 0 : srsRepetitions,
@@ -498,6 +500,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
           back: card.back,
           context: card.context || '',
           audio: audioBlob,
+          cefrLevel: card.cefrLevel || classifyLocal(card.front) || undefined,
           interval: typeof card.interval === 'number' ? card.interval : 0,
           ease: typeof card.ease === 'number' ? card.ease : 2.5,
           repetitions: typeof card.repetitions === 'number' ? card.repetitions : 0,

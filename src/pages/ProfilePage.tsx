@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Flame, Trophy, Sparkles, Award } from 'lucide-react';
+import { Plus, Flame, Trophy, Sparkles, Award, Loader2, CheckCircle2 } from 'lucide-react';
 import { Card as ShadcnCard } from '../components/ui/card';
 import { Progress } from '../components/ui/progress';
 import { db } from '../db/db';
@@ -33,31 +33,49 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
   const [estimatedLevel, setEstimatedLevel] = useState('Iniciante');
   const [estimatedLevelCode, setEstimatedLevelCode] = useState('-');
 
+  const [totalCards, setTotalCards] = useState(0);
+  const [classifiedCards, setClassifiedCards] = useState(0);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisStatus, setAnalysisStatus] = useState('');
+
   useEffect(() => {
     const analyzeCards = async () => {
       try {
+        setIsAnalyzing(true);
+        setAnalysisStatus("Lendo cartões do banco de dados...");
+        
         const allCards = await db.cards.toArray();
+        setTotalCards(allCards.length);
+
+        // 1. Process local classification for ALL unclassified cards in DB
+        let classifiedLocalCount = 0;
+        const unclassifiedAll: typeof allCards = [];
+
+        for (const card of allCards) {
+          if (!card.cefrLevel) {
+            const localLvl = classifyLocal(card.front);
+            if (localLvl) {
+              card.cefrLevel = localLvl;
+              await db.cards.update(card.id, { cefrLevel: localLvl });
+              classifiedLocalCount++;
+            } else {
+              unclassifiedAll.push(card);
+            }
+          }
+        }
+
+        // Update counts of classified cards
+        let currentClassified = allCards.filter(c => c.cefrLevel).length;
+        setClassifiedCards(currentClassified);
+
         // Cards marked as learned (at least 1 success repetition or active interval)
         const studied = allCards.filter(c => c.repetitions > 0 || c.interval > 0);
         setTotalLearned(studied.length);
 
         const counts = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0, C2: 0 };
-        const unclassified: typeof studied = [];
-
-        // 1. Process with cached or local dictionary
         for (const card of studied) {
           if (card.cefrLevel) {
             counts[card.cefrLevel as keyof typeof counts]++;
-          } else {
-            const localLvl = classifyLocal(card.front);
-            if (localLvl) {
-              card.cefrLevel = localLvl;
-              counts[localLvl]++;
-              // Save to cache asynchronously in Dexie
-              await db.cards.update(card.id, { cefrLevel: localLvl });
-            } else {
-              unclassified.push(card);
-            }
           }
         }
 
@@ -65,11 +83,13 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
         setCefrCounts({ ...counts });
         updateEstimatedLevelState(counts);
 
-        // 2. Background query for unclassified cards via Gemini (if API Key is available)
+        // 2. Background query for remaining unclassified cards via Gemini (if API Key is available)
         const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
-        if (geminiApiKey.trim() && unclassified.length > 0) {
+        if (geminiApiKey.trim() && unclassifiedAll.length > 0) {
+          setAnalysisStatus(`Analisando com I.A. Gemini (${unclassifiedAll.length} pendentes)...`);
+          
           // Take first 20 unclassified cards to avoid huge prompts
-          const batch = unclassified.slice(0, 20);
+          const batch = unclassifiedAll.slice(0, 20);
           const wordsToClassify = batch.map(c => c.front.toLowerCase());
           
           const resolvedMap = await classifyWithGemini(wordsToClassify, geminiApiKey);
@@ -80,7 +100,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
             const resolvedLvl = resolvedMap[wordKey];
             if (resolvedLvl) {
               card.cefrLevel = resolvedLvl;
-              counts[resolvedLvl as keyof typeof counts]++;
+              if (card.repetitions > 0 || card.interval > 0) {
+                counts[resolvedLvl as keyof typeof counts]++;
+              }
               await db.cards.update(card.id, { cefrLevel: resolvedLvl });
               updatedAny = true;
             }
@@ -89,10 +111,14 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
           if (updatedAny) {
             setCefrCounts({ ...counts });
             updateEstimatedLevelState(counts);
+            currentClassified = (await db.cards.toArray()).filter(c => c.cefrLevel).length;
+            setClassifiedCards(currentClassified);
           }
         }
       } catch (err) {
         console.error("CEFR calculation error:", err);
+      } finally {
+        setIsAnalyzing(false);
       }
     };
 
@@ -245,6 +271,33 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
               <p className="text-[8.5px] text-muted-foreground font-semibold leading-normal">
                 * As estimativas são baseadas nas cartas do seu baralho em que você já realizou revisões bem-sucedidas. Cartas novas ou em fase de re-aprendizado não são contabilizadas.
               </p>
+            </div>
+
+            {/* Status da Análise em Background */}
+            <div className="md:col-span-3 border-t border-border/30 pt-4 mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-[10px]">
+              <div className="flex items-center gap-2 text-muted-foreground font-bold">
+                {isAnalyzing ? (
+                  <>
+                    <Loader2 size={13} className="text-primary animate-spin shrink-0" />
+                    <span>{analysisStatus}</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 size={13} className="text-emerald-500 shrink-0" />
+                    <span>Análise de complexidade concluída. {classifiedCards} de {totalCards} cartas analisadas.</span>
+                  </>
+                )}
+              </div>
+              
+              {/* Barra de Progresso de Classificação */}
+              {totalCards > 0 && classifiedCards < totalCards && (
+                <div className="flex items-center gap-2 w-full sm:max-w-[200px]">
+                  <Progress value={(classifiedCards / totalCards) * 100} className="h-1 bg-muted flex-1" />
+                  <span className="font-bold text-foreground text-[9px] whitespace-nowrap">
+                    {Math.round((classifiedCards / totalCards) * 100)}%
+                  </span>
+                </div>
+              )}
             </div>
 
           </div>

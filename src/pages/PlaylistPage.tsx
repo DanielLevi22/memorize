@@ -35,6 +35,20 @@ import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
+import { getWordLevenshteinDistance, diffWords, type DiffWord } from '../utils/srs';
+import { decodeAudioFile, findSilenceSplitPoints, bufferToWav, adjustTimestampsSafeguard } from '../utils/audioChunker';
+import { separateVocalsCloud } from '../utils/vocalSeparationCloud';
+
+const cleanString = (str: string) => {
+  if (!str) return '';
+  return str
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"']/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+};
 
 export const PlaylistPage: React.FC = () => {
   // DB States
@@ -64,6 +78,49 @@ export const PlaylistPage: React.FC = () => {
   const [tempLines, setTempLines] = useState<TranscriptionLine[]>([]);
   const [isTranscribingAi, setIsTranscribingAi] = useState(false);
   const [isDictationMode, setIsDictationMode] = useState(false);
+
+  // New Modes States
+  const [transcriptionViewMode, setTranscriptionViewMode] = useState<'normal' | 'playback' | 'pronunciation'>('normal');
+  const [isListeningSpeech, setIsListeningSpeech] = useState(false);
+  const [speechTranscript, setSpeechTranscript] = useState('');
+  const [speechSimilarity, setSpeechSimilarity] = useState<number | null>(null);
+  const [speechWordDiffs, setSpeechWordDiffs] = useState<DiffWord[]>([]);
+  const [lineScores, setLineScores] = useState<Record<number, number>>({});
+  const [transcribingProgress, setTranscribingProgress] = useState('');
+  const recognitionRef = useRef<any>(null);
+  const shouldReconnectSpeechRef = useRef(false);
+  const activeLineIdxRef = useRef(-1);
+  const activeLinesRef = useRef<TranscriptionLine[]>([]);
+  
+  // Vocal reduction refs and state
+  const vocalReductionSplitterRef = useRef<ChannelSplitterNode | null>(null);
+  const vocalReductionInverterRef = useRef<GainNode | null>(null);
+  const vocalReductionSumRef = useRef<GainNode | null>(null);
+  const [isVocalReductionActive, setIsVocalReductionActive] = useState(false);
+
+  // AI Vocal Separation states
+  const [isIaInstrumentalActive, setIsIaInstrumentalActive] = useState(false);
+
+  // Cloud AI Vocal Separation states (HuggingFace Gradio Space — Demucs HTDemucs, grátis)
+  const [isProcessingCloudSeparation, setIsProcessingCloudSeparation] = useState(false);
+  const [cloudSeparationProgress, setCloudSeparationProgress] = useState(0);
+  const [cloudSeparationMessage, setCloudSeparationMessage] = useState('');
+
+  useEffect(() => {
+    if (activeTranscriptionTrack) {
+      setIsIaInstrumentalActive(!!activeTranscriptionTrack.instrumentalFile);
+    } else {
+      setIsIaInstrumentalActive(false);
+    }
+  }, [activeTranscriptionTrack]);
+  
+  useEffect(() => {
+    activeLineIdxRef.current = activeLineIdx;
+  }, [activeLineIdx]);
+
+  useEffect(() => {
+    activeLinesRef.current = activeTranscriptionTrack?.transcriptionLines || [];
+  }, [activeTranscriptionTrack]);
   
   const activeLineRef = useRef<HTMLDivElement | null>(null);
   const lastPausedLineIdxRef = useRef<number>(-1);
@@ -219,7 +276,25 @@ export const PlaylistPage: React.FC = () => {
 
       const source = audioContext.createMediaElementSource(audioElement);
       source.connect(analyser);
-      analyser.connect(audioContext.destination);
+      
+      if (isVocalReductionActive) {
+        const splitter = audioContext.createChannelSplitter(2);
+        const inverter = audioContext.createGain();
+        inverter.gain.value = -1;
+        const sumNode = audioContext.createGain();
+        
+        vocalReductionSplitterRef.current = splitter;
+        vocalReductionInverterRef.current = inverter;
+        vocalReductionSumRef.current = sumNode;
+        
+        analyser.connect(splitter);
+        splitter.connect(sumNode, 0, 0);
+        splitter.connect(inverter, 1, 0);
+        inverter.connect(sumNode);
+        sumNode.connect(audioContext.destination);
+      } else {
+        analyser.connect(audioContext.destination);
+      }
 
       if (audioContext.state === 'suspended') {
         audioElement.addEventListener('play', () => {
@@ -228,6 +303,168 @@ export const PlaylistPage: React.FC = () => {
       }
     } catch (err) {
       console.warn("Visualizer setup failed:", err);
+    }
+  };
+
+  const toggleVocalReduction = (active: boolean) => {
+    setIsVocalReductionActive(active);
+    
+    if (!audioContextRef.current || !analyserRef.current) return;
+    const analyser = analyserRef.current;
+    const audioContext = audioContextRef.current;
+    
+    try {
+      analyser.disconnect();
+      
+      if (active) {
+        const splitter = audioContext.createChannelSplitter(2);
+        const inverter = audioContext.createGain();
+        inverter.gain.value = -1;
+        const sumNode = audioContext.createGain();
+        
+        vocalReductionSplitterRef.current = splitter;
+        vocalReductionInverterRef.current = inverter;
+        vocalReductionSumRef.current = sumNode;
+        
+        analyser.connect(splitter);
+        splitter.connect(sumNode, 0, 0);
+        splitter.connect(inverter, 1, 0);
+        inverter.connect(sumNode);
+        sumNode.connect(audioContext.destination);
+        toast.success('Filtro de atenuação vocal ativado!');
+      } else {
+        analyser.connect(audioContext.destination);
+        vocalReductionSplitterRef.current = null;
+        vocalReductionInverterRef.current = null;
+        vocalReductionSumRef.current = null;
+        toast.info('Filtro de atenuação vocal desativado.');
+      }
+    } catch (e) {
+      console.warn('Erro ao alternar roteamento de áudio:', e);
+      try {
+        analyser.disconnect();
+        analyser.connect(audioContext.destination);
+      } catch (innerErr) {}
+    }
+  };
+
+  const toggleIaInstrumental = (active: boolean, trackOverride?: typeof currentTrack) => {
+    setIsIaInstrumentalActive(active);
+    
+    // Se estiver tocando a faixa atual, precisamos recarregar o áudio mantendo o tempo atual.
+    // trackOverride is used to avoid stale React state when called right after a setState.
+    const trackToUse = trackOverride || currentTrack;
+    if (trackToUse && audioRef.current) {
+      const currentTime = audioRef.current.currentTime;
+      const wasPlaying = isPlaying;
+      
+      cleanupAudio();
+      
+      try {
+        const fileToPlay = active && trackToUse.instrumentalFile ? trackToUse.instrumentalFile : trackToUse.audioFile;
+        const url = URL.createObjectURL(fileToPlay);
+        setActiveAudioUrl(url);
+        
+        const audio = new Audio(url);
+        audio.playbackRate = playbackSpeed;
+        audioRef.current = audio;
+        setupVisualizer(audio);
+        
+        audio.onloadedmetadata = () => {
+          setDuration(audio.duration);
+          audio.currentTime = currentTime;
+          if (wasPlaying) {
+            audio.play().catch(e => console.warn(e));
+            setIsPlaying(true);
+          }
+        };
+
+        audio.onended = () => {
+          if (isLoopingRef.current) {
+            audio.currentTime = 0;
+            audio.play().catch(e => console.warn(e));
+            return;
+          }
+          const trackRepeat = trackToUse.repeatTimes ?? 1;
+          setPlayCount(prev => {
+            const next = prev + 1;
+            if (trackRepeat === 0 || next <= trackRepeat) {
+              audio.currentTime = 0;
+              audio.play().catch(e => console.warn(e));
+              return next;
+            } else {
+              handleNextTrack(trackToUse);
+              return 1;
+            }
+          });
+        };
+
+        progressIntervalRef.current = window.setInterval(() => {
+          if (audioRef.current) {
+            setProgress(audioRef.current.currentTime);
+          }
+        }, 100);
+      } catch (err) {
+        console.error('Erro ao alternar para áudio de IA:', err);
+      }
+    }
+  };
+
+
+  /**
+   * Removes vocals using a free HuggingFace Gradio Space (Demucs HTDemucs).
+   * No API key required. Quality is significantly better than the local Spleeter model.
+   */
+  const handleStartCloudVocalSeparation = async () => {
+    if (!activeTranscriptionTrack) return;
+
+    setIsProcessingCloudSeparation(true);
+    setCloudSeparationProgress(0);
+    setCloudSeparationMessage('Conectando ao servidor...');
+
+    try {
+      const result = await separateVocalsCloud(
+        activeTranscriptionTrack.audioFile,
+        (progress, message) => {
+          setCloudSeparationProgress(progress);
+          setCloudSeparationMessage(message);
+        }
+      );
+
+      setCloudSeparationMessage('Salvando no banco...');
+
+      // Save to IndexedDB
+      await db.audioTracks.update(activeTranscriptionTrack.id, {
+        instrumentalFile: result.instrumentalBlob,
+        updatedAt: Date.now()
+      });
+
+      // Update all relevant state
+      const updatedTrack = {
+        ...activeTranscriptionTrack,
+        instrumentalFile: result.instrumentalBlob,
+        updatedAt: Date.now()
+      };
+      setActiveTranscriptionTrack(updatedTrack);
+      setTracks(prev => prev.map(t => t.id === updatedTrack.id ? updatedTrack : t));
+      if (currentTrack && currentTrack.id === activeTranscriptionTrack.id) {
+        setCurrentTrack(updatedTrack);
+      }
+
+      setIsIaInstrumentalActive(true);
+      toast.success(`Voz removida com Demucs (${result.source})! Qualidade profissional ✨`);
+
+      // If audio is currently playing, reload with the new instrumental immediately
+      if (currentTrack && currentTrack.id === activeTranscriptionTrack.id && audioRef.current) {
+        toggleIaInstrumental(true, updatedTrack);
+      }
+    } catch (err: any) {
+      console.error('Cloud vocal separation failed:', err);
+      toast.error(err?.message || 'Falha na separação via nuvem.');
+    } finally {
+      setIsProcessingCloudSeparation(false);
+      setCloudSeparationProgress(0);
+      setCloudSeparationMessage('');
     }
   };
 
@@ -293,13 +530,142 @@ export const PlaylistPage: React.FC = () => {
     draw();
   };
 
+  const stopSpeechRecognition = () => {
+    shouldReconnectSpeechRef.current = false;
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {
+        console.warn('Error stopping speech recognition:', e);
+      }
+      recognitionRef.current = null;
+    }
+    setIsListeningSpeech(false);
+  };
+
+  const startSpeechRecognition = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      toast.error('Reconhecimento de voz não é suportado neste navegador. Use o Chrome ou Edge.');
+      return;
+    }
+
+    if (isListeningSpeech) {
+      stopSpeechRecognition();
+      return;
+    }
+
+    shouldReconnectSpeechRef.current = true;
+    setIsListeningSpeech(true);
+    setSpeechTranscript('');
+    setSpeechSimilarity(null);
+    setSpeechWordDiffs([]);
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = (event: any) => {
+        let interimTranscript = '';
+        let finalTranscript = '';
+        
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          } else {
+            interimTranscript += event.results[i][0].transcript;
+          }
+        }
+        
+        const spokenText = finalTranscript || interimTranscript;
+        if (!spokenText.trim()) return;
+
+        const currentIdx = activeLineIdxRef.current;
+        const lines = activeLinesRef.current;
+        
+        if (currentIdx >= 0 && lines[currentIdx]) {
+          const expectedText = lines[currentIdx].text;
+          setSpeechTranscript(spokenText);
+
+          const cleanSpoken = cleanString(spokenText);
+          const cleanExpected = cleanString(expectedText);
+
+          const spokenWords = cleanSpoken.split(/\s+/).filter(Boolean);
+          const expectedWords = cleanExpected.split(/\s+/).filter(Boolean);
+
+          let similarity = 0;
+          if (spokenWords.length > 0 && expectedWords.length > 0) {
+            const wordDist = getWordLevenshteinDistance(spokenWords, expectedWords);
+            const maxWords = Math.max(spokenWords.length, expectedWords.length);
+            similarity = Math.max(0, 1 - wordDist / maxWords) * 100;
+          } else {
+            similarity = cleanSpoken === cleanExpected ? 100 : 0;
+          }
+
+          const roundedSimilarity = Math.round(similarity);
+          setSpeechSimilarity(roundedSimilarity);
+
+          const diffResult = diffWords(spokenText, expectedText);
+          setSpeechWordDiffs(diffResult);
+
+          if (finalTranscript) {
+            setLineScores(prev => ({
+              ...prev,
+              [currentIdx]: roundedSimilarity
+            }));
+            
+            if (roundedSimilarity >= 80) {
+              toast.success(`Excelente! Precisão de ${roundedSimilarity}%`);
+            } else if (roundedSimilarity >= 50) {
+              toast.info(`Muito bom! Precisão de ${roundedSimilarity}%`);
+            } else {
+              toast.error(`Precisão de ${roundedSimilarity}%. Tente novamente!`);
+            }
+          }
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.error('Speech recognition error:', event);
+        if (event.error === 'not-allowed') {
+          toast.error('Acesso ao microfone negado.');
+          stopSpeechRecognition();
+        }
+      };
+
+      recognition.onend = () => {
+        if (shouldReconnectSpeechRef.current) {
+          try {
+            recognitionRef.current?.start();
+          } catch (e) {
+            // Se já estiver rodando, ignora
+          }
+        } else {
+          setIsListeningSpeech(false);
+        }
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (error) {
+      console.error('Failed to start speech recognition:', error);
+      setIsListeningSpeech(false);
+    }
+  };
+
   // Cleanup current playing audio
   const cleanupAudio = () => {
     cleanupVisualizer();
+    stopSpeechRecognition();
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current = null;
     }
+    vocalReductionSplitterRef.current = null;
+    vocalReductionInverterRef.current = null;
+    vocalReductionSumRef.current = null;
     if (progressIntervalRef.current) {
       window.clearInterval(progressIntervalRef.current);
       progressIntervalRef.current = null;
@@ -315,7 +681,9 @@ export const PlaylistPage: React.FC = () => {
     cleanupAudio();
 
     try {
-      const url = URL.createObjectURL(track.audioFile);
+      const useInstrumental = isIaInstrumentalActive && track.instrumentalFile;
+      const fileToPlay = useInstrumental && track.instrumentalFile ? track.instrumentalFile : track.audioFile;
+      const url = URL.createObjectURL(fileToPlay);
       setActiveAudioUrl(url);
       setCurrentTrack(track);
 
@@ -671,6 +1039,7 @@ export const PlaylistPage: React.FC = () => {
   };
 
   const handleCloseTranscription = () => {
+    stopSpeechRecognition();
     setActiveTranscriptionTrack(null);
     setIsLoopingLine(false);
   };
@@ -890,104 +1259,266 @@ export const PlaylistPage: React.FC = () => {
     }
 
     const audioFile = activeTranscriptionTrack.audioFile;
-    const sizeInMB = audioFile.size / (1024 * 1024);
-    if (sizeInMB > 12) {
-      toast.error(`O arquivo de áudio é muito grande (${sizeInMB.toFixed(1)}MB). O limite para transcrição por IA é de 12MB.`);
-      return;
-    }
-
+    
     setIsTranscribingAi(true);
-    try {
-      const base64Audio = await blobToBase64(audioFile);
+    setTranscribingProgress('Iniciando...');
+    
+    const parseTimeStringToSeconds = (timeStr: string): number => {
+      if (typeof timeStr === 'number') return timeStr;
+      if (typeof timeStr !== 'string') return 0;
+      const parts = timeStr.split(':');
+      if (parts.length === 2) {
+        const min = parseInt(parts[0], 10) || 0;
+        const secParts = parts[1].split('.');
+        const sec = parseInt(secParts[0], 10) || 0;
+        const ms = secParts[1] ? parseInt(secParts[1], 10) / Math.pow(10, secParts[1].length) : 0;
+        return min * 60 + sec + ms;
+      } else if (parts.length === 3) {
+        const hr = parseInt(parts[0], 10) || 0;
+        const min = parseInt(parts[1], 10) || 0;
+        const secParts = parts[2].split('.');
+        const sec = parseInt(secParts[0], 10) || 0;
+        const ms = secParts[1] ? parseInt(secParts[1], 10) / Math.pow(10, secParts[1].length) : 0;
+        return hr * 3600 + min * 60 + sec + ms;
+      }
+      return parseFloat(timeStr) || 0;
+    };
+
+    const saveFinalLines = async (finalLines: TranscriptionLine[]) => {
+      await db.audioTracks.update(activeTranscriptionTrack.id, {
+        transcriptionLines: finalLines,
+        updatedAt: Date.now()
+      });
       
-      const promptText = `
+      const updatedTrack = {
+        ...activeTranscriptionTrack,
+        transcriptionLines: finalLines,
+        updatedAt: Date.now()
+      };
+      
+      setActiveTranscriptionTrack(updatedTrack);
+      setTracks(prev => prev.map(t => t.id === updatedTrack.id ? updatedTrack : t));
+      if (currentTrack?.id === updatedTrack.id) {
+        setCurrentTrack(updatedTrack);
+      }
+      
+      setTempLines(finalLines);
+      setTranscriptionText(finalLines.map(l => l.text).join('\n'));
+      setTranscriptionTab('view');
+    };
+
+    try {
+      let allLines: TranscriptionLine[] = [];
+      let chunkingSuccess = false;
+
+      // 1. Tenta decodificar o áudio localmente para fazer o chunking
+      try {
+        setTranscribingProgress('Decodificando áudio localmente...');
+        const audioBuffer = await decodeAudioFile(audioFile);
+        
+        setTranscribingProgress('Analisando pontos de silêncio para divisão...');
+        const splitPoints = findSilenceSplitPoints(audioBuffer, 30);
+        const totalChunks = splitPoints.length - 1;
+        
+        for (let i = 0; i < totalChunks; i++) {
+          const start = splitPoints[i];
+          const end = splitPoints[i + 1];
+          const chunkNum = i + 1;
+          
+          setTranscribingProgress(`Transcrevendo trecho ${chunkNum} de ${totalChunks} (${formatTime(start)} - ${formatTime(end)})...`);
+          
+          const wavSlice = bufferToWav(audioBuffer, start, end);
+          const base64Audio = await blobToBase64(wavSlice);
+          
+          const promptText = `
 Você é um assistente especialista em transcrição e tradução de áudio para aprendizado de idiomas.
-Transcreva o áudio fornecido linha por linha (frase por frase).
+O áudio fornecido é um trecho de uma gravação que começa em ${formatTime(start)} e termina em ${formatTime(end)}.
+Transcreva este trecho de áudio linha por linha de forma estritamente cronológica, do início ao fim do trecho.
+
 Para cada linha:
 1. Forneça o texto exato falado no idioma original ("text").
 2. Traduza a linha para o português do Brasil ("translation").
-3. Identifique o tempo de início aproximado em segundos ("startTime") em que a frase começa a ser dita no áudio. Seja o mais preciso possível na marcação do startTime (ex: 2.1, 10.5, 45.3). Os tempos devem ser estritamente crescentes.
-
-Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", seguindo o schema fornecido.
+3. Identifique o tempo de início aproximado relativo ao início deste trecho no formato de string "mm:ss" ou "mm:ss.xx" (ex: "00:03", "00:15.50").
 `;
 
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                {
-                  inlineData: {
-                    mimeType: audioFile.type || 'audio/mp3',
-                    data: base64Audio
-                  }
-                },
-                {
-                  text: promptText
-                }
-              ]
-            }],
-            generationConfig: {
-              responseMimeType: 'application/json',
-              responseSchema: {
-                type: 'OBJECT',
-                properties: {
-                  lines: {
-                    type: 'ARRAY',
-                    items: {
-                      type: 'OBJECT',
-                      properties: {
-                        text: { type: 'STRING' },
-                        translation: { type: 'STRING' },
-                        startTime: { type: 'NUMBER' }
-                      },
-                      required: ['text', 'startTime']
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{
+                  parts: [
+                    {
+                      inlineData: {
+                        mimeType: 'audio/wav',
+                        data: base64Audio
+                      }
+                    },
+                    {
+                      text: promptText
                     }
+                  ]
+                }],
+                generationConfig: {
+                  responseMimeType: 'application/json',
+                  responseSchema: {
+                    type: 'OBJECT',
+                    properties: {
+                      lines: {
+                        type: 'ARRAY',
+                        items: {
+                          type: 'OBJECT',
+                          properties: {
+                            text: { type: 'STRING' },
+                            translation: { type: 'STRING' },
+                            startTime: { type: 'STRING' }
+                          },
+                          required: ['text', 'startTime']
+                        }
+                      }
+                    },
+                    required: ['lines']
                   }
-                },
-                required: ['lines']
-              }
+                }
+              })
             }
-          })
+          );
+
+          if (!response.ok) {
+            throw new Error(`Erro na chamada da API para o trecho ${chunkNum}.`);
+          }
+
+          const result = await response.json();
+          const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (!rawText) {
+            throw new Error(`Resposta inválida para o trecho ${chunkNum}.`);
+          }
+
+          const parsed = JSON.parse(rawText);
+          if (parsed.lines && Array.isArray(parsed.lines)) {
+            const chunkLines = parsed.lines.map((l: any) => {
+              const relSeconds = parseTimeStringToSeconds(l.startTime);
+              const absSeconds = start + relSeconds;
+              return {
+                id: crypto.randomUUID(),
+                text: l.text,
+                translation: l.translation || '',
+                startTime: parseFloat(absSeconds.toFixed(2))
+              };
+            });
+            allLines.push(...chunkLines);
+          }
         }
-      );
-
-      if (!response.ok) {
-        throw new Error('Falha ao obter resposta do Gemini. Verifique sua API key e conexão.');
+        
+        chunkingSuccess = true;
+      } catch (chunkErr: any) {
+        console.warn('Erro durante o processamento em chunks. Caindo de volta para processamento completo:', chunkErr);
       }
 
-      const result = await response.json();
-      const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!rawText) {
-        throw new Error('A IA não retornou uma estrutura de transcrição válida.');
+      // 2. Fallback para transcrição direta do áudio completo se o chunking falhar ou não for suportado
+      if (!chunkingSuccess) {
+        setTranscribingProgress('Processando áudio completo (fallback)...');
+        
+        const sizeInMB = audioFile.size / (1024 * 1024);
+        if (sizeInMB > 12) {
+          throw new Error(`O arquivo de áudio é muito grande (${sizeInMB.toFixed(1)}MB) para o processamento em arquivo único. O limite é 12MB.`);
+        }
+        
+        const base64Audio = await blobToBase64(audioFile);
+        
+        const promptText = `
+Você é um assistente especialista em transcrição e tradução de áudio para aprendizado de idiomas.
+Transcreva o áudio fornecido linha por linha de forma estritamente cronológica, do início ao fim do áudio.
+Se houver partes repetidas (como o refrão), você deve transcrevê-las todas as vezes em que ocorrerem no áudio, respeitando o tempo correto em que são cantadas/faladas. Nunca pule repetições ou agrupe linhas fora de ordem.
+
+Para cada linha:
+1. Forneça o texto exato falado no idioma original ("text").
+2. Traduza a linha para o português do Brasil ("translation").
+3. Identifique o tempo de início aproximado no formato de string "mm:ss" ou "mm:ss.xx" (ex: "00:08", "01:03.50") em que a frase começa a ser dita no áudio. Os tempos devem ser estritamente crescentes.
+`;
+
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  {
+                    inlineData: {
+                      mimeType: audioFile.type || 'audio/mp3',
+                      data: base64Audio
+                    }
+                  },
+                  {
+                    text: promptText
+                  }
+                ]
+              }],
+              generationConfig: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                  type: 'OBJECT',
+                  properties: {
+                    lines: {
+                      type: 'ARRAY',
+                      items: {
+                        type: 'OBJECT',
+                        properties: {
+                          text: { type: 'STRING' },
+                          translation: { type: 'STRING' },
+                          startTime: { type: 'STRING' }
+                        },
+                        required: ['text', 'startTime']
+                      }
+                    }
+                  },
+                  required: ['lines']
+                }
+              }
+            })
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error('Falha ao obter resposta do Gemini para a transcrição completa.');
+        }
+
+        const result = await response.json();
+        const rawText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!rawText) {
+          throw new Error('A IA não retornou uma estrutura de transcrição válida.');
+        }
+
+        const parsed = JSON.parse(rawText);
+        if (!parsed.lines || !Array.isArray(parsed.lines)) {
+          throw new Error('Formato inválido retornado pela IA.');
+        }
+
+        allLines = parsed.lines.map((l: any) => {
+          const seconds = parseTimeStringToSeconds(l.startTime);
+          return {
+            id: crypto.randomUUID(),
+            text: l.text,
+            translation: l.translation || '',
+            startTime: parseFloat(seconds.toFixed(2))
+          };
+        });
       }
 
-      const parsed = JSON.parse(rawText);
-      if (!parsed.lines || !Array.isArray(parsed.lines)) {
-        throw new Error('Formato inválido retornado pela IA.');
-      }
-
-      const lines: TranscriptionLine[] = parsed.lines.map((l: any) => ({
-        id: crypto.randomUUID(),
-        text: l.text,
-        translation: l.translation || '',
-        startTime: parseFloat(l.startTime.toFixed(2))
-      }));
-
-      // Sort by startTime
-      lines.sort((a, b) => a.startTime - b.startTime);
-
-      setTempLines(lines);
-      setTranscriptionText(lines.map(l => l.text).join('\n'));
-      toast.success(`Transcrição concluída com sucesso! ${lines.length} frases geradas.`);
+      // 3. Ordenação final e salvamento com distanciamento mínimo (safeguard)
+      const adjustedLines = adjustTimestampsSafeguard(allLines, 0.5);
+      
+      await saveFinalLines(adjustedLines);
+      toast.success(`Transcrição concluída e salva com sucesso! ${adjustedLines.length} frases geradas.`);
     } catch (err: any) {
       console.error(err);
       toast.error(`Erro na transcrição por IA: ${err.message || err}`);
     } finally {
       setIsTranscribingAi(false);
+      setTranscribingProgress('');
     }
   };
 
@@ -1014,6 +1545,13 @@ Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", 
     if (activeLineRef.current) {
       activeLineRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
+  }, [activeLineIdx]);
+
+  // Reset speech states when active line changes (keep microphone running)
+  useEffect(() => {
+    setSpeechTranscript('');
+    setSpeechSimilarity(null);
+    setSpeechWordDiffs([]);
   }, [activeLineIdx]);
 
   // Loop active line logic if isLoopingLine is true
@@ -1306,6 +1844,147 @@ Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", 
           </div>
         </div>
 
+        {/* Barra de Seleção de Modos de Visualização */}
+        {transcriptionTab === 'view' && hasTranscription && (
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-3 pb-2 border-b border-border/20 shrink-0 relative z-10">
+            <div className="flex flex-wrap items-center gap-1.5 bg-muted/40 border border-border/30 rounded-xl p-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setTranscriptionViewMode('normal');
+                  stopSpeechRecognition();
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  transcriptionViewMode === 'normal'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                }`}
+              >
+                <FileText size={12} />
+                <span>Padrão</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTranscriptionViewMode('playback');
+                  stopSpeechRecognition();
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  transcriptionViewMode === 'playback'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                }`}
+              >
+                <Music size={12} />
+                <span>Playback / Karaokê</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTranscriptionViewMode('pronunciation');
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  transcriptionViewMode === 'pronunciation'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                }`}
+              >
+                <Mic size={12} />
+                <span>Desafio de Pronúncia</span>
+              </button>
+            </div>
+
+            {/* Controles de Modo e Vocal */}
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+
+              {/* Dica de Modo */}
+              {transcriptionViewMode === 'pronunciation' ? (
+                <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 px-3 py-1.5 rounded-xl text-[10px] font-black shadow-sm">
+                  <Headphones size={12} className="shrink-0 animate-bounce" />
+                  <span>Use fones — o microfone pode captar o áudio!</span>
+                </div>
+              ) : transcriptionViewMode === 'playback' ? (
+                <div className="hidden md:flex items-center gap-1.5 text-muted-foreground px-2 py-1 text-[10px] font-bold">
+                  <Info size={11} className="text-primary" />
+                  <span>Cante junto acompanhando as letras!</span>
+                </div>
+              ) : null}
+
+              {/* Painel de Controle Vocal — visível nos modos playback e pronúncia */}
+              {(transcriptionViewMode === 'playback' || transcriptionViewMode === 'pronunciation') && (
+                <div className="flex items-center gap-1.5 bg-muted/40 border border-border/30 rounded-xl p-1">
+                  {/* Label */}
+                  <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/50 px-1.5 select-none hidden sm:block">
+                    Voz
+                  </span>
+                  <div className="w-px h-4 bg-border/40 hidden sm:block" />
+
+                  {/* Botão: Atenuar (DSP filtro fase) */}
+                  <button
+                    type="button"
+                    onClick={() => toggleVocalReduction(!isVocalReductionActive)}
+                    title="Reduz a voz usando cancelamento de fase estéreo (DSP clássico). Funciona melhor com fones."
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                      isVocalReductionActive
+                        ? 'bg-rose-500/20 text-rose-500 dark:text-rose-400'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+                    }`}
+                  >
+                    <Volume2 size={11} className={isVocalReductionActive ? 'animate-pulse' : ''} />
+                    <span className="hidden sm:inline">Atenuar</span>
+                  </button>
+
+                  <div className="w-px h-4 bg-border/40" />
+
+                  {/* Estado: IA ativa (toggle) / processando / botão cloud */}
+                  {activeTranscriptionTrack?.instrumentalFile ? (
+                    /* Toggle IA Ativo/Desativado */
+                    <button
+                      type="button"
+                      onClick={() => toggleIaInstrumental(!isIaInstrumentalActive)}
+                      title="Alterna entre o áudio original e o instrumental sem voz processado por Demucs IA."
+                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                        isIaInstrumentalActive
+                          ? 'bg-violet-500/20 text-violet-500 dark:text-violet-400'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+                      }`}
+                    >
+                      <Sparkles size={11} className={isIaInstrumentalActive ? 'animate-pulse' : ''} />
+                      <span>{isIaInstrumentalActive ? 'Sem voz ✓' : 'Sem voz'}</span>
+                    </button>
+                  ) : isProcessingCloudSeparation ? (
+                    /* Processando: barra de progresso inline */
+                    <div className="flex items-center gap-2 px-2.5 py-1.5 min-w-[160px]">
+                      <div className="w-2.5 h-2.5 border-2 border-sky-500 border-t-transparent rounded-full animate-spin shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[9px] font-bold text-sky-500 truncate">{cloudSeparationMessage}</p>
+                        <div className="w-full bg-sky-500/20 rounded-full h-0.5 mt-0.5">
+                          <div
+                            className="bg-sky-500 h-0.5 rounded-full transition-all duration-500"
+                            style={{ width: `${cloudSeparationProgress}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Botão Cloud — Demucs HTDemucs via HuggingFace */
+                    <button
+                      type="button"
+                      onClick={handleStartCloudVocalSeparation}
+                      title="Remove a voz com Demucs HTDemucs via HuggingFace (grátis, sem API key). Qualidade profissional. Requer internet."
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider text-sky-500 dark:text-sky-400 hover:bg-sky-500/10 transition-all cursor-pointer"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
+                      <span>Remover voz</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+
         {/* Corpo principal */}
         {transcriptionTab === 'view' ? (
           /* MODO DE VISUALIZAÇÃO (KARAOKÊ) */
@@ -1338,54 +2017,80 @@ Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", 
               <div className="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-card/30 to-transparent pointer-events-none z-10" />
 
               {/* Contêiner de Letras Roláveis */}
-              <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-6 space-y-5 py-8 select-none scrollbar-thin relative">
+              <div
+                ref={scrollContainerRef}
+                className="flex-1 overflow-y-auto px-6 space-y-5 pt-8 pb-36 select-none scrollbar-thin relative"
+              >
                 {activeTranscriptionTrack.transcriptionLines?.map((line, idx) => {
                   const isActive = activeLineIdx === idx;
+                  
+                  let cardStyles = 'border-transparent text-muted-foreground/60 hover:text-foreground hover:scale-[1.01] font-semibold';
+                  if (isActive) {
+                    if (transcriptionViewMode === 'playback') {
+                      cardStyles = 'bg-primary/[0.03] text-primary text-2xl sm:text-3xl font-black py-6 scale-105 drop-shadow-[0_0_12px_rgba(139,92,246,0.35)] border-primary/25 border';
+                    } else {
+                      cardStyles = 'bg-primary/5 text-primary scale-105 font-extrabold shadow-sm border-primary/20 shadow-primary/5';
+                    }
+                  } else {
+                    if (transcriptionViewMode === 'playback') {
+                      cardStyles = 'opacity-20 scale-95 blur-[0.7px] border-transparent text-muted-foreground/40';
+                    } else if (line.difficulty === 'hard') {
+                      cardStyles = 'bg-rose-500/[0.03] border-rose-500/15 text-muted-foreground/75 hover:text-foreground font-semibold hover:border-rose-500/25';
+                    } else if (line.difficulty === 'easy') {
+                      cardStyles = 'bg-emerald-500/[0.02] border-emerald-500/15 text-muted-foreground/75 hover:text-foreground font-semibold hover:border-emerald-500/25';
+                    }
+                  }
+                  
+                  const isCinematic = transcriptionViewMode === 'playback';
+                  const showTranslationsInMode = showTranslation && !isCinematic && line.translation;
+                  
                   return (
                     <div
                       key={line.id || idx}
                       ref={isActive ? activeLineRef : null}
                       onClick={() => handleScrub(line.startTime)}
-                      className={`group relative text-center py-3 px-12 rounded-2xl transition-all duration-300 cursor-pointer border ${
-                        isActive
-                          ? 'bg-primary/5 text-primary scale-105 font-extrabold shadow-sm border-primary/20 shadow-primary/5'
-                          : line.difficulty === 'hard'
-                          ? 'bg-rose-500/[0.03] border-rose-500/15 text-muted-foreground/75 hover:text-foreground font-semibold hover:border-rose-500/25'
-                          : line.difficulty === 'easy'
-                          ? 'bg-emerald-500/[0.02] border-emerald-500/15 text-muted-foreground/75 hover:text-foreground font-semibold hover:border-emerald-500/25'
-                          : 'border-transparent text-muted-foreground/60 hover:text-foreground hover:scale-[1.01] font-semibold'
-                      }`}
+                      className={`group relative text-center py-3 px-12 rounded-2xl transition-all duration-300 cursor-pointer border ${cardStyles}`}
                     >
-                      {/* Indicador de dificuldade na esquerda (Clique para alterar) */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleToggleLineDifficulty(line.id, line.difficulty);
-                        }}
-                        className="absolute left-4 top-1/2 -translate-y-1/2 p-1 rounded-lg hover:bg-muted transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 cursor-pointer z-20"
-                        title="Marcar dificuldade da frase (Sem marcacao -> Fácil -> Difícil)"
-                      >
-                        <div className={`w-3 h-3 rounded-full border transition-all ${
-                          line.difficulty === 'hard'
-                            ? 'bg-rose-500 border-rose-600 shadow-sm shadow-rose-500/35'
-                            : line.difficulty === 'easy'
-                            ? 'bg-emerald-500 border-emerald-600 shadow-sm shadow-emerald-500/35'
-                            : 'bg-transparent border-muted-foreground/45 hover:border-muted-foreground/70'
-                        }`} />
-                      </button>
-
-                      {/* Mantém indicador sutil visível no mobile/desktop se não houver hover */}
-                      {line.difficulty && line.difficulty !== 'none' && (
-                        <div className="absolute left-5 top-1/2 -translate-y-1/2 pointer-events-none group-hover:hidden">
-                          <div className={`w-2.5 h-2.5 rounded-full ${
-                            line.difficulty === 'hard'
-                              ? 'bg-rose-500/80 shadow-sm shadow-rose-500/20'
-                              : 'bg-emerald-500/80 shadow-sm shadow-emerald-500/20'
-                          }`} />
+                      {/* Dificuldades (apenas no modo padrão) */}
+                      {!isCinematic && transcriptionViewMode === 'normal' && (
+                        <>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleLineDifficulty(line.id, line.difficulty);
+                            }}
+                            className="absolute left-4 top-1/2 -translate-y-1/2 p-1 rounded-lg hover:bg-muted transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 cursor-pointer z-20"
+                            title="Marcar dificuldade da frase (Sem marcacao -> Fácil -> Difícil)"
+                          >
+                            <div className={`w-3 h-3 rounded-full border transition-all ${
+                              line.difficulty === 'hard'
+                                ? 'bg-rose-500 border-rose-600 shadow-sm shadow-rose-500/35'
+                                : line.difficulty === 'easy'
+                                ? 'bg-emerald-500 border-emerald-600 shadow-sm shadow-emerald-500/35'
+                                : 'bg-transparent border-muted-foreground/45 hover:border-muted-foreground/70'
+                            }`} />
+                          </button>
+                          
+                          {line.difficulty && line.difficulty !== 'none' && (
+                            <div className="absolute left-5 top-1/2 -translate-y-1/2 pointer-events-none group-hover:hidden">
+                              <div className={`w-2.5 h-2.5 rounded-full ${
+                                line.difficulty === 'hard'
+                                  ? 'bg-rose-500/80 shadow-sm shadow-rose-500/20'
+                                  : 'bg-emerald-500/80 shadow-sm shadow-emerald-500/20'
+                              }`} />
+                            </div>
+                          )}
+                        </>
+                      )}
+                      
+                      {/* Best Score Badge (apenas no modo desafio de pronúncia) */}
+                      {transcriptionViewMode === 'pronunciation' && lineScores[idx] !== undefined && (
+                        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 rounded-md text-[9px] font-black">
+                          <span>⭐ {lineScores[idx]}%</span>
                         </div>
                       )}
-
-                      <p className={`transition-all ${isActive ? 'text-sm sm:text-base' : 'text-xs sm:text-sm'}`}>
+                      
+                      <p className={`transition-all ${isActive && !isCinematic ? 'text-sm sm:text-base' : ''}`}>
                         {isActive ? (
                           (() => {
                             const nextLine = activeTranscriptionTrack.transcriptionLines?.[idx + 1];
@@ -1396,7 +2101,7 @@ Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", 
                           line.text
                         )}
                       </p>
-                      {showTranslation && line.translation && (
+                      {showTranslationsInMode && (
                         <p className={`text-[10px] sm:text-xs font-medium mt-1 leading-normal transition-opacity ${isActive ? 'text-primary/75' : 'text-muted-foreground/40'}`}>
                           {line.translation}
                         </p>
@@ -1405,9 +2110,117 @@ Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", 
                   );
                 })}
               </div>
-
+              
               {/* Fade inferior decorativo */}
               <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-card/30 to-transparent pointer-events-none z-10" />
+
+              {/* Pronunciation Real-time Feedback Panel */}
+              {transcriptionViewMode === 'pronunciation' && (
+                <div className="mx-6 mb-3 p-4 bg-card border border-border/80 rounded-2xl shadow-xl space-y-3 animate-fadeIn relative overflow-hidden shrink-0">
+                  <div className="absolute inset-0 bg-primary/[0.02] pointer-events-none" />
+                  
+                  <div className="flex items-center justify-between gap-3 relative z-10 border-b border-border/30 pb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 bg-primary/10 text-primary rounded-lg">
+                        <Mic size={14} />
+                      </div>
+                      <span className="text-[10px] font-black uppercase text-foreground tracking-wider">
+                        Desafio de Pronúncia Ativo
+                      </span>
+                    </div>
+                    
+                    <Button
+                      type="button"
+                      onClick={startSpeechRecognition}
+                      className={`text-[10px] font-black h-8 px-4 rounded-xl cursor-pointer flex items-center gap-1.5 shadow-sm transition-all duration-300 ${
+                        isListeningSpeech
+                          ? 'bg-rose-600 hover:bg-rose-700 text-white animate-pulse'
+                          : 'bg-primary hover:bg-primary/95 text-primary-foreground'
+                      }`}
+                    >
+                      <Mic size={12} className={isListeningSpeech ? 'animate-bounce' : ''} />
+                      <span>{isListeningSpeech ? 'Ouvindo... Parar' : 'Ativar Microfone Contínuo'}</span>
+                    </Button>
+                  </div>
+
+                  <div className="flex flex-col gap-2.5 relative z-10">
+                    {activeLineIdx >= 0 && activeTranscriptionTrack?.transcriptionLines?.[activeLineIdx] ? (
+                      <div className="space-y-2">
+                        <p className="text-[8px] font-black uppercase text-muted-foreground/60 tracking-wider">
+                          Análise da Frase Ativa
+                        </p>
+                        
+                        <div className="p-3 bg-muted/40 rounded-xl border border-border/40 min-h-[50px] flex items-center justify-center flex-wrap gap-x-2 gap-y-1.5 text-center">
+                          {speechWordDiffs.length > 0 ? (
+                            speechWordDiffs.map((word, wIdx) => {
+                              let colorClass = 'text-muted-foreground/50';
+                              let bgClass = 'bg-muted/10 border-border/20';
+                              
+                              if (word.type === 'correct') {
+                                colorClass = 'text-emerald-600 dark:text-emerald-400 font-bold';
+                                bgClass = 'bg-emerald-500/10 border-emerald-500/20';
+                              } else if (word.type === 'incorrect') {
+                                colorClass = 'text-rose-600 dark:text-rose-400 font-bold';
+                                bgClass = 'bg-rose-500/10 border-rose-500/20';
+                              } else if (word.type === 'missing') {
+                                colorClass = 'text-rose-600/80 dark:text-rose-400/80 font-semibold';
+                                bgClass = 'bg-rose-500/5 border-rose-500/10';
+                              }
+                              
+                              return (
+                                <span
+                                  key={wIdx}
+                                  className={`px-2.5 py-1 rounded-lg border text-xs leading-none transition-all ${colorClass} ${bgClass}`}
+                                >
+                                  {word.word}
+                                </span>
+                              );
+                            })
+                          ) : (
+                            <span className="text-[10px] font-extrabold text-muted-foreground/50 italic">
+                              {isListeningSpeech ? 'Cante ou fale a frase ativa agora...' : 'Ative o microfone e comece a cantar!'}
+                            </span>
+                          )}
+                        </div>
+
+                        {speechTranscript && (
+                          <p className="text-[10px] font-semibold text-muted-foreground leading-normal text-center">
+                            Você falou: <span className="text-foreground font-extrabold">"{speechTranscript}"</span>
+                          </p>
+                        )}
+
+                        <div className="flex items-center justify-between gap-4 pt-1">
+                          <div className="flex items-center gap-1.5">
+                            {speechSimilarity !== null && (
+                              <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${
+                                speechSimilarity >= 80
+                                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                                  : speechSimilarity >= 50
+                                  ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                                  : 'bg-rose-500/10 text-rose-500 border border-rose-500/20'
+                              }`}>
+                                Precisão: {speechSimilarity}%
+                              </span>
+                            )}
+                          </div>
+
+                          {Object.keys(lineScores).length > 0 && (
+                            <span className="text-[9px] font-black uppercase text-primary bg-primary/10 border border-primary/20 px-2.5 py-0.5 rounded-md">
+                              Média do Álbum: {Math.round(
+                                Object.values(lineScores).reduce((a, b) => a + b, 0) / Object.keys(lineScores).length
+                              )}%
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-[10px] font-bold text-muted-foreground/60 text-center py-2 italic">
+                        Dê play na música para iniciar a verificação da pronúncia.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )
         ) : (
@@ -1421,8 +2234,8 @@ Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", 
                   <div className="absolute inset-0 bg-background/80 backdrop-blur-sm z-30 flex flex-col items-center justify-center space-y-3 rounded-2xl animate-fadeIn">
                     <Sparkles size={32} className="text-primary animate-bounce" />
                     <p className="text-xs font-black text-foreground">IA Transcrevendo seu Áudio...</p>
-                    <p className="text-[10px] text-muted-foreground text-center px-6 leading-relaxed max-w-xs">
-                      Enviando áudio para o Gemini 2.5 Flash. Isso pode levar de 10 a 20 segundos para processar.
+                    <p className="text-[10px] text-muted-foreground text-center px-6 leading-relaxed max-w-xs font-semibold">
+                      {transcribingProgress || 'Enviando áudio para o Gemini 2.5 Flash. Isso pode levar de 10 a 20 segundos para processar.'}
                     </p>
                   </div>
                 )}
@@ -1877,8 +2690,10 @@ Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", 
         </div>
         )}
 
-        {/* COLUNA 2: Lista de Faixas do Álbum Ativo (2 Colunas) OU Tela de Transcrição/Karaokê (2 Colunas) */}
-        <div className={`${activeTranscriptionTrack ? 'lg:col-span-3' : 'lg:col-span-2'} space-y-4 flex flex-col h-full`}>
+        {/* COLUNA 2: Lista de Faixas do Álbum Ativo (2 Colunas) OU Tela de Transcrição/Karaokê (4 Colunas) */}
+        <div className={`${
+          activeTranscriptionTrack ? 'lg:col-span-4' : 'lg:col-span-2'
+        } space-y-4 flex flex-col h-full`}>
           {activeTranscriptionTrack ? (
             renderTranscriptionPanel()
           ) : (
@@ -1979,6 +2794,15 @@ Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", 
                                         T
                                       </span>
                                     )}
+                                    {track.instrumentalFile && (
+                                      <span
+                                        className="text-[8px] font-black text-violet-500 dark:text-violet-400 bg-violet-500/10 border border-violet-500/20 px-1 rounded flex items-center gap-0.5 shrink-0"
+                                        title="Instrumental sem voz processado por Demucs IA — pronto para cantar!"
+                                      >
+                                        <Sparkles size={7} />
+                                        IA
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -2047,9 +2871,10 @@ Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", 
               </ShadcnCard>
             )}
           </div>
-
-            {/* COLUNA 3: Tocador de Mídia Integrado (1 Coluna) */}
-            <div className="lg:col-span-1 space-y-4 flex flex-col lg:sticky lg:top-4 lg:self-start">
+            
+            {/* COLUNA 3: Tocador de Mídia Integrado — ocultado quando a transcrição está aberta */}
+            {!activeTranscriptionTrack ? (
+              <div className="lg:col-span-1 space-y-4 flex flex-col lg:sticky lg:top-4 lg:self-start">
               <ShadcnCard className="bg-card/90 border-border/80 p-5 rounded-3xl shadow-2xl flex flex-col items-center justify-between text-center space-y-5 relative overflow-hidden min-h-[495px]">
                 <div className="absolute inset-0 bg-gradient-to-b from-primary/10 via-transparent to-transparent pointer-events-none" />
 
@@ -2290,7 +3115,165 @@ Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", 
                 </div>
               </ShadcnCard>
             </div>
+            ) : null}
       </div>
+
+      {/* ── Mini Player Fixo Flutuante na Base da Tela ── */}
+      {activeTranscriptionTrack && currentTrack && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none">
+          <div className="w-full pointer-events-auto bg-card/65 backdrop-blur-2xl border-t border-border/40 shadow-2xl shadow-black/30 overflow-hidden flex flex-col animate-fadeIn">
+            {/* Barra de progresso interativa com overlay invisível de range input */}
+            <div className="relative h-1 w-full bg-border/20 group/progress">
+              {/* Fill */}
+              <div
+                className="absolute h-full bg-primary"
+                style={{ width: duration ? `${Math.min((progress / duration) * 100, 100)}%` : '0%' }}
+              />
+              <input
+                type="range"
+                min="0"
+                max={duration || 100}
+                value={progress}
+                step={0.1}
+                onChange={(e) => handleScrub(parseFloat(e.target.value))}
+                disabled={!currentTrack}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed z-10"
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4 px-4 py-3 sm:px-8">
+              {/* Letra Atual / Info (Esquerda) */}
+              <div className="flex-1 min-w-0 flex items-center gap-3">
+                {/* Imagem de Capa do Álbum Miniatura */}
+                {(() => {
+                  const coverSrc = playlistCoverUrls[currentTrack.playlistId];
+                  return coverSrc ? (
+                    <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-border/40 shadow-sm hidden sm:block">
+                      <img src={coverSrc} alt={currentTrack.title} className="w-full h-full object-cover" />
+                    </div>
+                  ) : (
+                    <div className="w-10 h-10 rounded-lg shrink-0 bg-muted/60 border border-border/30 flex items-center justify-center text-muted-foreground hidden sm:flex">
+                      <Music size={16} />
+                    </div>
+                  );
+                })()}
+
+                <div className="flex-1 min-w-0">
+                  {activeLineIdx >= 0 && activeTranscriptionTrack?.transcriptionLines?.[activeLineIdx] ? (
+                    <p className="text-xs sm:text-sm font-extrabold text-primary truncate animate-fadeIn">
+                      {activeTranscriptionTrack.transcriptionLines[activeLineIdx].text}
+                    </p>
+                  ) : (
+                    <p className="text-xs font-bold text-foreground truncate">
+                      {currentTrack.title}
+                    </p>
+                  )}
+                  {activeLineIdx >= 0 && activeTranscriptionTrack?.transcriptionLines?.[activeLineIdx]?.translation && showTranslation && (
+                    <p className="text-[10px] text-muted-foreground truncate font-medium mt-0.5 animate-fadeIn">
+                      {activeTranscriptionTrack.transcriptionLines[activeLineIdx].translation}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Controles de Áudio & Vocal (Direita) */}
+              <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                {/* Tempo do Áudio */}
+                <p className="text-[10px] text-muted-foreground font-mono tabular-nums hidden md:block">
+                  {formatTime(progress)} / {formatTime(duration)}
+                </p>
+
+                {/* Controles de Redução Vocal / IA integrados na barra */}
+                <div className="flex items-center bg-muted/40 border border-border/30 rounded-xl p-0.5 gap-0.5 hidden sm:flex">
+                  {/* Atenuar phase cancellation */}
+                  <button
+                    type="button"
+                    onClick={() => toggleVocalReduction(!isVocalReductionActive)}
+                    title="Atenuar voz (DSP)"
+                    className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                      isVocalReductionActive
+                        ? 'bg-rose-500/20 text-rose-500 dark:text-rose-400'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    DSP
+                  </button>
+
+                  <div className="w-px h-3 bg-border/40" />
+
+                  {/* IA Separation */}
+                  {currentTrack.instrumentalFile ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleIaInstrumental(!isIaInstrumentalActive)}
+                      title="Alternar instrumental sem voz (IA)"
+                      className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                        isIaInstrumentalActive
+                          ? 'bg-violet-500/20 text-violet-500 dark:text-violet-400'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      IA
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      title="Instrumental IA indisponível para esta faixa"
+                      className="px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider text-muted-foreground/30 cursor-not-allowed"
+                    >
+                      IA
+                    </button>
+                  )}
+                </div>
+
+                {/* Seletor de Velocidade */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+                    const next = speeds[(speeds.indexOf(playbackSpeed) + 1) % speeds.length];
+                    setPlaybackSpeed(next);
+                    if (audioRef.current) audioRef.current.playbackRate = next;
+                  }}
+                  className="text-[9px] sm:text-[10px] font-black text-muted-foreground hover:text-foreground bg-muted hover:bg-muted/80 rounded-xl px-2.5 py-1.5 transition-all cursor-pointer tabular-nums shrink-0"
+                  title="Velocidade de reprodução"
+                >
+                  {playbackSpeed}×
+                </button>
+
+                {/* Botão Play / Pause */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (audioRef.current) {
+                      if (isPlaying) {
+                        audioRef.current.pause();
+                      } else {
+                        audioRef.current.play();
+                      }
+                      setIsPlaying(!isPlaying);
+                    }
+                  }}
+                  className="w-9 h-9 sm:w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/95 active:scale-95 transition-all cursor-pointer shadow-lg shadow-primary/25 shrink-0"
+                  title={isPlaying ? 'Pausar' : 'Reproduzir'}
+                >
+                  {isPlaying ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" className="sm:w-4 sm:h-4" viewBox="0 0 24 24" fill="currentColor">
+                      <rect x="6" y="4" width="4" height="16" rx="1"/>
+                      <rect x="14" y="4" width="4" height="16" rx="1"/>
+                    </svg>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" className="sm:w-4 sm:h-4" viewBox="0 0 24 24" fill="currentColor">
+                      <polygon points="5,3 19,12 5,21"/>
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Dialog: Criar Álbum */}
       <Dialog open={isNewPlaylistOpen} onOpenChange={setIsNewPlaylistOpen}>

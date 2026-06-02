@@ -9,6 +9,7 @@ import { Textarea } from './ui/textarea';
 import { Volume2, Trash2, Mic, Sparkles, Loader2 } from 'lucide-react';
 import { getTagColors } from '../utils/tagColors';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { classifyLocal } from '../utils/cefrClassifier';
 
 interface CardModalProps {
   isOpen: boolean;
@@ -28,6 +29,7 @@ export const CardModal: React.FC<CardModalProps> = ({
   isOpen,
   onClose,
   onSave,
+
   cardToEdit,
   deckName
 }) => {
@@ -42,6 +44,11 @@ export const CardModal: React.FC<CardModalProps> = ({
   const [audioFileName, setAudioFileName] = useState('');
   const [isPlayingPreview, setIsPlayingPreview] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const estimatedLevel = fields[0] 
+    ? (cardToEdit && cardToEdit.front === fields[0] ? (cardToEdit.cefrLevel || classifyLocal(fields[0])) : classifyLocal(fields[0])) 
+    : null;
+
 
   // Helper setters for fields
   const setField0 = (valOrFn: string | ((prev: string) => string)) => {
@@ -534,6 +541,32 @@ export const CardModal: React.FC<CardModalProps> = ({
                 <Mic size={16} />
               </Button>
             </div>
+            {fields[0].trim() && (
+              <div className="mt-1 flex items-center gap-1.5 text-[10px] font-bold">
+                <span className="text-muted-foreground">Complexidade Estimada:</span>
+                {estimatedLevel ? (
+                  <span className={`px-2 py-0.5 rounded-md ${
+                    estimatedLevel === 'A1' || estimatedLevel === 'A2'
+                      ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
+                      : estimatedLevel === 'B1' || estimatedLevel === 'B2'
+                        ? 'bg-blue-500/10 text-blue-600 border border-blue-500/20'
+                        : 'bg-violet-500/10 text-violet-600 border border-violet-500/20'
+                  }`}>
+                    {estimatedLevel} — {
+                      estimatedLevel === 'A1' ? 'Iniciante' :
+                      estimatedLevel === 'A2' ? 'Básico' :
+                      estimatedLevel === 'B1' ? 'Intermediário' :
+                      estimatedLevel === 'B2' ? 'Intermediário Avançado' :
+                      estimatedLevel === 'C1' ? 'Avançado' : 'Fluente'
+                    }
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground italic px-2 py-0.5 bg-muted/40 rounded-md border border-border/40">
+                    Análise pendente (I.A. em background)
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Campo 2: Verso / Extra Cloze */}

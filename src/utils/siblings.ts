@@ -1,4 +1,5 @@
 import type { Card, Note } from '../types';
+import { classifyLocal } from './cefrClassifier';
 
 /**
  * Encontra todos os índices distintos de cloze no formato {{c1::palavra}}
@@ -160,6 +161,9 @@ export function syncNoteCards(
         context: note.context,
         audio: note.audio,
         tags: note.tags,
+        cefrLevel: foundCard.front !== def.front
+          ? (classifyLocal(def.front) || undefined)
+          : (foundCard.cefrLevel || classifyLocal(def.front) || undefined),
         updatedAt: Date.now(),
       };
       toUpdate.push(updatedCard);
@@ -179,6 +183,7 @@ export function syncNoteCards(
         tags: note.tags,
         clozeIndex: def.clozeIndex,
         cardType: def.cardType,
+        cefrLevel: classifyLocal(def.front) || undefined,
         
         // SRS fields iniciais
         interval: 0,
