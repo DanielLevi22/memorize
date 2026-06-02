@@ -29,6 +29,15 @@ export const PlaylistPage: React.FC<PlaylistPageProps> = ({ onPlayTrackInKaraoke
   const [duration, setDuration] = useState(0);
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
   
+  // Custom states for normal player on PlaylistPage
+  const [currentPlayTrack, setCurrentPlayTrack] = useState<AudioTrack | null>(null);
+  const [isLooping, setIsLooping] = useState(false);
+  const isLoopingRef = useRef(false);
+
+  useEffect(() => {
+    isLoopingRef.current = isLooping;
+  }, [isLooping]);
+  
   // Transcription States
   const [activeTranscriptionTrack, setActiveTranscriptionTrack] = useState<AudioTrack | null>(null);
   const [transcriptionTab, setTranscriptionTab] = useState<'view' | 'edit'>('view');
@@ -158,8 +167,25 @@ export const PlaylistPage: React.FC<PlaylistPageProps> = ({ onPlayTrackInKaraoke
     setIsPlaying(false);
   };
 
+  const handleNextTrack = () => {
+    if (!currentPlayTrack) return;
+    const index = tracks.findIndex(t => t.id === currentPlayTrack.id);
+    if (index === -1) return;
+    const nextIndex = (index + 1) % tracks.length;
+    handlePlayTrack(tracks[nextIndex]);
+  };
+
+  const handlePrevTrack = () => {
+    if (!currentPlayTrack) return;
+    const index = tracks.findIndex(t => t.id === currentPlayTrack.id);
+    if (index === -1) return;
+    const prevIndex = (index - 1 + tracks.length) % tracks.length;
+    handlePlayTrack(tracks[prevIndex]);
+  };
+
   const handlePlayTrack = (track: AudioTrack) => {
     cleanupAudio();
+    setCurrentPlayTrack(track);
     try {
       const url = URL.createObjectURL(track.audioFile);
       setActiveAudioUrl(url);
@@ -181,7 +207,18 @@ export const PlaylistPage: React.FC<PlaylistPageProps> = ({ onPlayTrackInKaraoke
       };
 
       audio.onended = () => {
-        setIsPlaying(false);
+        if (isLoopingRef.current) {
+          audio.currentTime = 0;
+          audio.play().catch(e => console.warn(e));
+          return;
+        }
+        // Auto play next track in playlist page
+        const index = tracks.findIndex(t => t.id === track.id);
+        if (index !== -1 && index + 1 < tracks.length) {
+          handlePlayTrack(tracks[index + 1]);
+        } else {
+          setIsPlaying(false);
+        }
       };
 
       progressIntervalRef.current = window.setInterval(() => {
@@ -1187,14 +1224,30 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
                     ) : (
                       <div className="divide-y divide-border/35 overflow-y-auto pr-1 space-y-1 flex-1 min-h-0 mt-3">
                         {tracks.map((track, idx) => {
+                          const isPlayingThis = currentPlayTrack?.id === track.id;
                           return (
                             <div
                               key={track.id}
-                              className={`flex items-center justify-between p-3 rounded-xl transition-all duration-200 group border border-transparent hover:bg-muted/30`}
+                              onClick={() => handlePlayTrack(track)}
+                              className={`flex items-center justify-between p-3 rounded-xl transition-all duration-200 group border border-transparent hover:bg-muted/30 cursor-pointer ${
+                                isPlayingThis ? 'bg-primary/5 border-primary/20 shadow-sm' : ''
+                              }`}
                             >
                               <div className="flex items-center gap-3.5 min-w-0">
-                                <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border bg-muted/50 text-muted-foreground border-border/40">
-                                  <span className="text-[10px] font-bold font-mono">{idx + 1}</span>
+                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${
+                                  isPlayingThis 
+                                    ? 'bg-primary text-primary-foreground border-primary' 
+                                    : 'bg-muted/50 text-muted-foreground border-border/40'
+                                }`}>
+                                  {isPlayingThis && isPlaying ? (
+                                    <div className="flex gap-0.5 items-end justify-center h-2.5">
+                                      <div className="w-0.5 bg-current animate-bounce h-2" style={{ animationDelay: '0.1s' }} />
+                                      <div className="w-0.5 bg-current animate-bounce h-3" style={{ animationDelay: '0.3s' }} />
+                                      <div className="w-0.5 bg-current animate-bounce h-1.5" style={{ animationDelay: '0.5s' }} />
+                                    </div>
+                                  ) : (
+                                    <span className="text-[10px] font-bold font-mono">{idx + 1}</span>
+                                  )}
                                 </div>
                                 <div className="flex flex-col min-w-0">
                                   <span className="text-xs font-bold truncate text-foreground">
@@ -1241,7 +1294,7 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
                                 {track.transcriptionLines && track.transcriptionLines.length > 0 && (
                                   <button
                                     type="button"
-                                    onClick={() => onPlayTrackInKaraoke?.(track.id)}
+                                    onClick={(e) => { e.stopPropagation(); onPlayTrackInKaraoke?.(track.id); }}
                                     className="p-1.5 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 rounded-lg cursor-pointer transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
                                     title="Praticar / Cantar no Karaokê 🎤"
                                   >
@@ -1684,6 +1737,185 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Floating Bottom Fixed Player Bar */}
+      {currentPlayTrack && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none">
+          <div className="w-full pointer-events-auto bg-card/65 backdrop-blur-2xl border-t border-border/40 shadow-2xl shadow-black/30 overflow-hidden flex flex-col animate-fadeIn">
+            {/* Interactive Progress Bar */}
+            <div className="relative h-1 w-full bg-border/20 group/progress">
+              <div
+                className="absolute h-full bg-primary"
+                style={{ width: duration ? `${Math.min((progress / duration) * 100, 100)}%` : '0%' }}
+              />
+              <input
+                type="range"
+                min="0"
+                max={duration || 100}
+                value={progress}
+                step={0.1}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  setProgress(val);
+                  if (audioRef.current) {
+                    audioRef.current.currentTime = val;
+                  }
+                }}
+                disabled={!currentPlayTrack}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed z-10"
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4 px-4 py-3 sm:px-8">
+              {/* Left Side: Track details */}
+              <div className="flex-1 min-w-0 flex items-center gap-3">
+                {(() => {
+                  const coverSrc = selectedPlaylist ? playlistCoverUrls[selectedPlaylist.id] : null;
+                  return coverSrc ? (
+                    <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-border/40 shadow-sm hidden sm:block">
+                      <img src={coverSrc} alt={currentPlayTrack.title} className="w-full h-full object-cover" />
+                    </div>
+                  ) : (
+                    <div className="w-10 h-10 rounded-lg shrink-0 bg-muted/60 border border-border/30 flex items-center justify-center text-muted-foreground hidden sm:flex">
+                      <Music size={16} />
+                    </div>
+                  );
+                })()}
+
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs sm:text-sm font-extrabold text-foreground truncate">
+                    {currentPlayTrack.title}
+                  </p>
+                  {currentPlayTrack.description && (
+                    <p className="text-[10px] text-muted-foreground truncate font-medium mt-0.5">
+                      {currentPlayTrack.description}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Right Side: Player controls */}
+              <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                <p className="text-[10px] text-muted-foreground font-mono tabular-nums hidden md:block">
+                  {(() => {
+                    const format = (seconds: number) => {
+                      if (isNaN(seconds) || !isFinite(seconds)) return '0:00';
+                      const m = Math.floor(seconds / 60);
+                      const s = Math.floor(seconds % 60);
+                      return `${m}:${String(s).padStart(2, '0')}`;
+                    };
+                    return `${format(progress)} / ${format(duration)}`;
+                  })()}
+                </p>
+
+                <div className="flex items-center bg-muted/40 border border-border/30 rounded-xl p-0.5 gap-0.5 hidden sm:flex">
+                  <button
+                    type="button"
+                    onClick={() => setIsLooping(!isLooping)}
+                    className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                      isLooping
+                        ? 'bg-amber-500/15 border border-amber-500/35 text-amber-600 dark:text-amber-400 font-bold'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                    title={isLooping ? 'Desativar repetição' : 'Repetir faixa continuamente'}
+                  >
+                    Repetir
+                  </button>
+
+                  <div className="w-px h-3 bg-border/40" />
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+                      const next = speeds[(speeds.indexOf(playbackSpeed) + 1) % speeds.length];
+                      setPlaybackSpeed(next);
+                      if (audioRef.current) {
+                        audioRef.current.playbackRate = next;
+                      }
+                    }}
+                    className="px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider text-muted-foreground hover:text-foreground cursor-pointer"
+                    title="Velocidade de reprodução"
+                  >
+                    {playbackSpeed}×
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={handlePrevTrack}
+                    className="w-8 h-8 rounded-full text-muted-foreground hover:text-foreground flex items-center justify-center transition-all cursor-pointer hover:bg-muted shrink-0"
+                    title="Faixa Anterior"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polygon points="19 20 9 12 19 4 19 20"/>
+                      <line x1="5" y1="19" x2="5" y2="5"/>
+                    </svg>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (audioRef.current) {
+                        if (isPlaying) {
+                          audioRef.current.pause();
+                          setIsPlaying(false);
+                        } else {
+                          audioRef.current.play().catch(e => console.warn(e));
+                          setIsPlaying(true);
+                        }
+                      }
+                    }}
+                    className="w-9 h-9 sm:w-10 h-10 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/95 active:scale-95 transition-all cursor-pointer shadow-lg shadow-primary/25 shrink-0"
+                    title={isPlaying ? 'Pausar' : 'Reproduzir'}
+                  >
+                    {isPlaying ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" className="sm:w-4 sm:h-4" viewBox="0 0 24 24" fill="currentColor">
+                        <rect x="6" y="4" width="4" height="16" rx="1"/>
+                        <rect x="14" y="4" width="4" height="16" rx="1"/>
+                      </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" className="sm:w-4 sm:h-4" viewBox="0 0 24 24" fill="currentColor">
+                        <polygon points="5,3 19,12 5,21"/>
+                      </svg>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleNextTrack}
+                    className="w-8 h-8 rounded-full text-muted-foreground hover:text-foreground flex items-center justify-center transition-all cursor-pointer hover:bg-muted shrink-0"
+                    title="Próxima Faixa"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polygon points="5 4 15 12 5 20 5 4"/>
+                      <line x1="19" y1="5" x2="19" y2="19"/>
+                    </svg>
+                  </button>
+
+                  <div className="w-px h-4 bg-border/40 mx-1 hidden sm:block" />
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      cleanupAudio();
+                      setCurrentPlayTrack(null);
+                    }}
+                    className="w-7 h-7 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center transition-all cursor-pointer shrink-0"
+                    title="Fechar Player"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18"/>
+                      <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
