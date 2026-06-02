@@ -1164,9 +1164,9 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
         </div>
         )}
 
-        {/* COLUNA 2: Lista de Faixas do Álbum Ativo (2 Colunas) OU Tela de Transcrição/Karaokê (4 Colunas) */}
+        {/* COLUNA 2: Lista de Faixas do Álbum Ativo (3 Colunas) OU Tela de Transcrição/Karaokê (4 Colunas) */}
         <div className={`${
-          activeTranscriptionTrack ? 'lg:col-span-4' : 'lg:col-span-2'
+          activeTranscriptionTrack ? 'lg:col-span-4' : 'lg:col-span-3'
         } space-y-4 flex flex-col h-full`}>
           {activeTranscriptionTrack ? (
             renderTranscriptionPanel()
