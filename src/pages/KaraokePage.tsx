@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Play, Headphones, Mic, Sparkles, ChevronRight, 
   ArrowLeft, Languages, Volume2, Repeat, FileText, 
-  CheckCircle2, Music
+  CheckCircle2, Music, Settings2, Download, Upload, RefreshCw
 } from 'lucide-react';
 import { db } from '../db/db';
 import type { Playlist, AudioTrack, TranscriptionLine } from '../types';
@@ -11,6 +11,7 @@ import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
 import { getWordLevenshteinDistance, diffWords, type DiffWord } from '../utils/srs';
 import { separateVocalsCloud } from '../utils/vocalSeparationCloud';
+import { decodeAudioFile, findSilenceSplitPoints, bufferToWav, adjustTimestampsSafeguard } from '../utils/audioChunker';
 
 const cleanString = (str: string) => {
   if (!str) return '';
@@ -52,6 +53,15 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({ initialTrackId, onClea
   const [isDictationMode, setIsDictationMode] = useState(false);
   const [activeLineIdx, setActiveLineIdx] = useState(-1);
   const [transcriptionViewMode, setTranscriptionViewMode] = useState<'normal' | 'playback' | 'pronunciation'>('normal');
+
+  // Lyrics editor states
+  const [isEditingLyrics, setIsEditingLyrics] = useState(false);
+  const [transcriptionTab, setTranscriptionTab] = useState<'view' | 'edit'>('view');
+  const [transcriptionText, setTranscriptionText] = useState('');
+  const [tempLines, setTempLines] = useState<TranscriptionLine[]>([]);
+  const [syncingLineIdx, setSyncingLineIdx] = useState(0);
+  const [isTranscribingAi, setIsTranscribingAi] = useState(false);
+  const [transcribingProgress, setTranscribingProgress] = useState('');
 
   // Speech Recognition States
   const [isListeningSpeech, setIsListeningSpeech] = useState(false);
@@ -727,6 +737,338 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({ initialTrackId, onClea
     return `${m}:${String(s).padStart(2, '0')}`;
   };
 
+  // Sincronia de Letra & Editor
+  const handleOpenTranscription = (track: AudioTrack) => {
+    cleanupAudio();
+    setActiveTrack(track);
+    setTranscriptionTab('view');
+    setProgress(0);
+    setDuration(0);
+    setTranscriptionText(track.transcriptionLines?.map(l => l.text).join('\n') || '');
+    setTempLines(track.transcriptionLines || []);
+    setSyncingLineIdx(0);
+    setIsEditingLyrics(true);
+    handlePlayTrack(track);
+  };
+
+  const handleSaveTranscription = async () => {
+    if (!activeTrack) return;
+    const sortedLines = [...tempLines].sort((a, b) => a.startTime - b.startTime);
+
+    try {
+      await db.audioTracks.update(activeTrack.id, {
+        transcriptionLines: sortedLines,
+        updatedAt: Date.now()
+      });
+      toast.success('Transcrição e sincronização salvas com sucesso!');
+      
+      const updatedTrack = { ...activeTrack, transcriptionLines: sortedLines };
+      setActiveTrack(updatedTrack);
+      setAllTracks(prev => prev.map(t => t.id === activeTrack.id ? updatedTrack : t));
+      setIsEditingLyrics(false);
+    } catch (err) {
+      console.error(err);
+      toast.error('Erro ao salvar transcrição.');
+    }
+  };
+
+  const handleStartAiTranscription = async () => {
+    if (!activeTrack) return;
+    const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
+    if (!geminiApiKey.trim()) {
+      toast.error('Configuração Requerida: Adicione sua Chave de API do Gemini nas Configurações.');
+      return;
+    }
+
+    try {
+      setIsTranscribingAi(true);
+      setTranscribingProgress('Decodificando áudio localmente...');
+
+      const audioBuffer = await decodeAudioFile(activeTrack.audioFile);
+      const splitPoints = findSilenceSplitPoints(audioBuffer);
+
+      let finalLines: TranscriptionLine[] = [];
+      const totalChunks = splitPoints.length + 1;
+
+      for (let i = 0; i <= splitPoints.length; i++) {
+        const start = i === 0 ? 0 : splitPoints[i - 1];
+        const end = i === splitPoints.length ? audioBuffer.duration : splitPoints[i];
+        
+        setTranscribingProgress(`Processando trecho ${i + 1} de ${totalChunks}...`);
+
+        const wavBlob = await bufferToWav(audioBuffer, start, end);
+        const chunkLines = await requestGeminiTranscription(wavBlob, geminiApiKey);
+
+        const adjustedLines = chunkLines.map(l => ({
+          ...l,
+          id: crypto.randomUUID(),
+          startTime: l.startTime + start,
+          endTime: l.endTime !== undefined ? l.endTime + start : undefined
+        }));
+
+        finalLines = [...finalLines, ...adjustedLines];
+      }
+
+      const postProcessedLines = adjustTimestampsSafeguard(finalLines, audioBuffer.duration);
+
+      setTempLines(postProcessedLines);
+      setTranscriptionText(postProcessedLines.map(l => l.text).join('\n'));
+      setSyncingLineIdx(postProcessedLines.length);
+      
+      toast.success('Áudio transcrito e traduzido com sucesso pelo Gemini 2.5 Flash!');
+      setTranscriptionTab('view');
+    } catch (err: any) {
+      console.error("[TranscriptionError]", err);
+      toast.error(err.message || 'Erro durante a transcrição.');
+    } finally {
+      setIsTranscribingAi(false);
+      setTranscribingProgress('');
+    }
+  };
+
+  const requestGeminiTranscription = async (audioBlob: Blob, apiKey: string): Promise<TranscriptionLine[]> => {
+    const reader = new FileReader();
+    const base64Promise = new Promise<string>((resolve) => {
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        resolve(result.split(',')[1]);
+      };
+      reader.readAsDataURL(audioBlob);
+    });
+    const base64Data = await base64Promise;
+
+    const promptText = `
+Você é uma IA especializada em transcrição de áudio e tradução pedagógica de idiomas.
+Sua tarefa é transcrever o áudio fornecido e gerar a tradução de cada frase para fins de estudo de idiomas.
+
+Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", onde cada linha possui:
+1. "startTime": Tempo de início em segundos (float).
+2. "endTime": Tempo de fim em segundos (float).
+3. "text": Texto transcrito exatamente como falado (em inglês/idioma original do áudio).
+4. "translation": Tradução da linha para o português do Brasil.
+
+O JSON deve seguir exatamente este formato:
+{
+  "lines": [
+    { "startTime": 1.2, "endTime": 3.5, "text": "Hello, how are you?", "translation": "Olá, como você está?" }
+  ]
+}
+Não adicione explicações, comentários ou markdown fora do bloco JSON.
+`;
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: promptText },
+            { inlineData: { mimeType: 'audio/wav', data: base64Data } }
+          ]
+        }],
+        generationConfig: {
+          responseMimeType: 'application/json'
+        }
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`API Gemini retornou status ${response.status}`);
+    }
+
+    const data = await response.json();
+    const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!textResponse) {
+      throw new Error('Resposta vazia da API do Gemini.');
+    }
+
+    const parsed = JSON.parse(textResponse);
+    return parsed.lines || [];
+  };
+
+  // Syncing stamp handlers
+  const handleStartManualSync = () => {
+    if (!transcriptionText.trim()) {
+      toast.error('Escreva ou cole a letra da música primeiro!');
+      return;
+    }
+    const rawLines = transcriptionText.split('\n').map(l => l.trim()).filter(Boolean);
+    const newLines = rawLines.map(text => ({
+      id: crypto.randomUUID(),
+      text,
+      startTime: 0,
+      endTime: undefined
+    }));
+    setTempLines(newLines);
+    setSyncingLineIdx(0);
+    setTranscriptionTab('edit');
+    if (audioRef.current) {
+      audioRef.current.currentTime = 0;
+      setProgress(0);
+      audioRef.current.play().catch(e => console.warn(e));
+      setIsPlaying(true);
+    }
+  };
+
+  const handleNextSyncStamp = () => {
+    if (syncingLineIdx >= tempLines.length) return;
+    
+    const currentProgress = audioRef.current ? audioRef.current.currentTime : progress;
+    
+    setTempLines(prev => {
+      const copy = [...prev];
+      copy[syncingLineIdx] = {
+        ...copy[syncingLineIdx],
+        startTime: currentProgress
+      };
+      if (syncingLineIdx > 0 && copy[syncingLineIdx - 1].endTime === undefined) {
+        copy[syncingLineIdx - 1] = {
+          ...copy[syncingLineIdx - 1],
+          endTime: currentProgress
+        };
+      }
+      return copy;
+    });
+    
+    setSyncingLineIdx(prev => prev + 1);
+  };
+
+  const undoLastStamp = () => {
+    if (syncingLineIdx === 0) return;
+    
+    setTempLines(prev => {
+      const copy = [...prev];
+      const prevIdx = syncingLineIdx - 1;
+      
+      copy[prevIdx] = {
+        ...copy[prevIdx],
+        startTime: 0,
+        endTime: undefined
+      };
+      
+      if (prevIdx > 0) {
+        copy[prevIdx - 1] = {
+          ...copy[prevIdx - 1],
+          endTime: undefined
+        };
+      }
+      return copy;
+    });
+    
+    setSyncingLineIdx(prev => prev - 1);
+  };
+
+  const handleImportLRC = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      try {
+        const lines = parseLRC(content);
+        if (lines.length === 0) {
+          toast.error('Nenhuma linha de letra encontrada no arquivo LRC.');
+          return;
+        }
+        setTempLines(lines);
+        setTranscriptionText(lines.map(l => l.text).join('\n'));
+        setSyncingLineIdx(lines.length);
+        toast.success(`Importado ${lines.length} linhas do arquivo LRC.`);
+        setTranscriptionTab('view');
+      } catch (err) {
+        console.error(err);
+        toast.error('Falha ao processar o arquivo LRC.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleExportLRC = () => {
+    if (tempLines.length === 0) {
+      toast.error('Não há letras para exportar.');
+      return;
+    }
+    const lrcContent = formatLRC(tempLines, activeTrack?.title || 'audio');
+    const blob = new Blob([lrcContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${activeTrack?.title || 'letra'}.lrc`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success('Letras exportadas como arquivo LRC com sucesso!');
+  };
+
+  const parseLRC = (lrcText: string): TranscriptionLine[] => {
+    const lines = lrcText.split('\n');
+    const result: TranscriptionLine[] = [];
+    const timeRegex = /\[(\d+):(\d+(?:\.\d+)?)\]/;
+
+    for (let line of lines) {
+      line = line.trim();
+      const match = timeRegex.exec(line);
+      if (match) {
+        const min = parseInt(match[1]);
+        const sec = parseFloat(match[2]);
+        const time = min * 60 + sec;
+        const text = line.replace(timeRegex, '').trim();
+        result.push({
+          id: crypto.randomUUID(),
+          text,
+          startTime: time
+        });
+      }
+    }
+
+    for (let i = 0; i < result.length; i++) {
+      if (i + 1 < result.length) {
+        result[i].endTime = result[i + 1].startTime;
+      } else if (audioRef.current) {
+        result[i].endTime = audioRef.current.duration;
+      }
+    }
+
+    return result;
+  };
+
+  const formatLRC = (lines: TranscriptionLine[], title: string): string => {
+    let output = `[ti:${title}]\n`;
+    for (const line of lines) {
+      const min = Math.floor(line.startTime / 60);
+      const sec = (line.startTime % 60).toFixed(2);
+      const timeStr = `[${String(min).padStart(2, '0')}:${sec.padStart(5, '0')}]`;
+      output += `${timeStr} ${line.text}\n`;
+    }
+    return output;
+  };
+
+  // Hotkey listener for manual sync (Space/Enter to stamp, Backspace to undo)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isEditingLyrics || transcriptionTab !== 'edit') return;
+      
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+        return;
+      }
+
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        handleNextSyncStamp();
+      } else if (e.key === 'Backspace') {
+        e.preventDefault();
+        undoLastStamp();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isEditingLyrics, transcriptionTab, syncingLineIdx, progress, tempLines]);
+
   const renderHighlightedText = (text: string, startTime: number, endTime: number) => {
     const durationOfLine = endTime - startTime;
     if (durationOfLine <= 0) return <span>{text}</span>;
@@ -749,9 +1091,196 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({ initialTrackId, onClea
   };
 
   // Rendering components
-  const renderDashboard = () => {
-    const tracksWithTranscription = allTracks.filter(t => t.transcriptionLines && t.transcriptionLines.length > 0);
+  const renderTranscriptionPanel = () => {
+    if (!activeTrack) return null;
 
+    return (
+      <div className="flex-1 flex flex-col min-h-0 mt-4 relative z-10">
+        {transcriptionTab === 'view' ? (
+          <div className="flex-1 flex flex-col min-h-0 space-y-4">
+            <div className="flex-1 flex flex-col min-h-0 relative">
+              <label className="text-xs font-bold text-muted-foreground/80 block mb-1.5 uppercase tracking-widest">
+                Letra Original (uma frase por linha)
+              </label>
+              <textarea
+                value={transcriptionText}
+                onChange={(e) => setTranscriptionText(e.target.value)}
+                placeholder="Cole ou digite a letra da música aqui. Pule uma linha para cada nova frase para que possam ser sincronizadas individualmente no player."
+                className="flex-1 w-full bg-muted/20 hover:bg-muted/30 border border-border/40 focus:border-primary focus:ring-1 focus:ring-primary/20 rounded-2xl p-4 text-xs font-medium leading-relaxed resize-none text-foreground placeholder:text-muted-foreground/50 transition-all select-text"
+              />
+            </div>
+
+            {/* Ações de Letras */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 shrink-0">
+              <div className="space-y-3">
+                <Button
+                  onClick={handleStartManualSync}
+                  className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-black text-xs h-11 rounded-xl shadow-md shadow-primary/10 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.98]"
+                >
+                  <Settings2 size={14} />
+                  Iniciar Sincronia Manual
+                </Button>
+                
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="file"
+                      accept=".lrc"
+                      onChange={handleImportLRC}
+                      id="lrc-import-input"
+                      className="hidden"
+                    />
+                    <Button
+                      onClick={() => document.getElementById('lrc-import-input')?.click()}
+                      variant="outline"
+                      className="w-full border-border/60 hover:bg-muted text-foreground font-bold text-xs h-10 rounded-xl flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Upload size={13} />
+                      Importar LRC
+                    </Button>
+                  </div>
+
+                  {tempLines.length > 0 && (
+                    <Button
+                      onClick={handleExportLRC}
+                      variant="outline"
+                      className="flex-1 border-border/60 hover:bg-muted text-foreground font-bold text-xs h-10 rounded-xl flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Download size={13} />
+                      Exportar LRC
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-muted/30 border border-border/30 rounded-2xl p-4 flex flex-col justify-between space-y-3">
+                <div className="space-y-1">
+                  <h4 className="text-[10px] font-black text-foreground uppercase tracking-widest flex items-center gap-1.5">
+                    <Sparkles size={11} className="text-primary animate-pulse" />
+                    Transcrição com IA Gemini
+                  </h4>
+                  <p className="text-[9px] text-muted-foreground leading-normal font-semibold">
+                    Use a inteligência artificial do Google para decodificar o áudio em inglês/idioma original e gerar a tradução para o português automaticamente.
+                  </p>
+                </div>
+
+                <Button
+                  onClick={handleStartAiTranscription}
+                  disabled={isTranscribingAi}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs h-10 rounded-xl shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
+                >
+                  {isTranscribingAi ? (
+                    <>
+                      <RefreshCw size={13} className="animate-spin" />
+                      <span>{transcribingProgress || 'Processando com IA...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles size={13} />
+                      <span>Auto-Transcrever e Traduzir</span>
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Aba de Sincronia Manual Ativa */
+          <div className="flex-1 flex flex-col min-h-0 space-y-4 animate-fadeIn">
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 text-[10px] text-amber-600 dark:text-amber-400 font-semibold leading-normal shrink-0">
+              <p className="font-bold flex items-center gap-1.5 mb-1 text-[11px] uppercase tracking-wider">
+                <Settings2 size={13} /> Modo Sincronização Manual Ativado
+              </p>
+              Instruções de Teclado:<br />
+              • Pressione <kbd className="bg-card px-1.5 py-0.5 rounded border border-border/30 font-mono text-[9px]">ESPAÇO</kbd> ou <kbd className="bg-card px-1.5 py-0.5 rounded border border-border/30 font-mono text-[9px]">ENTER</kbd> no momento exato em que a linha destacada for falada no áudio.<br />
+              • Pressione <kbd className="bg-card px-1.5 py-0.5 rounded border border-border/30 font-mono text-[9px]">BACKSPACE</kbd> para voltar e refazer a última marcação de tempo.
+            </div>
+
+            {/* Lista de Letras para Carimbagem */}
+            <div className="flex-1 overflow-y-auto pr-1 border border-border/40 rounded-2xl bg-muted/10 p-3 space-y-1.5 min-h-[180px]">
+              {tempLines.map((line, idx) => {
+                const isCurrent = syncingLineIdx === idx;
+                const isStamped = idx < syncingLineIdx;
+                
+                return (
+                  <div
+                    key={line.id || idx}
+                    className={`flex items-center justify-between p-2.5 rounded-xl border text-xs transition-all duration-200 ${
+                      isCurrent
+                        ? 'bg-primary/10 border-primary/40 text-foreground font-extrabold ring-1 ring-primary/20 scale-[1.01]'
+                        : isStamped
+                        ? 'bg-emerald-500/[0.03] border-emerald-500/15 text-muted-foreground/80 font-medium'
+                        : 'bg-transparent border-transparent text-muted-foreground/40'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 truncate">
+                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold ${
+                        isCurrent
+                          ? 'bg-primary text-primary-foreground'
+                          : isStamped
+                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                          : 'bg-muted text-muted-foreground'
+                      }`}>
+                        {idx + 1}
+                      </span>
+                      <span className="truncate">{line.text}</span>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0 font-mono text-[9px] font-black">
+                      {isStamped ? (
+                        <span className="text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-md">
+                          {formatTime(line.startTime)}
+                        </span>
+                      ) : isCurrent ? (
+                        <span className="text-primary bg-primary/10 px-1.5 py-0.5 rounded-md animate-pulse">
+                          Aguardando
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground/30">
+                          --:--
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Painel de Controles Manuais */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 shrink-0 pt-2 border-t border-border/20">
+              <Button
+                onClick={handleNextSyncStamp}
+                disabled={syncingLineIdx >= tempLines.length}
+                className="col-span-2 bg-primary hover:bg-primary/90 text-primary-foreground font-black text-xs h-11 rounded-xl shadow-lg shadow-primary/10 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40"
+              >
+                Carimbar Linha ({syncingLineIdx + 1}/{tempLines.length})
+              </Button>
+
+              <Button
+                onClick={undoLastStamp}
+                disabled={syncingLineIdx === 0}
+                variant="outline"
+                className="border-border/60 hover:bg-muted text-foreground font-bold text-xs h-11 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40"
+              >
+                Desfazer Marco
+              </Button>
+
+              <Button
+                onClick={handleSaveTranscription}
+                disabled={syncingLineIdx === 0}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs h-11 rounded-xl shadow-md flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40"
+              >
+                Salvar Sincronia
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Rendering components
+  const renderDashboard = () => {
     return (
       <div className="space-y-6 w-full animate-fadeIn">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border/40 shrink-0">
@@ -763,7 +1292,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({ initialTrackId, onClea
               Estúdio de Karaokê e Cantar
             </h2>
             <p className="text-xs text-muted-foreground font-semibold leading-relaxed max-w-2xl">
-              Escolha uma música já transcrevida no sistema para cantar, praticar a escuta ou desafiar sua pronúncia em tempo real com avaliação de IA.
+              Escolha uma música para cantar, praticar a escuta ou sincronizar suas letras em tempo real no estúdio de karaokê.
             </p>
           </div>
 
@@ -775,15 +1304,15 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({ initialTrackId, onClea
           </Button>
         </div>
 
-        {tracksWithTranscription.length === 0 ? (
+        {allTracks.length === 0 ? (
           <ShadcnCard className="bg-card/40 backdrop-blur-md border border-border/50 p-12 rounded-3xl flex flex-col items-center justify-center text-center space-y-4 shadow-xl">
             <div className="p-4 bg-muted/40 rounded-full border border-border/30 shadow-inner">
               <Headphones size={36} className="text-muted-foreground/60 animate-bounce" />
             </div>
             <div className="space-y-1">
-              <p className="text-sm font-extrabold text-foreground">Nenhuma música pronta para cantar</p>
+              <p className="text-sm font-extrabold text-foreground">Nenhuma música cadastrada</p>
               <p className="text-xs text-muted-foreground max-w-sm leading-normal">
-                Para cantar e praticar pronúncia, você precisa de faixas que já possuam letras sincronizadas. Vá até o gerenciador de playlists para transcrever seus áudios.
+                Faça upload de arquivos de áudio no gerenciador de playlists para começar a sincronizar as letras ou cantar.
               </p>
             </div>
             <Button
@@ -797,7 +1326,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({ initialTrackId, onClea
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {playlists.map(playlist => {
-              const playlistTracks = tracksWithTranscription.filter(t => t.playlistId === playlist.id);
+              const playlistTracks = allTracks.filter(t => t.playlistId === playlist.id);
               if (playlistTracks.length === 0) return null;
               const coverSrc = playlistCoverUrls[playlist.id];
 
@@ -816,37 +1345,52 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({ initialTrackId, onClea
                     <div className="min-w-0">
                       <h4 className="text-sm font-black text-foreground truncate">{playlist.name}</h4>
                       <p className="text-[10px] text-muted-foreground font-bold truncate leading-relaxed">
-                        {playlistTracks.length} faixas com letras prontas
+                        {playlistTracks.length} faixas disponíveis
                       </p>
                     </div>
                   </div>
 
                   <div className="mt-3 space-y-1.5 flex-1 max-h-[190px] overflow-y-auto pr-1">
-                    {playlistTracks.map(track => (
-                      <div
-                        key={track.id}
-                        onClick={() => handlePlayTrack(track)}
-                        className="flex items-center justify-between p-2 rounded-xl hover:bg-muted/40 transition-colors cursor-pointer group"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <div className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0 border border-primary/10 group-hover:bg-primary group-hover:text-primary-foreground transition-all">
-                            <Play size={12} className="fill-current ml-0.5" />
-                          </div>
-                          <span className="text-xs font-bold text-foreground group-hover:text-primary truncate transition-colors">
-                            {track.title}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 shrink-0 pl-1">
-                          {track.instrumentalFile && (
-                            <span className="text-[8px] font-black text-violet-500 bg-violet-500/10 px-1 py-0.5 rounded border border-violet-500/15" title="Instrumental sem voz pronto">
-                              ✦ IA
+                    {playlistTracks.map(track => {
+                      const hasTranscription = track.transcriptionLines && track.transcriptionLines.length > 0;
+                      return (
+                        <div
+                          key={track.id}
+                          onClick={() => {
+                            if (!hasTranscription) {
+                              handleOpenTranscription(track);
+                            } else {
+                              setIsEditingLyrics(false);
+                              handlePlayTrack(track);
+                            }
+                          }}
+                          className="flex items-center justify-between p-2 rounded-xl hover:bg-muted/40 transition-colors cursor-pointer group"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0 border border-primary/10 group-hover:bg-primary group-hover:text-primary-foreground transition-all">
+                              <Play size={12} className="fill-current ml-0.5" />
+                            </div>
+                            <span className="text-xs font-bold text-foreground group-hover:text-primary truncate transition-colors">
+                              {track.title}
                             </span>
-                          )}
-                          <ChevronRight size={12} className="text-muted-foreground/30" />
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0 pl-1">
+                            {!hasTranscription && (
+                              <span className="text-[8px] font-black text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/15" title="Sem letras prontas">
+                                Sem letra 📝
+                              </span>
+                            )}
+                            {track.instrumentalFile && (
+                              <span className="text-[8px] font-black text-violet-500 bg-violet-500/10 px-1 py-0.5 rounded border border-violet-500/15" title="Instrumental sem voz pronto">
+                                ✦ IA
+                              </span>
+                            )}
+                            <ChevronRight size={12} className="text-muted-foreground/30" />
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </ShadcnCard>
               );
@@ -964,9 +1508,9 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({ initialTrackId, onClea
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border/40 shrink-0 relative z-10">
               <div className="flex items-center gap-3">
                 <button
-                  onClick={handleCloseStudio}
+                  onClick={isEditingLyrics ? () => setIsEditingLyrics(false) : handleCloseStudio}
                   className="p-1.5 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer border border-border/40 bg-card/65 shadow-sm"
-                  title="Voltar ao estúdio"
+                  title={isEditingLyrics ? "Voltar ao Player" : "Voltar ao estúdio"}
                 >
                   <ArrowLeft size={16} />
                 </button>
@@ -1033,9 +1577,10 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({ initialTrackId, onClea
                   onClick={() => {
                     setTranscriptionViewMode('normal');
                     stopSpeechRecognition();
+                    setIsEditingLyrics(false);
                   }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                    transcriptionViewMode === 'normal'
+                    transcriptionViewMode === 'normal' && !isEditingLyrics
                       ? 'bg-primary text-primary-foreground shadow-sm'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
                   }`}
@@ -1048,9 +1593,10 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({ initialTrackId, onClea
                   onClick={() => {
                     setTranscriptionViewMode('playback');
                     stopSpeechRecognition();
+                    setIsEditingLyrics(false);
                   }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                    transcriptionViewMode === 'playback'
+                    transcriptionViewMode === 'playback' && !isEditingLyrics
                       ? 'bg-primary text-primary-foreground shadow-sm'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
                   }`}
@@ -1062,15 +1608,34 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({ initialTrackId, onClea
                   type="button"
                   onClick={() => {
                     setTranscriptionViewMode('pronunciation');
+                    setIsEditingLyrics(false);
                   }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                    transcriptionViewMode === 'pronunciation'
+                    transcriptionViewMode === 'pronunciation' && !isEditingLyrics
                       ? 'bg-primary text-primary-foreground shadow-sm'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
                   }`}
                 >
                   <Mic size={12} />
                   <span>Desafio de Pronúncia</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTranscriptionText(activeTrack.transcriptionLines?.map(l => l.text).join('\n') || '');
+                    setTempLines(activeTrack.transcriptionLines || []);
+                    setSyncingLineIdx(0);
+                    setTranscriptionTab('view');
+                    setIsEditingLyrics(true);
+                  }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                    isEditingLyrics
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                  }`}
+                >
+                  <Settings2 size={12} />
+                  <span>Editar Letras 📝</span>
                 </button>
               </div>
 
@@ -1144,8 +1709,11 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({ initialTrackId, onClea
               </div>
             </div>
 
-            {/* Painel Central das Letras */}
-            <div className="flex-1 flex flex-col min-h-0 relative mt-3 pb-2">
+            {isEditingLyrics ? (
+              renderTranscriptionPanel()
+            ) : (
+              /* Painel Central das Letras */
+              <div className="flex-1 flex flex-col min-h-0 relative mt-3 pb-2">
               <div className="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-card/30 to-transparent pointer-events-none z-10" />
 
               <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-6 space-y-5 pt-8 pb-36 select-none scrollbar-thin relative">
@@ -1304,6 +1872,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({ initialTrackId, onClea
                 </div>
               )}
             </div>
+            )}
           </ShadcnCard>
         </div>
       </div>
