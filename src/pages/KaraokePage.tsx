@@ -2016,18 +2016,22 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
 
     const promptText = `
 Você é um especialista em transcrição e inteligência artificial de altíssima precisão para músicas.
-Sua tarefa é analisar as frases transcritas da música "${trackTitle}" e corrigir quaisquer erros de transcrição fonética, homófonos ou alucinações (como "master of my CEO" em vez de "master of my sea, oh", "one at the sale" em vez de "one at the sail", "Believe her" em vez de "Believer", etc.) para alinhá-las com a letra oficial real da música.
+Sua tarefa é analisar as frases transcritas da música "${trackTitle}" e corrigi-las para que correspondam EXATAMENTE à letra oficial real da música.
 
-Importante:
-1. O array retornado "corrected_texts" DEVE ter exatamente o mesmo número de elementos do array de entrada "texts" (exatamente ${lines.length} itens). Cada índice do resultado deve corresponder rigorosamente ao mesmo índice da entrada.
-2. Não junte linhas e não divida linhas em múltiplas frases. Mantenha a correspondência estrita de 1 para 1.
-3. Não altere a ordem das linhas.
-4. Se a linha original já estiver correta, ou se corresponder a ruído/silêncio que não pode ser mapeado para a letra oficial, repita o texto original, mas nunca remova o item da lista.
-5. Retorne obrigatoriamente um JSON no seguinte formato:
+Diretrizes obrigatórias:
+1. Recupere da sua memória a letra oficial da música "${trackTitle}" (seja extremamente fiel à composição original do artista).
+2. Compare cada frase transcrita com o trecho correspondente na letra oficial. Substitua os erros de transcrição fonética (como "master of my CEO", "one at the sale", "Believe her", "Thirties turn", "choking in the ground", etc.) pela grafia correta da letra oficial.
+3. O tempo de início e fim gerado pelo modelo de transcrição local é absoluto e definitivo. Cada linha de entrada representa uma frase cantada em um instante exato do áudio. Portanto, a sua correção de texto deve ser uma substituição direta, servindo apenas para corrigir a ortografia da frase que foi pronunciada naquele momento específico do áudio, sem embaralhar ou adiantar/atrasar a letra da música.
+4. NÃO invente versos, palavras ou expressões que não existem na letra oficial da música (como "living in a world of don't", "rained all night", "did it for the love", "fifties", etc.). Se o cantor não canta aquela frase na versão oficial da música, você NÃO deve inseri-la de forma alguma.
+5. O array retornado "corrected_texts" DEVE ter exatamente o mesmo número de elementos do array de entrada "texts" (exatamente ${lines.length} itens). Cada elemento do resultado deve corresponder rigorosamente ao mesmo índice da entrada, servindo como uma substituição direta (correspondência estrita de 1 para 1).
+6. Não junte linhas e não divida linhas em múltiplas frases.
+7. Se uma frase da transcrição original for apenas ruído, silêncio, vocalização avulsa (como "ooh", "hey") ou um trecho repetitivo que não faça parte das estrofes principais da letra oficial, você pode mantê-la ou limpá-la, mas DEVE preservar a linha no array (nunca remova o item ou mude o tamanho da lista).
+
+Retorne obrigatoriamente um JSON no seguinte formato:
 {
   "corrected_texts": [
-    "Texto corrigido da primeira linha",
-    "Texto corrigido da segunda linha"
+    "Texto oficial correto da primeira linha",
+    "Texto oficial correto da segunda linha"
   ]
 }
 
