@@ -95,6 +95,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   const [transcribingProgress, setTranscribingProgress] = useState('');
   const [transcribingPercent, setTranscribingPercent] = useState(0);
   const isTranscribeCancelledRef = useRef(false);
+  const [isConfirmRestartModalOpen, setIsConfirmRestartModalOpen] = useState(false);
 
   // Speech Recognition States
   const [isListeningSpeech, setIsListeningSpeech] = useState(false);
@@ -1965,9 +1966,7 @@ Não adicione markdown fora do bloco JSON.
                       </Button>
                       <Button
                         onClick={() => {
-                          if (confirm('Tem certeza que deseja apagar o progresso anterior e começar do zero?')) {
-                            handleStartAiTranscription(true);
-                          }
+                          setIsConfirmRestartModalOpen(true);
                         }}
                         disabled={isTranscribingAi}
                         variant="outline"
@@ -3338,6 +3337,44 @@ Não adicione markdown fora do bloco JSON.
           >
             Cancelar Transcrição
           </Button>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Confirmação de Reinício de Transcrição */}
+      <Dialog open={isConfirmRestartModalOpen} onOpenChange={setIsConfirmRestartModalOpen}>
+        <DialogContent className="sm:max-w-[420px] bg-card border border-border text-foreground p-6 rounded-2xl shadow-2xl flex flex-col justify-start text-left space-y-4 animate-fadeIn">
+          <DialogHeader className="space-y-2">
+            <DialogTitle className="text-base font-black tracking-tight text-foreground flex items-center gap-2">
+              <div className="p-1.5 bg-rose-500/10 text-rose-500 rounded-lg">
+                <RefreshCw size={16} />
+              </div>
+              <span>Recomeçar Transcrição?</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground leading-normal font-semibold text-left">
+              Atenção: Esta ação irá apagar permanentemente todos os trechos de áudio que já foram transcritos e salvos temporariamente para esta música. Você terá que reiniciar o processo do zero.
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="flex items-center gap-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsConfirmRestartModalOpen(false)}
+              className="flex-1 border-border/60 hover:bg-muted text-foreground font-extrabold text-xs h-10 rounded-xl cursor-pointer"
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={async () => {
+                setIsConfirmRestartModalOpen(false);
+                await handleStartAiTranscription(true);
+              }}
+              className="flex-1 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs h-10 rounded-xl shadow-lg shadow-rose-500/10 cursor-pointer"
+            >
+              Confirmar e Apagar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
