@@ -60,7 +60,10 @@ self.addEventListener('message', async (event: MessageEvent) => {
         return_timestamps: true,
         language: null, // Auto-detecta o idioma falado/cantado
         task: 'transcribe',
-        temperature: 0.0
+        temperature: 0.0,
+        no_speech_threshold: 0.6,
+        logprob_threshold: -1.0,
+        compression_ratio_threshold: 2.4
       });
 
       // Mapeia chunks do Whisper para o formato esperado pelo app
