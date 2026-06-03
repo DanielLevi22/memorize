@@ -2016,11 +2016,14 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
 
     const promptText = `
 Você é um especialista em transcrição e inteligência artificial de altíssima precisão para músicas.
-Sua tarefa é analisar as frases transcritas da música "${trackTitle}" e corrigi-las para que correspondam EXATAMENTE à letra oficial real da música.
+
+Sua tarefa consiste em duas etapas obrigatórias:
+1. IDENTIFICAR a música original com base nas linhas transcritas fornecidas (que podem conter erros fonéticos, mas mantêm o sentido geral e palavras-chave da composição oficial do artista). A faixa possui o título provisório de "${trackTitle}".
+2. RECUPERAR da sua memória a letra oficial real da música identificada e CORRIGIR cada linha transcrita para corresponder EXATAMENTE à letra oficial.
 
 Diretrizes obrigatórias:
-1. Recupere da sua memória a letra oficial da música "${trackTitle}" (seja extremamente fiel à composição original do artista).
-2. Compare cada frase transcrita com o trecho correspondente na letra oficial. Substitua os erros de transcrição fonética (como "master of my CEO", "one at the sale", "Believe her", "Thirties turn", "choking in the ground", etc.) pela grafia correta da letra oficial.
+1. Descubra qual é a música oficial. Por exemplo, se a transcrição contiver frases como "First things first, I'ma say all the words inside my head", você deve identificar que se trata de "Believer" do Imagine Dragons.
+2. Substitua os erros de transcrição fonética (como "master of my CEO", "one at the sale", "Believe her", "Thirties turn", "choking in the ground", etc.) pela grafia correta da letra oficial da música identificada.
 3. O tempo de início e fim gerado pelo modelo de transcrição local é absoluto e definitivo. Cada linha de entrada representa uma frase cantada em um instante exato do áudio. Portanto, a sua correção de texto deve ser uma substituição direta, servindo apenas para corrigir a ortografia da frase que foi pronunciada naquele momento específico do áudio, sem embaralhar ou adiantar/atrasar a letra da música.
 4. NÃO invente versos, palavras ou expressões que não existem na letra oficial da música (como "living in a world of don't", "rained all night", "did it for the love", "fifties", etc.). Se o cantor não canta aquela frase na versão oficial da música, você NÃO deve inseri-la de forma alguma.
 5. O array retornado "corrected_texts" DEVE ter exatamente o mesmo número de elementos do array de entrada "texts" (exatamente ${lines.length} itens). Cada elemento do resultado deve corresponder rigorosamente ao mesmo índice da entrada, servindo como uma substituição direta (correspondência estrita de 1 para 1).
@@ -2029,6 +2032,7 @@ Diretrizes obrigatórias:
 
 Retorne obrigatoriamente um JSON no seguinte formato:
 {
+  "detected_song": "Nome da Música - Artista",
   "corrected_texts": [
     "Texto oficial correto da primeira linha",
     "Texto oficial correto da segunda linha"
@@ -2066,6 +2070,7 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
     }
 
     const parsed = JSON.parse(textResponse);
+    console.log("[GeminiCorretor] Música detectada:", parsed.detected_song);
     return parsed.corrected_texts || [];
   };
 
