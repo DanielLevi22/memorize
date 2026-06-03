@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import { getWordLevenshteinDistance, diffWords, type DiffWord } from '../utils/srs';
 import { separateVocalsCloud } from '../utils/vocalSeparationCloud';
 import { decodeAudioFile, findSilenceSplitPoints, bufferToWav, adjustTimestampsSafeguard } from '../utils/audioChunker';
+import { translateWithMyMemory } from '../utils/readingProcessor';
 
 const cleanString = (str: string) => {
   if (!str) return '';
@@ -1628,9 +1629,11 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
         setAllTracks(prev => prev.map(t => t.id === activeTrack.id ? { ...t, aiTranscriptionProgress: undefined } : t));
       }
 
-      // Se usamos Whisper (API ou Local), traduzimos as frases finais para o português usando o Gemini
+      // Se usamos Whisper (API ou Local), traduzimos as frases finais para o português
       if (transcriptionProvider !== 'gemini' && finalLines.length > 0) {
         const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
+        let hasTranslation = false;
+
         if (geminiApiKey.trim()) {
           setTranscribingProgress('Traduzindo frases com Gemini...');
           try {
@@ -1639,9 +1642,39 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
               ...l,
               translation: translations[idx] || ''
             }));
+            hasTranslation = true;
           } catch (transErr) {
-            console.warn("Falha ao traduzir letras pelo Gemini, continuando sem tradução:", transErr);
+            console.warn("Falha ao traduzir letras pelo Gemini, caindo para MyMemory:", transErr);
           }
+        }
+
+        if (!hasTranslation) {
+          // Fallback para quando o usuário não tiver chave do Gemini (ex: no modo Whisper Local 100% grátis)
+          setTranscribingProgress('Traduzindo frases com MyMemory (Grátis)...');
+          const translatedLines: TranscriptionLine[] = [];
+          for (let idx = 0; idx < finalLines.length; idx++) {
+            if (isTranscribeCancelledRef.current) {
+              throw new Error('CanceledByUser');
+            }
+            const line = finalLines[idx];
+            const transPercent = Math.round((idx / finalLines.length) * 100);
+            setTranscribingPercent(transPercent);
+            setTranscribingProgress(`Traduzindo trecho ${idx + 1} de ${finalLines.length}...`);
+            
+            let translated = '';
+            try {
+              translated = await translateWithMyMemory(line.text);
+              // Pequena pausa de 100ms para evitar sobrecarga/rate limit
+              await new Promise(r => setTimeout(r, 100));
+            } catch (err) {
+              console.error(`Erro ao traduzir "${line.text}" via MyMemory:`, err);
+            }
+            translatedLines.push({
+              ...line,
+              translation: translated
+            });
+          }
+          finalLines = translatedLines;
         }
       }
 
@@ -1808,7 +1841,7 @@ Não adicione markdown fora do bloco JSON.
         if (type === 'status') {
           setTranscribingProgress(message);
         } else if (type === 'loading') {
-          const pct = Math.round(progress * 100);
+          const pct = Math.min(100, Math.round(progress));
           setTranscribingPercent(pct);
           setTranscribingProgress(`Baixando inteligência local... ${pct}%`);
         } else if (type === 'success') {
