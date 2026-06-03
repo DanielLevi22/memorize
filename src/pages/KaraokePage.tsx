@@ -96,6 +96,13 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   const [transcribingPercent, setTranscribingPercent] = useState(0);
   const isTranscribeCancelledRef = useRef(false);
   const [isConfirmRestartModalOpen, setIsConfirmRestartModalOpen] = useState(false);
+  const [transcriptionProvider, setTranscriptionProvider] = useState<'gemini' | 'openai' | 'groq' | 'local'>(() => {
+    return (localStorage.getItem('memorize_transcription_provider') as any) || 'gemini';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('memorize_transcription_provider', transcriptionProvider);
+  }, [transcriptionProvider]);
 
   // Speech Recognition States
   const [isListeningSpeech, setIsListeningSpeech] = useState(false);
@@ -1413,10 +1420,26 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
 
   const handleStartAiTranscription = async (forceRestart = false) => {
     if (!activeTrack) return;
-    const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
-    if (!geminiApiKey.trim()) {
-      toast.error('Configuração Requerida: Adicione sua Chave de API do Gemini nas Configurações.');
-      return;
+
+    // Verificar chaves de API necessárias com base no motor selecionado
+    if (transcriptionProvider === 'gemini') {
+      const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
+      if (!geminiApiKey.trim()) {
+        toast.error('Configuração Requerida: Adicione sua Chave de API do Gemini nas Configurações.');
+        return;
+      }
+    } else if (transcriptionProvider === 'openai') {
+      const openaiApiKey = localStorage.getItem('memorize_openai_api_key') || '';
+      if (!openaiApiKey.trim()) {
+        toast.error('Configuração Requerida: Adicione sua Chave de API da OpenAI nas Configurações.');
+        return;
+      }
+    } else if (transcriptionProvider === 'groq') {
+      const groqApiKey = localStorage.getItem('memorize_groq_api_key') || '';
+      if (!groqApiKey.trim()) {
+        toast.error('Configuração Requerida: Adicione sua Chave de API da Groq nas Configurações.');
+        return;
+      }
     }
 
     try {
@@ -1426,12 +1449,94 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
       setTranscribingProgress('Decodificando áudio localmente...');
 
       const audioBuffer = await decodeAudioFile(activeTrack.audioFile);
-
-      let splitPoints: number[] = [];
       let finalLines: TranscriptionLine[] = [];
-      let startIdx = 0;
 
-      if (forceRestart) {
+      if (transcriptionProvider === 'local') {
+        // Whisper Local: executa no navegador via Web Worker sem fatiamento
+        setTranscribingProgress('Inicializando Whisper local no navegador...');
+        finalLines = await requestLocalWhisperTranscription(audioBuffer);
+      } else {
+        // Motores em Nuvem: processamento em chunks de 10s para maior precisão de alinhamento
+        let splitPoints: number[] = [];
+        let startIdx = 0;
+
+        if (forceRestart) {
+          await db.audioTracks.update(activeTrack.id, {
+            aiTranscriptionProgress: undefined,
+            updatedAt: Date.now()
+          });
+          activeTrack.aiTranscriptionProgress = undefined;
+          setActiveTrack({ ...activeTrack });
+          setAllTracks(prev => prev.map(t => t.id === activeTrack.id ? { ...t, aiTranscriptionProgress: undefined } : t));
+        }
+
+        if (!forceRestart && activeTrack.aiTranscriptionProgress) {
+          const progressState = activeTrack.aiTranscriptionProgress;
+          splitPoints = progressState.splitPoints;
+          finalLines = progressState.lines;
+          startIdx = progressState.lastProcessedChunkIndex;
+        } else {
+          splitPoints = findSilenceSplitPoints(audioBuffer, 10);
+        }
+
+        const totalChunks = splitPoints.length + 1;
+
+        for (let i = startIdx; i <= splitPoints.length; i++) {
+          if (isTranscribeCancelledRef.current) {
+            throw new Error('CanceledByUser');
+          }
+
+          const percent = Math.round((i / totalChunks) * 100);
+          setTranscribingPercent(percent);
+
+          const start = i === 0 ? 0 : splitPoints[i - 1];
+          const end = i === splitPoints.length ? audioBuffer.duration : splitPoints[i];
+          
+          setTranscribingProgress(`Processando trecho ${i + 1} de ${totalChunks}...`);
+
+          const wavBlob = await bufferToWav(audioBuffer, start, end);
+          let chunkLines: TranscriptionLine[] = [];
+
+          if (transcriptionProvider === 'gemini') {
+            const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
+            chunkLines = await requestGeminiTranscription(wavBlob, geminiApiKey);
+          } else if (transcriptionProvider === 'openai') {
+            const openaiApiKey = localStorage.getItem('memorize_openai_api_key') || '';
+            chunkLines = await requestOpenaiWhisperTranscription(wavBlob, openaiApiKey);
+          } else if (transcriptionProvider === 'groq') {
+            const groqApiKey = localStorage.getItem('memorize_groq_api_key') || '';
+            chunkLines = await requestGroqWhisperTranscription(wavBlob, groqApiKey);
+          }
+
+          const adjustedLines = chunkLines.map(l => ({
+            ...l,
+            id: crypto.randomUUID(),
+            startTime: l.startTime + start,
+            endTime: l.endTime !== undefined ? l.endTime + start : undefined
+          }));
+
+          finalLines = [...finalLines, ...adjustedLines];
+
+          // Salva progresso temporário
+          const nextProgress = {
+            lastProcessedChunkIndex: i + 1,
+            splitPoints,
+            lines: finalLines
+          };
+
+          await db.audioTracks.update(activeTrack.id, {
+            aiTranscriptionProgress: nextProgress,
+            updatedAt: Date.now()
+          });
+
+          activeTrack.aiTranscriptionProgress = nextProgress;
+          setActiveTrack({ ...activeTrack });
+          setAllTracks(prev => prev.map(t => t.id === activeTrack.id ? { ...t, aiTranscriptionProgress: nextProgress } : t));
+        }
+
+        setTranscribingPercent(100);
+
+        // Limpa o progresso temporário ao terminar
         await db.audioTracks.update(activeTrack.id, {
           aiTranscriptionProgress: undefined,
           updatedAt: Date.now()
@@ -1441,80 +1546,31 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
         setAllTracks(prev => prev.map(t => t.id === activeTrack.id ? { ...t, aiTranscriptionProgress: undefined } : t));
       }
 
-      if (!forceRestart && activeTrack.aiTranscriptionProgress) {
-        const progressState = activeTrack.aiTranscriptionProgress;
-        splitPoints = progressState.splitPoints;
-        finalLines = progressState.lines;
-        startIdx = progressState.lastProcessedChunkIndex;
-      } else {
-        // Find split points using target size 10 seconds
-        splitPoints = findSilenceSplitPoints(audioBuffer, 10);
-      }
-
-      const totalChunks = splitPoints.length + 1;
-
-      for (let i = startIdx; i <= splitPoints.length; i++) {
-        if (isTranscribeCancelledRef.current) {
-          throw new Error('CanceledByUser');
+      // Se usamos Whisper (API ou Local), traduzimos as frases finais para o português usando o Gemini
+      if (transcriptionProvider !== 'gemini' && finalLines.length > 0) {
+        const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
+        if (geminiApiKey.trim()) {
+          setTranscribingProgress('Traduzindo frases com Gemini...');
+          try {
+            const translations = await requestGeminiTranslationOnly(finalLines, geminiApiKey);
+            finalLines = finalLines.map((l, idx) => ({
+              ...l,
+              translation: translations[idx] || ''
+            }));
+          } catch (transErr) {
+            console.warn("Falha ao traduzir letras pelo Gemini, continuando sem tradução:", transErr);
+          }
         }
-
-        const percent = Math.round((i / totalChunks) * 100);
-        setTranscribingPercent(percent);
-
-        const start = i === 0 ? 0 : splitPoints[i - 1];
-        const end = i === splitPoints.length ? audioBuffer.duration : splitPoints[i];
-        
-        setTranscribingProgress(`Processando trecho ${i + 1} de ${totalChunks}...`);
-
-        const wavBlob = await bufferToWav(audioBuffer, start, end);
-        const chunkLines = await requestGeminiTranscription(wavBlob, geminiApiKey);
-
-        const adjustedLines = chunkLines.map(l => ({
-          ...l,
-          id: crypto.randomUUID(),
-          startTime: l.startTime + start,
-          endTime: l.endTime !== undefined ? l.endTime + start : undefined
-        }));
-
-        finalLines = [...finalLines, ...adjustedLines];
-
-        // Save progress to database
-        const nextProgress = {
-          lastProcessedChunkIndex: i + 1,
-          splitPoints,
-          lines: finalLines
-        };
-
-        await db.audioTracks.update(activeTrack.id, {
-          aiTranscriptionProgress: nextProgress,
-          updatedAt: Date.now()
-        });
-
-        // Update local state reactively
-        activeTrack.aiTranscriptionProgress = nextProgress;
-        setActiveTrack({ ...activeTrack });
-        setAllTracks(prev => prev.map(t => t.id === activeTrack.id ? { ...t, aiTranscriptionProgress: nextProgress } : t));
       }
 
-      setTranscribingPercent(100);
-
-      // Clear the temporary AI progress from db.audioTracks on completion
-      await db.audioTracks.update(activeTrack.id, {
-        aiTranscriptionProgress: undefined,
-        updatedAt: Date.now()
-      });
-      activeTrack.aiTranscriptionProgress = undefined;
-      setActiveTrack({ ...activeTrack });
-      setAllTracks(prev => prev.map(t => t.id === activeTrack.id ? { ...t, aiTranscriptionProgress: undefined } : t));
-
-      // Call adjustTimestampsSafeguard properly with minSpacing=0.5 and trackDuration=audioBuffer.duration
+      // Aplicar salvaguarda cronológica final
       const postProcessedLines = adjustTimestampsSafeguard(finalLines, 0.5, audioBuffer.duration);
 
       setTempLines(postProcessedLines);
       setTranscriptionText(postProcessedLines.map(l => l.text).join('\n'));
       setSyncingLineIdx(postProcessedLines.length);
       
-      toast.success('Áudio transcrito e traduzido com sucesso pelo Gemini 2.5 Flash!');
+      toast.success('Áudio transcrito e traduzido com sucesso!');
       setTranscriptionTab('view');
     } catch (err: any) {
       if (err.message === 'CanceledByUser') {
@@ -1593,6 +1649,153 @@ Não adicione markdown fora do bloco JSON.
 
     const parsed = JSON.parse(textResponse);
     return parsed.lines || [];
+  };
+
+  const requestOpenaiWhisperTranscription = async (audioBlob: Blob, apiKey: string): Promise<TranscriptionLine[]> => {
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'audio.wav');
+    formData.append('model', 'whisper-1');
+    formData.append('response_format', 'verbose_json');
+
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: formData
+    });
+
+    if (!response.ok) {
+      throw new Error(`OpenAI Whisper retornou status ${response.status}`);
+    }
+
+    const data = await response.json();
+    return (data.segments || []).map((seg: any) => ({
+      id: crypto.randomUUID(),
+      text: seg.text.trim(),
+      startTime: parseFloat(seg.start.toFixed(2)),
+      endTime: parseFloat(seg.end.toFixed(2))
+    }));
+  };
+
+  const requestGroqWhisperTranscription = async (audioBlob: Blob, apiKey: string): Promise<TranscriptionLine[]> => {
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'audio.wav');
+    formData.append('model', 'whisper-large-v3');
+    formData.append('response_format', 'verbose_json');
+
+    const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: formData
+    });
+
+    if (!response.ok) {
+      throw new Error(`Groq Whisper retornou status ${response.status}`);
+    }
+
+    const data = await response.json();
+    return (data.segments || []).map((seg: any) => ({
+      id: crypto.randomUUID(),
+      text: seg.text.trim(),
+      startTime: parseFloat(seg.start.toFixed(2)),
+      endTime: parseFloat(seg.end.toFixed(2))
+    }));
+  };
+
+  const requestLocalWhisperTranscription = (audioBuffer: AudioBuffer): Promise<TranscriptionLine[]> => {
+    return new Promise((resolve, reject) => {
+      const worker = new Worker(
+        new URL('../workers/whisper.worker.ts', import.meta.url),
+        { type: 'module' }
+      );
+
+      const checkCancellation = setInterval(() => {
+        if (isTranscribeCancelledRef.current) {
+          clearInterval(checkCancellation);
+          worker.terminate();
+          reject(new Error('CanceledByUser'));
+        }
+      }, 200);
+
+      worker.onmessage = (e: MessageEvent) => {
+        const { type, message, progress, lines, error } = e.data;
+
+        if (type === 'status') {
+          setTranscribingProgress(message);
+        } else if (type === 'loading') {
+          const pct = Math.round(progress * 100);
+          setTranscribingPercent(pct);
+          setTranscribingProgress(`Baixando inteligência local... ${pct}%`);
+        } else if (type === 'success') {
+          clearInterval(checkCancellation);
+          worker.terminate();
+          resolve(lines);
+        } else if (type === 'error') {
+          clearInterval(checkCancellation);
+          worker.terminate();
+          reject(new Error(error));
+        }
+      };
+
+      const audioData = audioBuffer.getChannelData(0);
+      worker.postMessage({
+        type: 'start',
+        audioData,
+        sampleRate: audioBuffer.sampleRate
+      });
+    });
+  };
+
+  const requestGeminiTranslationOnly = async (lines: TranscriptionLine[], apiKey: string): Promise<string[]> => {
+    if (lines.length === 0) return [];
+    
+    const promptText = `
+Você é um tradutor pedagógico de altíssima precisão.
+Sua tarefa é traduzir a lista de frases fornecida para o português do Brasil.
+Abaixo está o JSON contendo uma lista de strings em "texts" a traduzir.
+
+Retorne obrigatoriamente um JSON no seguinte formato:
+{
+  "translations": [
+    "Tradução da primeira frase",
+    "Tradução da segunda frase"
+  ]
+}
+
+NÃO invente explicações ou inclua outros campos. Retorne apenas o JSON válido.
+JSON de entrada:
+${JSON.stringify({ texts: lines.map(l => l.text) })}
+`;
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{ text: promptText }]
+        }],
+        generationConfig: {
+          responseMimeType: 'application/json'
+        }
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Erro na tradução do Gemini: status ${response.status}`);
+    }
+
+    const data = await response.json();
+    const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!textResponse) {
+      throw new Error('Tradução vazia da API do Gemini.');
+    }
+
+    const parsed = JSON.parse(textResponse);
+    return parsed.translations || [];
   };
 
   // Syncing stamp handlers
@@ -1942,11 +2145,28 @@ Não adicione markdown fora do bloco JSON.
                 <div className="space-y-1">
                   <h4 className="text-[10px] font-black text-foreground uppercase tracking-widest flex items-center gap-1.5">
                     <Sparkles size={11} className="text-primary animate-pulse" />
-                    Transcrição com IA Gemini
+                    Transcrição com Inteligência Artificial
                   </h4>
                   <p className="text-[9px] text-muted-foreground leading-normal font-semibold">
-                    Decodifique o áudio no idioma original e gere a tradução para o português automaticamente usando a IA do Google.
+                    Segmenta e transcreve a letra no idioma original automaticamente, traduzindo as frases para português.
                   </p>
+                </div>
+
+                <div className="space-y-1.5 w-full">
+                  <label className="text-[8px] font-black text-muted-foreground uppercase tracking-wider block">
+                    Motor de Transcrição
+                  </label>
+                  <select
+                    value={transcriptionProvider}
+                    onChange={(e) => setTranscriptionProvider(e.target.value as any)}
+                    disabled={isTranscribingAi}
+                    className="w-full bg-background border border-border text-foreground px-3 py-1.5 rounded-xl text-xs font-bold outline-none focus:border-violet-500/50 cursor-pointer"
+                  >
+                    <option value="gemini">IA Gemini 2.5 Flash (API)</option>
+                    <option value="openai">OpenAI Whisper (API)</option>
+                    <option value="groq">Groq Whisper (API - Veloz)</option>
+                    <option value="local">Whisper Local (No Navegador - 100% Grátis)</option>
+                  </select>
                 </div>
 
                 {activeTrack.aiTranscriptionProgress ? (

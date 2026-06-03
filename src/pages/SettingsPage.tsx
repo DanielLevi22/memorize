@@ -98,6 +98,17 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const [showApiKey, setShowApiKey] = useState(false);
   const [localApiKey, setLocalApiKey] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
+  
+  // OpenAI & Groq API Key states
+  const [openaiApiKey, setOpenaiApiKey] = useState(() => localStorage.getItem('memorize_openai_api_key') || '');
+  const [groqApiKey, setGroqApiKey] = useState(() => localStorage.getItem('memorize_groq_api_key') || '');
+  const [localOpenaiKey, setLocalOpenaiKey] = useState('');
+  const [localGroqKey, setLocalGroqKey] = useState('');
+  const [openaiSaveSuccess, setOpenaiSaveSuccess] = useState(false);
+  const [groqSaveSuccess, setGroqSaveSuccess] = useState(false);
+  const [showOpenaiKey, setShowOpenaiKey] = useState(false);
+  const [showGroqKey, setShowGroqKey] = useState(false);
+
   const [showDriveHelp, setShowDriveHelp] = useState(false);
 
   // Available theme accent colors
@@ -219,6 +230,40 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     setLocalApiKey('');
     setShowRemoveKeyConfirm(false);
     toast.success("Chave da API removida.");
+  };
+
+  const handleSaveOpenaiKey = () => {
+    if (!localOpenaiKey.trim()) return;
+    localStorage.setItem('memorize_openai_api_key', localOpenaiKey.trim());
+    setOpenaiApiKey(localOpenaiKey.trim());
+    setLocalOpenaiKey('');
+    setOpenaiSaveSuccess(true);
+    setTimeout(() => setOpenaiSaveSuccess(false), 3000);
+    toast.success('Chave da API OpenAI salva com sucesso!');
+  };
+
+  const handleRemoveOpenaiKey = () => {
+    localStorage.removeItem('memorize_openai_api_key');
+    setOpenaiApiKey('');
+    setLocalOpenaiKey('');
+    toast.success('Chave da API OpenAI removida.');
+  };
+
+  const handleSaveGroqKey = () => {
+    if (!localGroqKey.trim()) return;
+    localStorage.setItem('memorize_groq_api_key', localGroqKey.trim());
+    setGroqApiKey(localGroqKey.trim());
+    setLocalGroqKey('');
+    setGroqSaveSuccess(true);
+    setTimeout(() => setGroqSaveSuccess(false), 3000);
+    toast.success('Chave da API Groq salva com sucesso!');
+  };
+
+  const handleRemoveGroqKey = () => {
+    localStorage.removeItem('memorize_groq_api_key');
+    setGroqApiKey('');
+    setLocalGroqKey('');
+    toast.success('Chave da API Groq removida.');
   };
 
   const confirmResetData = () => {
@@ -1272,7 +1317,153 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               Sua chave é salva <strong>somente no seu navegador (localStorage)</strong> de forma 100% segura e privada. Ela é enviada diretamente para a API oficial da Google para gerar os cartões.
             </p>
           </div>
+
+        {/* Card: OpenAI API Key */}
+        <div className="p-4 bg-card space-y-3 border-t border-border/40">
+          <div className="flex flex-col gap-1.5">
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                <Key size={14} className="text-muted-foreground" /> Chave de API da OpenAI (Whisper Cloud)
+              </span>
+              <div className="flex items-center gap-3">
+                {openaiApiKey && (
+                  <span className="text-[10px] text-emerald-500 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                    Configurada ✅
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowOpenaiKey(!showOpenaiKey)}
+                  className="text-xs text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1 font-semibold"
+                >
+                  {showOpenaiKey ? (
+                    <>
+                      <EyeOff size={13} /> Ocultar
+                    </>
+                  ) : (
+                    <>
+                      <Eye size={13} /> Revelar
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+            
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  type={showOpenaiKey ? "text" : "password"}
+                  placeholder={openaiApiKey ? "•••••••••••••••• (Chave Salva)" : "Cole sua API Key da OpenAI aqui..."}
+                  value={localOpenaiKey}
+                  onChange={(e) => setLocalOpenaiKey(e.target.value)}
+                  className="w-full bg-muted border border-border text-foreground px-3 py-2 rounded-xl text-xs outline-none focus:border-violet-500/50 pr-10 font-mono transition-colors"
+                />
+                <div className="absolute right-3 top-2.5 text-muted-foreground pointer-events-none">
+                  🔑
+                </div>
+              </div>
+              <Button
+                onClick={handleSaveOpenaiKey}
+                disabled={!localOpenaiKey.trim()}
+                className="bg-violet-600 hover:bg-violet-700 text-zinc-50 text-xs font-bold px-4 py-2 rounded-xl h-auto cursor-pointer flex-shrink-0"
+              >
+                Salvar
+              </Button>
+              {openaiApiKey && (
+                <Button
+                  onClick={handleRemoveOpenaiKey}
+                  variant="outline"
+                  className="border-destructive/20 hover:bg-destructive/10 text-destructive text-xs font-bold px-3 py-2 rounded-xl h-auto cursor-pointer flex-shrink-0"
+                >
+                  Remover
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {openaiSaveSuccess && (
+            <p className="text-[10px] text-emerald-500 font-bold animate-pulse">
+              ✅ Chave de API da OpenAI salva com sucesso!
+            </p>
+          )}
+          <p className="text-[10px] text-muted-foreground leading-relaxed mt-1">
+            Usada para transcrever áudio com alta precisão usando o modelo Whisper em nuvem oficial da OpenAI.
+          </p>
         </div>
+
+        {/* Card: Groq API Key */}
+        <div className="p-4 bg-card space-y-3 border-t border-border/40">
+          <div className="flex flex-col gap-1.5">
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                <Key size={14} className="text-muted-foreground" /> Chave de API da Groq (Whisper Veloz)
+              </span>
+              <div className="flex items-center gap-3">
+                {groqApiKey && (
+                  <span className="text-[10px] text-emerald-500 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                    Configurada ✅
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowGroqKey(!showGroqKey)}
+                  className="text-xs text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1 font-semibold"
+                >
+                  {showGroqKey ? (
+                    <>
+                      <EyeOff size={13} /> Ocultar
+                    </>
+                  ) : (
+                    <>
+                      <Eye size={13} /> Revelar
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+            
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  type={showGroqKey ? "text" : "password"}
+                  placeholder={groqApiKey ? "•••••••••••••••• (Chave Salva)" : "Cole sua API Key da Groq aqui..."}
+                  value={localGroqKey}
+                  onChange={(e) => setLocalGroqKey(e.target.value)}
+                  className="w-full bg-muted border border-border text-foreground px-3 py-2 rounded-xl text-xs outline-none focus:border-violet-500/50 pr-10 font-mono transition-colors"
+                />
+                <div className="absolute right-3 top-2.5 text-muted-foreground pointer-events-none">
+                  🔑
+                </div>
+              </div>
+              <Button
+                onClick={handleSaveGroqKey}
+                disabled={!localGroqKey.trim()}
+                className="bg-violet-600 hover:bg-violet-700 text-zinc-50 text-xs font-bold px-4 py-2 rounded-xl h-auto cursor-pointer flex-shrink-0"
+              >
+                Salvar
+              </Button>
+              {groqApiKey && (
+                <Button
+                  onClick={handleRemoveGroqKey}
+                  variant="outline"
+                  className="border-destructive/20 hover:bg-destructive/10 text-destructive text-xs font-bold px-3 py-2 rounded-xl h-auto cursor-pointer flex-shrink-0"
+                >
+                  Remover
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {groqSaveSuccess && (
+            <p className="text-[10px] text-emerald-500 font-bold animate-pulse">
+              ✅ Chave de API da Groq salva com sucesso!
+            </p>
+          )}
+          <p className="text-[10px] text-muted-foreground leading-relaxed mt-1">
+            Usada para transcrever áudio gratuitamente com velocidade ultrarrápida usando o Whisper na Groq.
+          </p>
+        </div>
+      </div>
 
       <div className="bg-card border border-border rounded-2xl overflow-hidden divide-y divide-border/60 shadow-sm">
         <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider px-4 pt-4 pb-2 bg-muted/20">
