@@ -209,3 +209,227 @@ export const adjustTimestampsSafeguard = (
   
   return sorted;
 };
+
+/**
+ * Converte um AudioBuffer completo para um Blob no formato WAV Mono a 16000Hz (16kHz).
+ * Ideal para enviar arquivos comprimidos e leves para APIs de transcrição e alinhamento forçado.
+ */
+export const bufferToMono16kWav = (buffer: AudioBuffer): Blob => {
+  const targetSampleRate = 16000;
+  const numChannels = buffer.numberOfChannels;
+  const originalSampleRate = buffer.sampleRate;
+  const numSamples = buffer.length;
+  
+  // 1. Mescla para Mono se tiver múltiplos canais
+  const monoData = new Float32Array(numSamples);
+  if (numChannels === 1) {
+    monoData.set(buffer.getChannelData(0));
+  } else {
+    const channelsData: Float32Array[] = [];
+    for (let c = 0; c < numChannels; c++) {
+      channelsData.push(buffer.getChannelData(c));
+    }
+    for (let i = 0; i < numSamples; i++) {
+      let sum = 0;
+      for (let c = 0; c < numChannels; c++) {
+        sum += channelsData[c][i];
+      }
+      monoData[i] = sum / numChannels;
+    }
+  }
+  
+  // 2. Reamostra para 16kHz usando interpolação linear
+  let resampledData: Float32Array;
+  if (originalSampleRate === targetSampleRate) {
+    resampledData = monoData;
+  } else {
+    const ratio = originalSampleRate / targetSampleRate;
+    const newLength = Math.round(numSamples / ratio);
+    resampledData = new Float32Array(newLength);
+    for (let i = 0; i < newLength; i++) {
+      const position = i * ratio;
+      const index = Math.floor(position);
+      const fraction = position - index;
+      const indexNext = Math.min(numSamples - 1, index + 1);
+      
+      const sample = monoData[index];
+      const sampleNext = monoData[indexNext];
+      resampledData[i] = sample + fraction * (sampleNext - sample);
+    }
+  }
+  
+  // 3. Monta cabeçalho WAV (PCM 16-bit, Mono, 16000Hz)
+  const bufferLength = resampledData.length * 2;
+  const wavBuffer = new ArrayBuffer(44 + bufferLength);
+  const view = new DataView(wavBuffer);
+  
+  const writeString = (dataView: DataView, offset: number, string: string) => {
+    for (let i = 0; i < string.length; i++) {
+      dataView.setUint8(offset + i, string.charCodeAt(i));
+    }
+  };
+  
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, 36 + bufferLength, true);
+  writeString(view, 8, 'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM = 1
+  view.setUint16(22, 1, true); // Mono = 1
+  view.setUint32(24, targetSampleRate, true);
+  view.setUint32(28, targetSampleRate * 1 * 2, true); // byteRate
+  view.setUint16(32, 2, true); // blockAlign
+  view.setUint16(34, 16, true); // 16-bit
+  writeString(view, 36, 'data');
+  view.setUint32(40, bufferLength, true);
+  
+  // Escreve os samples de áudio reamostrados
+  let offset = 44;
+  for (let i = 0; i < resampledData.length; i++) {
+    let sample = resampledData[i];
+    sample = Math.max(-1, Math.min(1, sample));
+    const val = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+    view.setInt16(offset, val, true);
+    offset += 2;
+  }
+  
+  return new Blob([wavBuffer], { type: 'audio/wav' });
+};
+
+/**
+ * Realiza o alinhamento textual fuzzy (client-side) entre a letra de referência colada pelo usuário
+ * e as frases transcritas pelo Whisper, associando os timestamps corretos.
+ * Pula alucinações (segmentos com baixo score de overlap) e interpola tempos para linhas não encontradas.
+ */
+export const alignLyricsLocal = (
+  referenceLines: string[],
+  transcribedSegments: TranscriptionLine[]
+): TranscriptionLine[] => {
+  if (referenceLines.length === 0) return [];
+  
+  const cleanString = (str: string): string => {
+    return str
+      .toLowerCase()
+      .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'’]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  };
+
+  const wordsAreSimilar = (w1: string, w2: string): boolean => {
+    if (w1 === w2) return true;
+    if (w1.length < 3 || w2.length < 3) return false;
+    return w1.includes(w2) || w2.includes(w1);
+  };
+
+  // 1. Achatar os segmentos em palavras com timestamps
+  const transcribedWords: { text: string; startTime: number; endTime: number }[] = [];
+  for (const seg of transcribedSegments) {
+    const text = seg.text.trim();
+    if (!text) continue;
+    const rawWords = text.split(/\s+/);
+    const startTime = seg.startTime;
+    const endTime = seg.endTime ?? (seg.startTime + 3.0);
+    const duration = endTime - startTime;
+    const wordDuration = duration / Math.max(1, rawWords.length);
+
+    for (let i = 0; i < rawWords.length; i++) {
+      const cleaned = cleanString(rawWords[i]);
+      if (cleaned) {
+        transcribedWords.push({
+          text: cleaned,
+          startTime: startTime + i * wordDuration,
+          endTime: startTime + (i + 1) * wordDuration
+        });
+      }
+    }
+  }
+
+  if (transcribedWords.length === 0) {
+    // Se não transcreveu nenhuma palavra, distribui por igual
+    return referenceLines.map((line, idx) => ({
+      id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15),
+      text: line.trim(),
+      startTime: idx * 3.0,
+      endTime: (idx + 1) * 3.0
+    }));
+  }
+
+  const aligned: TranscriptionLine[] = [];
+  let wordPtr = 0;
+
+  for (let i = 0; i < referenceLines.length; i++) {
+    const refLine = referenceLines[i];
+    const cleanRef = cleanString(refLine);
+    const id = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
+
+    if (!cleanRef) {
+      aligned.push({ id, text: refLine, startTime: 0, endTime: 0 });
+      continue;
+    }
+
+    const refWords = cleanRef.split(' ').filter(Boolean);
+    const matchedIndices: number[] = [];
+    let currentSearchStart = wordPtr;
+
+    // Para cada palavra da linha de referência, procura nos próximos 30 palavras transcritas
+    for (const refW of refWords) {
+      const searchLimit = Math.min(transcribedWords.length, currentSearchStart + 30);
+      let foundIdx = -1;
+      for (let k = currentSearchStart; k < searchLimit; k++) {
+        if (wordsAreSimilar(refW, transcribedWords[k].text)) {
+          foundIdx = k;
+          break;
+        }
+      }
+      if (foundIdx !== -1) {
+        matchedIndices.push(foundIdx);
+        currentSearchStart = foundIdx + 1; // Avança busca para a próxima palavra
+      }
+    }
+
+    // Se conseguirmos casar pelo menos uma parte significativa (pelo menos 15% das palavras)
+    const minMatches = Math.max(1, Math.ceil(refWords.length * 0.15));
+    if (matchedIndices.length >= minMatches) {
+      const firstIdx = matchedIndices[0];
+      const lastIdx = matchedIndices[matchedIndices.length - 1];
+      
+      aligned.push({
+        id,
+        text: refLine,
+        startTime: parseFloat(transcribedWords[firstIdx].startTime.toFixed(2)),
+        endTime: parseFloat(transcribedWords[lastIdx].endTime.toFixed(2))
+      });
+      
+      wordPtr = lastIdx + 1;
+    } else {
+      // Se não casou, coloca tempo temporário baseado na última linha
+      const lastTime = aligned.length > 0 ? (aligned[aligned.length - 1].endTime ?? aligned[aligned.length - 1].startTime) : 0;
+      aligned.push({
+        id,
+        text: refLine,
+        startTime: lastTime,
+        endTime: lastTime + 2.0
+      });
+    }
+  }
+
+  // Interpolação e salvaguarda: Garante cronologia crescente estrita
+  for (let i = 0; i < aligned.length; i++) {
+    const line = aligned[i];
+    if (i > 0) {
+      const prevLine = aligned[i - 1];
+      const prevEndTime = prevLine.endTime ?? (prevLine.startTime + 2.0);
+      if (line.startTime < prevLine.startTime) {
+        aligned[i] = {
+          ...line,
+          startTime: prevEndTime,
+          endTime: prevEndTime + 2.0
+        };
+      }
+    }
+  }
+
+  return aligned;
+};
+
+

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findSilenceSplitPoints, bufferToWav, adjustTimestampsSafeguard } from './audioChunker';
+import { findSilenceSplitPoints, bufferToWav, adjustTimestampsSafeguard, bufferToMono16kWav, alignLyricsLocal } from './audioChunker';
 import type { TranscriptionLine } from '../types';
 
 /**
@@ -175,6 +175,94 @@ describe('audioChunker Unit Tests', () => {
 
       // Line C (startTime: 8.0): endTime was 12.0, but should be capped at trackDuration (10.0)
       expect(adjusted[2].endTime).toBe(10.0);
+    });
+  });
+
+  describe('bufferToMono16kWav', () => {
+    it('deve codificar o AudioBuffer em WAV mono 16kHz', async () => {
+      const originalSampleRate = 44100;
+      const duration = 2; // 2 segundos
+      const mockBuffer = createMockAudioBuffer(duration, originalSampleRate, 2, 0.2); // Stereo
+
+      const wavBlob = bufferToMono16kWav(mockBuffer);
+      expect(wavBlob).toBeInstanceOf(Blob);
+      expect(wavBlob.type).toBe('audio/wav');
+
+      const expectedSamples = 2 * 16000; // 2 segundos * 16000Hz = 32000 samples
+      const expectedSize = 44 + expectedSamples * 2; // 44 cabeçalho + 32000 samples * 2 bytes/sample (16-bit PCM mono)
+      expect(wavBlob.size).toBe(expectedSize);
+
+      const arrayBuffer = await wavBlob.arrayBuffer();
+      const view = new DataView(arrayBuffer);
+
+      // RIFF
+      expect(String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3))).toBe('RIFF');
+      // Channels (1 = Mono)
+      expect(view.getUint16(22, true)).toBe(1);
+      // SampleRate (16000)
+      expect(view.getUint32(24, true)).toBe(16000);
+    });
+  });
+
+  describe('alignLyricsLocal', () => {
+    it('deve alinhar corretamente letras com segmentos transcendentes', () => {
+      const referenceLines = [
+        "Let's go out of my mom",
+        "Looks like we made it",
+        "Look how far we've come, my baby"
+      ];
+      const transcribedSegments: TranscriptionLine[] = [
+        { id: 't1', text: "Let's go out of my mom.", startTime: 2.0, endTime: 4.5 },
+        { id: 't2', text: "Get there someday. Hey, say, I'll pay.", startTime: 5.0, endTime: 8.5 }, // Hallucination!
+        { id: 't3', text: "Looks like we made it.", startTime: 9.0, endTime: 11.5 },
+        { id: 't4', text: "Look how far we've come, my baby.", startTime: 12.0, endTime: 15.0 }
+      ];
+
+      const aligned = alignLyricsLocal(referenceLines, transcribedSegments);
+
+      expect(aligned.length).toBe(3);
+
+      // Line 1 should match segment 1
+      expect(aligned[0].text).toBe("Let's go out of my mom");
+      expect(aligned[0].startTime).toBe(2.0);
+      expect(aligned[0].endTime).toBe(4.5);
+
+      // Line 2 should match segment 3 (skipping the hallucination t2!)
+      expect(aligned[1].text).toBe("Looks like we made it");
+      expect(aligned[1].startTime).toBe(9.0);
+      expect(aligned[1].endTime).toBe(11.5);
+
+      // Line 3 should match segment 4
+      expect(aligned[2].text).toBe("Look how far we've come, my baby");
+      expect(aligned[2].startTime).toBe(12.0);
+      expect(aligned[2].endTime).toBe(15.0);
+    });
+
+    it('deve interpolar tempos caso nao encontre casamento', () => {
+      const referenceLines = [
+        "Let's go out of my mom",
+        "Missing Line Here", // Sem match no áudio
+        "Looks like we made it"
+      ];
+      const transcribedSegments: TranscriptionLine[] = [
+        { id: 't1', text: "Let's go out of my mom.", startTime: 2.0, endTime: 4.0 },
+        { id: 't3', text: "Looks like we made it.", startTime: 8.0, endTime: 11.0 }
+      ];
+
+      const aligned = alignLyricsLocal(referenceLines, transcribedSegments);
+      expect(aligned.length).toBe(3);
+
+      expect(aligned[0].startTime).toBe(2.0);
+      expect(aligned[0].endTime).toBe(4.0);
+
+      // A linha sem match deve herdar tempos baseados na primeira linha
+      expect(aligned[1].text).toBe("Missing Line Here");
+      expect(aligned[1].startTime).toBe(4.0);
+      expect(aligned[1].endTime).toBe(6.0);
+
+      // A terceira linha deve respeitar a ordem crescente ou ser corrigida/mantida
+      expect(aligned[2].startTime).toBe(8.0);
+      expect(aligned[2].endTime).toBe(11.0);
     });
   });
 });

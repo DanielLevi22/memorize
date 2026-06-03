@@ -53,13 +53,14 @@ self.addEventListener('message', async (event: MessageEvent) => {
 
       self.postMessage({ type: 'status', message: 'Transcrevendo áudio localmente...' });
 
-      // Executa a transcrição com carimbo de tempo
+      // Executa a transcrição com carimbo de tempo e parâmetros anti-alucinação
       const result = await transcriber(audio16k, {
         chunk_length_s: 30,
         stride_length_s: 5,
         return_timestamps: true,
         language: null, // Auto-detecta o idioma falado/cantado
-        task: 'transcribe'
+        task: 'transcribe',
+        temperature: 0.0
       });
 
       // Mapeia chunks do Whisper para o formato esperado pelo app

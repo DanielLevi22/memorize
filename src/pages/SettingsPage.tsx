@@ -1251,6 +1251,14 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             <div className="flex justify-between items-center">
               <span className="text-sm font-semibold text-foreground flex items-center gap-1.5">
                 <Key size={14} className="text-muted-foreground" /> Chave de API do Gemini
+                <a
+                  href="https://aistudio.google.com/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[10px] font-bold text-violet-500 hover:underline inline-flex items-center gap-0.5 ml-1"
+                >
+                  (Obter chave grátis ↗)
+                </a>
               </span>
               <div className="flex items-center gap-3">
                 {geminiApiKey && (
@@ -1324,6 +1332,14 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             <div className="flex justify-between items-center">
               <span className="text-sm font-semibold text-foreground flex items-center gap-1.5">
                 <Key size={14} className="text-muted-foreground" /> Chave de API da OpenAI (Whisper Cloud)
+                <a
+                  href="https://platform.openai.com/api-keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[10px] font-bold text-violet-500 hover:underline inline-flex items-center gap-0.5 ml-1"
+                >
+                  (Obter chave ↗)
+                </a>
               </span>
               <div className="flex items-center gap-3">
                 {openaiApiKey && (
@@ -1397,6 +1413,14 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             <div className="flex justify-between items-center">
               <span className="text-sm font-semibold text-foreground flex items-center gap-1.5">
                 <Key size={14} className="text-muted-foreground" /> Chave de API da Groq (Whisper Veloz)
+                <a
+                  href="https://console.groq.com/keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[10px] font-bold text-violet-500 hover:underline inline-flex items-center gap-0.5 ml-1"
+                >
+                  (Obter chave grátis ↗)
+                </a>
               </span>
               <div className="flex items-center gap-3">
                 {groqApiKey && (

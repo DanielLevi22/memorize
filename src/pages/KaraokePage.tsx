@@ -14,7 +14,7 @@ import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
 import { getWordLevenshteinDistance, diffWords, type DiffWord } from '../utils/srs';
 import { separateVocalsCloud } from '../utils/vocalSeparationCloud';
-import { decodeAudioFile, findSilenceSplitPoints, bufferToWav, adjustTimestampsSafeguard } from '../utils/audioChunker';
+import { decodeAudioFile, adjustTimestampsSafeguard, bufferToMono16kWav } from '../utils/audioChunker';
 import { translateWithMyMemory } from '../utils/readingProcessor';
 
 const cleanString = (str: string) => {
@@ -98,7 +98,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   const isTranscribeCancelledRef = useRef(false);
   const [isConfirmRestartModalOpen, setIsConfirmRestartModalOpen] = useState(false);
   const [transcriptionProvider, setTranscriptionProvider] = useState<'gemini' | 'openai' | 'groq' | 'local'>(() => {
-    return (localStorage.getItem('memorize_transcription_provider') as any) || 'gemini';
+    return (localStorage.getItem('memorize_transcription_provider') as any) || 'groq';
   });
 
   useEffect(() => {
@@ -1501,7 +1501,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     }
   };
 
-  const handleStartAiTranscription = async (forceRestart = false) => {
+  const handleStartAiTranscription = async () => {
     if (!activeTrack) return;
 
     // Verificar chaves de API necessárias com base no motor selecionado
@@ -1534,107 +1534,43 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
       const audioBuffer = await decodeAudioFile(activeTrack.audioFile);
       let finalLines: TranscriptionLine[] = [];
 
+      // --- FLUXO DE TRANSCRIÇÃO DIRETA ---
+      setTranscribingProgress('Preparando áudio para transcrição...');
+
       if (transcriptionProvider === 'local') {
         // Whisper Local: executa no navegador via Web Worker sem fatiamento
         setTranscribingProgress('Inicializando Whisper local no navegador...');
         finalLines = await requestLocalWhisperTranscription(audioBuffer);
       } else {
-        // Motores em Nuvem: processamento em chunks de 10s para maior precisão de alinhamento
-        let splitPoints: number[] = [];
-        let startIdx = 0;
+        // Motores em Nuvem (Gemini, OpenAI, Groq): processamento do áudio completo em uma chamada única
+        setTranscribingProgress('Comprimindo áudio para envio...');
+        const wavBlob = bufferToMono16kWav(audioBuffer);
 
-        if (forceRestart) {
-          await db.audioTracks.update(activeTrack.id, {
-            aiTranscriptionProgress: undefined,
-            updatedAt: Date.now()
-          });
-          activeTrack.aiTranscriptionProgress = undefined;
-          setActiveTrack({ ...activeTrack });
-          setAllTracks(prev => prev.map(t => t.id === activeTrack.id ? { ...t, aiTranscriptionProgress: undefined } : t));
+        if (isTranscribeCancelledRef.current) throw new Error('CanceledByUser');
+
+        if (transcriptionProvider === 'gemini') {
+          const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
+          setTranscribingProgress('Transcrevendo com Gemini (Nuvem)...');
+          finalLines = await requestGeminiTranscription(wavBlob, geminiApiKey);
+        } else if (transcriptionProvider === 'openai') {
+          const openaiApiKey = localStorage.getItem('memorize_openai_api_key') || '';
+          setTranscribingProgress('Transcrevendo com OpenAI Whisper...');
+          finalLines = await requestOpenaiWhisperTranscription(wavBlob, openaiApiKey);
+        } else if (transcriptionProvider === 'groq') {
+          const groqApiKey = localStorage.getItem('memorize_groq_api_key') || '';
+          setTranscribingProgress('Transcrevendo com Groq Whisper...');
+          finalLines = await requestGroqWhisperTranscription(wavBlob, groqApiKey);
         }
-
-        if (!forceRestart && activeTrack.aiTranscriptionProgress) {
-          const progressState = activeTrack.aiTranscriptionProgress;
-          splitPoints = progressState.splitPoints;
-          finalLines = progressState.lines;
-          startIdx = progressState.lastProcessedChunkIndex;
-        } else {
-          splitPoints = findSilenceSplitPoints(audioBuffer, 10);
-        }
-
-        const totalChunks = splitPoints.length + 1;
-
-        for (let i = startIdx; i <= splitPoints.length; i++) {
-          if (isTranscribeCancelledRef.current) {
-            throw new Error('CanceledByUser');
-          }
-
-          const percent = Math.round((i / totalChunks) * 100);
-          setTranscribingPercent(percent);
-
-          const start = i === 0 ? 0 : splitPoints[i - 1];
-          const end = i === splitPoints.length ? audioBuffer.duration : splitPoints[i];
-          
-          setTranscribingProgress(`Processando trecho ${i + 1} de ${totalChunks}...`);
-
-          const wavBlob = await bufferToWav(audioBuffer, start, end);
-          let chunkLines: TranscriptionLine[] = [];
-
-          if (transcriptionProvider === 'gemini') {
-            const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
-            chunkLines = await requestGeminiTranscription(wavBlob, geminiApiKey);
-          } else if (transcriptionProvider === 'openai') {
-            const openaiApiKey = localStorage.getItem('memorize_openai_api_key') || '';
-            chunkLines = await requestOpenaiWhisperTranscription(wavBlob, openaiApiKey);
-          } else if (transcriptionProvider === 'groq') {
-            const groqApiKey = localStorage.getItem('memorize_groq_api_key') || '';
-            chunkLines = await requestGroqWhisperTranscription(wavBlob, groqApiKey);
-          }
-
-          const adjustedLines = chunkLines.map(l => ({
-            ...l,
-            id: crypto.randomUUID(),
-            startTime: l.startTime + start,
-            endTime: l.endTime !== undefined ? l.endTime + start : undefined
-          }));
-
-          finalLines = [...finalLines, ...adjustedLines];
-
-          // Salva progresso temporário
-          const nextProgress = {
-            lastProcessedChunkIndex: i + 1,
-            splitPoints,
-            lines: finalLines
-          };
-
-          await db.audioTracks.update(activeTrack.id, {
-            aiTranscriptionProgress: nextProgress,
-            updatedAt: Date.now()
-          });
-
-          activeTrack.aiTranscriptionProgress = nextProgress;
-          setActiveTrack({ ...activeTrack });
-          setAllTracks(prev => prev.map(t => t.id === activeTrack.id ? { ...t, aiTranscriptionProgress: nextProgress } : t));
-        }
-
-        setTranscribingPercent(100);
-
-        // Limpa o progresso temporário ao terminar
-        await db.audioTracks.update(activeTrack.id, {
-          aiTranscriptionProgress: undefined,
-          updatedAt: Date.now()
-        });
-        activeTrack.aiTranscriptionProgress = undefined;
-        setActiveTrack({ ...activeTrack });
-        setAllTracks(prev => prev.map(t => t.id === activeTrack.id ? { ...t, aiTranscriptionProgress: undefined } : t));
       }
+      setTranscribingPercent(100);
 
       // Se usamos Whisper (API ou Local), traduzimos as frases finais para o português
       if (transcriptionProvider !== 'gemini' && finalLines.length > 0) {
         const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
         let hasTranslation = false;
 
-        if (geminiApiKey.trim()) {
+        // O Whisper Local traduz EXCLUSIVAMENTE via MyMemory (para evitar consumo indevido de créditos Gemini)
+        if (transcriptionProvider !== 'local' && geminiApiKey.trim()) {
           setTranscribingProgress('Traduzindo frases com Gemini...');
           try {
             const translations = await requestGeminiTranslationOnly(finalLines, geminiApiKey);
@@ -1649,7 +1585,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
         }
 
         if (!hasTranslation) {
-          // Fallback para quando o usuário não tiver chave do Gemini (ex: no modo Whisper Local 100% grátis)
+          // Fallback para MyMemory (Grátis / Whisper Local)
           setTranscribingProgress('Traduzindo frases com MyMemory (Grátis)...');
           const translatedLines: TranscriptionLine[] = [];
           for (let idx = 0; idx < finalLines.length; idx++) {
@@ -1700,6 +1636,85 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     }
   };
 
+  const fetchWithRetry = async (
+    url: string,
+    options: RequestInit,
+    providerName: string,
+    maxRetries = 4
+  ): Promise<Response> => {
+    let attempt = 0;
+    while (true) {
+      attempt++;
+      if (isTranscribeCancelledRef.current) {
+        throw new Error('CanceledByUser');
+      }
+
+      const response = await fetch(url, options);
+
+      if (response.status === 429 && attempt <= maxRetries) {
+        let retryAfterMs = 3000; // default 3s
+
+        const retryHeader = response.headers.get('retry-after');
+        if (retryHeader) {
+          const parsedSeconds = parseFloat(retryHeader);
+          if (!isNaN(parsedSeconds)) {
+            retryAfterMs = parsedSeconds * 1000;
+          }
+        } else {
+          try {
+            const clonedResponse = response.clone();
+            const bodyText = await clonedResponse.text();
+            let messageText = bodyText;
+            try {
+              const bodyJson = JSON.parse(bodyText);
+              if (bodyJson.error?.message) {
+                messageText = bodyJson.error.message;
+              }
+            } catch (_) {}
+
+            const match = messageText.match(/try\s+again\s+in\s+([0-9]+(?:\.[0-9]+)?)\s*(ms|s|m|segs|segundos|minutes)?/i);
+            if (match) {
+              const value = parseFloat(match[1]);
+              const unit = (match[2] || 's').toLowerCase();
+              if (unit.startsWith('ms')) {
+                retryAfterMs = value;
+              } else if (unit.startsWith('m')) {
+                retryAfterMs = value * 60 * 1000;
+              } else {
+                retryAfterMs = value * 1000;
+              }
+            }
+          } catch (err) {
+            console.warn("Falha ao analisar corpo de erro 429 para tempo de espera:", err);
+          }
+        }
+
+        // Add 500ms safety buffer
+        retryAfterMs += 500;
+
+        const startTime = Date.now();
+        const originalProgress = transcribingProgress || 'Aguardando API...';
+        
+        while (Date.now() - startTime < retryAfterMs) {
+          if (isTranscribeCancelledRef.current) {
+            throw new Error('CanceledByUser');
+          }
+          const remainingSecs = Math.max(0, Math.ceil((retryAfterMs - (Date.now() - startTime)) / 1000));
+          setTranscribingProgress(
+            `Limite de requisições excedido (${providerName}). Aguardando ${remainingSecs}s para tentar novamente (Tentativa ${attempt} de ${maxRetries})...`
+          );
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+
+        // Restore progress message
+        setTranscribingProgress(originalProgress);
+        continue;
+      }
+
+      return response;
+    }
+  };
+
   const requestGeminiTranscription = async (audioBlob: Blob, apiKey: string): Promise<TranscriptionLine[]> => {
     const reader = new FileReader();
     const base64Promise = new Promise<string>((resolve) => {
@@ -1736,7 +1751,7 @@ Não adicione markdown fora do bloco JSON.
 `;
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-    const response = await fetch(url, {
+    const response = await fetchWithRetry(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1750,10 +1765,17 @@ Não adicione markdown fora do bloco JSON.
           responseMimeType: 'application/json'
         }
       })
-    });
+    }, 'Gemini');
 
     if (!response.ok) {
-      throw new Error(`API Gemini retornou status ${response.status}`);
+      let errMsg = `API Gemini retornou status ${response.status}`;
+      try {
+        const errJson = await response.json();
+        if (errJson.error?.message) {
+          errMsg += `: ${errJson.error.message}`;
+        }
+      } catch (e) {}
+      throw new Error(errMsg);
     }
 
     const data = await response.json();
@@ -1772,16 +1794,23 @@ Não adicione markdown fora do bloco JSON.
     formData.append('model', 'whisper-1');
     formData.append('response_format', 'verbose_json');
 
-    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    const response = await fetchWithRetry('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`
       },
       body: formData
-    });
+    }, 'OpenAI Whisper');
 
     if (!response.ok) {
-      throw new Error(`OpenAI Whisper retornou status ${response.status}`);
+      let errMsg = `OpenAI Whisper retornou status ${response.status}`;
+      try {
+        const errJson = await response.json();
+        if (errJson.error?.message) {
+          errMsg += `: ${errJson.error.message}`;
+        }
+      } catch (e) {}
+      throw new Error(errMsg);
     }
 
     const data = await response.json();
@@ -1799,16 +1828,23 @@ Não adicione markdown fora do bloco JSON.
     formData.append('model', 'whisper-large-v3');
     formData.append('response_format', 'verbose_json');
 
-    const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+    const response = await fetchWithRetry('https://api.groq.com/openai/v1/audio/transcriptions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`
       },
       body: formData
-    });
+    }, 'Groq Whisper');
 
     if (!response.ok) {
-      throw new Error(`Groq Whisper retornou status ${response.status}`);
+      let errMsg = `Groq Whisper retornou status ${response.status}`;
+      try {
+        const errJson = await response.json();
+        if (errJson.error?.message) {
+          errMsg += `: ${errJson.error.message}`;
+        }
+      } catch (e) {}
+      throw new Error(errMsg);
     }
 
     const data = await response.json();
@@ -1886,7 +1922,7 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
 `;
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-    const response = await fetch(url, {
+    const response = await fetchWithRetry(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1897,10 +1933,17 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
           responseMimeType: 'application/json'
         }
       })
-    });
+    }, 'Gemini Tradutor');
 
     if (!response.ok) {
-      throw new Error(`Erro na tradução do Gemini: status ${response.status}`);
+      let errMsg = `Erro na tradução do Gemini: status ${response.status}`;
+      try {
+        const errJson = await response.json();
+        if (errJson.error?.message) {
+          errMsg += `: ${errJson.error.message}`;
+        }
+      } catch (e) {}
+      throw new Error(errMsg);
     }
 
     const data = await response.json();
@@ -2111,17 +2154,99 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
     const progressOfLine = progress - startTime;
     const ratio = Math.min(Math.max(progressOfLine / durationOfLine, 0), 1);
 
-    const chars = text.split('');
-    const highlightLength = Math.floor(chars.length * ratio);
+    // Divide o texto em tokens de palavras e espaços em branco
+    const tokens = text.split(/(\s+)/);
+    const wordTokens = tokens.filter(t => !/^\s+$/.test(t) && t.length > 0);
+    
+    if (wordTokens.length === 0) {
+      return <span>{text}</span>;
+    }
+
+    // Calcula o total de caracteres de palavras para distribuir a duração de forma proporcional
+    const totalWordChars = wordTokens.reduce((sum, w) => sum + w.length, 0);
+
+    let currentWordCharCount = 0;
+    const wordTimeRanges = wordTokens.map(w => {
+      const startRatio = currentWordCharCount / totalWordChars;
+      currentWordCharCount += w.length;
+      const endRatio = currentWordCharCount / totalWordChars;
+      return {
+        word: w,
+        startTimeOfWord: startTime + startRatio * durationOfLine,
+        endTimeOfWord: startTime + endRatio * durationOfLine
+      };
+    });
+
+    const renderedTokens: { text: string; highlight: 'full' | 'none' | 'partial'; highlightLength?: number }[] = [];
+    let wordIndex = 0;
+    let charIndex = 0;
+
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i];
+      const isWhitespace = /^\s+$/.test(token) || token.length === 0;
+
+      if (isWhitespace) {
+        const tokenRatio = charIndex / text.length;
+        charIndex += token.length;
+        if (ratio >= tokenRatio) {
+          renderedTokens.push({ text: token, highlight: 'full' });
+        } else {
+          renderedTokens.push({ text: token, highlight: 'none' });
+        }
+      } else {
+        const range = wordTimeRanges[wordIndex];
+        wordIndex++;
+        charIndex += token.length;
+
+        if (progress >= range.endTimeOfWord) {
+          renderedTokens.push({ text: token, highlight: 'full' });
+        } else if (progress <= range.startTimeOfWord) {
+          renderedTokens.push({ text: token, highlight: 'none' });
+        } else {
+          // Palavra atual ativa (parcialmente percorrida)
+          const wordDuration = range.endTimeOfWord - range.startTimeOfWord;
+          const wordProgress = progress - range.startTimeOfWord;
+          const wordRatio = Math.min(Math.max(wordProgress / wordDuration, 0), 1);
+          const highlightLength = Math.floor(token.length * wordRatio);
+
+          renderedTokens.push({
+            text: token,
+            highlight: 'partial',
+            highlightLength
+          });
+        }
+      }
+    }
 
     return (
       <span className="relative inline-block text-center select-none leading-relaxed transition-all">
-        <span className="text-primary drop-shadow-[0_0_15px_hsl(var(--primary)/0.6)]">
-          {text.slice(0, highlightLength)}
-        </span>
-        <span className="text-foreground/20 dark:text-foreground/10 select-none">
-          {text.slice(highlightLength)}
-        </span>
+        {renderedTokens.map((t, idx) => {
+          if (t.highlight === 'full') {
+            return (
+              <span key={idx} className="text-primary drop-shadow-[0_0_15px_hsl(var(--primary)/0.6)]">
+                {t.text}
+              </span>
+            );
+          } else if (t.highlight === 'none') {
+            return (
+              <span key={idx} className="text-foreground/20 dark:text-foreground/10 select-none">
+                {t.text}
+              </span>
+            );
+          } else {
+            const hLength = t.highlightLength ?? 0;
+            return (
+              <span key={idx} className="relative inline-block select-none leading-relaxed transition-all">
+                <span className="text-primary drop-shadow-[0_0_15px_hsl(var(--primary)/0.6)]">
+                  {t.text.slice(0, hLength)}
+                </span>
+                <span className="text-foreground/20 dark:text-foreground/10 select-none">
+                  {t.text.slice(hLength)}
+                </span>
+              </span>
+            );
+          }
+        })}
       </span>
     );
   };
@@ -2292,7 +2417,7 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
                     </div>
                     <div className="flex items-center gap-2">
                       <Button
-                        onClick={() => handleStartAiTranscription(false)}
+                        onClick={() => handleStartAiTranscription()}
                         disabled={isTranscribingAi}
                         className="flex-1 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-extrabold text-xs h-10 rounded-xl shadow-md shadow-violet-500/25 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 transition-all active:scale-[0.98]"
                       >
@@ -2314,7 +2439,7 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
                   </div>
                 ) : (
                   <Button
-                    onClick={() => handleStartAiTranscription(false)}
+                    onClick={() => handleStartAiTranscription()}
                     disabled={isTranscribingAi}
                     className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-extrabold text-xs h-10 rounded-xl shadow-md shadow-violet-500/25 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 transition-all active:scale-[0.98]"
                   >
@@ -3769,7 +3894,7 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
               type="button"
               onClick={async () => {
                 setIsConfirmRestartModalOpen(false);
-                await handleStartAiTranscription(true);
+                await handleStartAiTranscription();
               }}
               className="flex-1 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs h-10 rounded-xl shadow-lg shadow-rose-500/10 cursor-pointer"
             >
