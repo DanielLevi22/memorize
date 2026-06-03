@@ -65,13 +65,13 @@ self.addEventListener('message', async (event: MessageEvent) => {
 
       // Mapeia chunks do Whisper para o formato esperado pelo app
       const lines = (result.chunks || []).map((c: any) => {
-        const startTime = c.timestamp ? c.timestamp[0] : 0;
-        const endTime = c.timestamp ? c.timestamp[1] : startTime + 3.0;
+        const rawStart = (c.timestamp && c.timestamp[0] !== null && c.timestamp[0] !== undefined) ? c.timestamp[0] : 0;
+        const rawEnd = (c.timestamp && c.timestamp[1] !== null && c.timestamp[1] !== undefined) ? c.timestamp[1] : rawStart + 3.0;
         return {
           id: Math.random().toString(36).substring(2, 15),
           text: c.text.trim(),
-          startTime: parseFloat(startTime.toFixed(2)),
-          endTime: parseFloat(endTime.toFixed(2))
+          startTime: parseFloat(Number(rawStart).toFixed(2)),
+          endTime: parseFloat(Number(rawEnd).toFixed(2))
         };
       });
 

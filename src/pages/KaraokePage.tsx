@@ -1822,12 +1822,16 @@ Não adicione markdown fora do bloco JSON.
     }
 
     const data = await response.json();
-    return (data.segments || []).map((seg: any) => ({
-      id: crypto.randomUUID(),
-      text: seg.text.trim(),
-      startTime: parseFloat(seg.start.toFixed(2)),
-      endTime: parseFloat(seg.end.toFixed(2))
-    }));
+    return (data.segments || []).map((seg: any) => {
+      const rawStart = (seg.start !== null && seg.start !== undefined) ? seg.start : 0;
+      const rawEnd = (seg.end !== null && seg.end !== undefined) ? seg.end : rawStart + 3.0;
+      return {
+        id: crypto.randomUUID(),
+        text: seg.text.trim(),
+        startTime: parseFloat(Number(rawStart).toFixed(2)),
+        endTime: parseFloat(Number(rawEnd).toFixed(2))
+      };
+    });
   };
 
   const requestGroqWhisperTranscription = async (audioBlob: Blob, apiKey: string): Promise<TranscriptionLine[]> => {
@@ -1856,12 +1860,16 @@ Não adicione markdown fora do bloco JSON.
     }
 
     const data = await response.json();
-    return (data.segments || []).map((seg: any) => ({
-      id: crypto.randomUUID(),
-      text: seg.text.trim(),
-      startTime: parseFloat(seg.start.toFixed(2)),
-      endTime: parseFloat(seg.end.toFixed(2))
-    }));
+    return (data.segments || []).map((seg: any) => {
+      const rawStart = (seg.start !== null && seg.start !== undefined) ? seg.start : 0;
+      const rawEnd = (seg.end !== null && seg.end !== undefined) ? seg.end : rawStart + 3.0;
+      return {
+        id: crypto.randomUUID(),
+        text: seg.text.trim(),
+        startTime: parseFloat(Number(rawStart).toFixed(2)),
+        endTime: parseFloat(Number(rawEnd).toFixed(2))
+      };
+    });
   };
 
   const requestLocalWhisperTranscription = (audioBuffer: AudioBuffer): Promise<TranscriptionLine[]> => {
