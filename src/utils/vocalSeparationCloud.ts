@@ -34,7 +34,8 @@ function toMessage(err: unknown): string {
 
 export async function separateVocalsCloud(
   audioBlob: Blob,
-  onProgress: (progress: number, message: string) => void
+  onProgress: (progress: number, message: string) => void,
+  outputType: 'vocals' | 'instrumental' = 'instrumental'
 ): Promise<CloudSeparationResult> {
   onProgress(5, 'Iniciando separação via nuvem...');
 
@@ -42,18 +43,21 @@ export async function separateVocalsCloud(
 
   for (const space of SEPARATION_SPACES) {
     try {
-      console.log(`[VocalCloud] Tentando: ${space.name} (${space.endpoint})`);
+      console.log(`[VocalCloud] Tentando: ${space.name} (${space.endpoint}) - Solicitado: ${outputType}`);
       onProgress(10, `Conectando a ${space.name}...`);
 
-      const instrumentalBlob = await callSpace(
+      // Índice 0 para Vocais (vocals), e space.instrumentalOutputIndex (1) para Instrumental
+      const outputIndex = outputType === 'vocals' ? 0 : space.instrumentalOutputIndex;
+
+      const resultBlob = await callSpace(
         space.name,
         space.endpoint,
-        space.instrumentalOutputIndex,
+        outputIndex,
         audioBlob,
         onProgress
       );
 
-      return { instrumentalBlob, source: space.name };
+      return { instrumentalBlob: resultBlob, source: space.name };
     } catch (err: unknown) {
       const msg = toMessage(err);
       console.error(`[VocalCloud] FALHA em ${space.name}:`, err);

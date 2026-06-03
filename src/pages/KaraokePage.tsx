@@ -105,6 +105,10 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     return (localStorage.getItem('memorize_local_whisper_model_size') as any) || 'onnx-community/whisper-tiny';
   });
 
+  const [useVocalIsolation, setUseVocalIsolation] = useState<boolean>(() => {
+    return localStorage.getItem('memorize_use_vocal_isolation') === 'true';
+  });
+
   useEffect(() => {
     localStorage.setItem('memorize_transcription_provider', transcriptionProvider);
   }, [transcriptionProvider]);
@@ -112,6 +116,10 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   useEffect(() => {
     localStorage.setItem('memorize_local_whisper_model_size', localModelSize);
   }, [localModelSize]);
+
+  useEffect(() => {
+    localStorage.setItem('memorize_use_vocal_isolation', String(useVocalIsolation));
+  }, [useVocalIsolation]);
 
   // Speech Recognition States
   const [isListeningSpeech, setIsListeningSpeech] = useState(false);
@@ -1537,9 +1545,36 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
       setIsTranscribingAi(true);
       isTranscribeCancelledRef.current = false;
       setTranscribingPercent(0);
-      setTranscribingProgress('Decodificando áudio localmente...');
 
-      const audioBuffer = await decodeAudioFile(activeTrack.audioFile);
+      let audioFileToTranscribe: Blob = activeTrack.audioFile;
+
+      if (useVocalIsolation) {
+        setTranscribingProgress('Isolando voz por IA na nuvem (Demucs)...');
+        try {
+          const result = await separateVocalsCloud(
+            activeTrack.audioFile,
+            (progress: number, msg: string) => {
+              if (isTranscribeCancelledRef.current) {
+                // Lança erro para interromper a execução caso o usuário clique em Cancelar
+                throw new Error('CanceledByUser');
+              }
+              setTranscribingProgress(`[Isolamento de Voz] ${msg}`);
+              setTranscribingPercent(Math.round(progress * 0.5)); // Mapeia para 0-50%
+            },
+            'vocals'
+          );
+          audioFileToTranscribe = result.instrumentalBlob; // Em 'vocals', o blob retornado é o a capela (voz limpa)
+        } catch (vocalErr: any) {
+          if (vocalErr.message === 'CanceledByUser') {
+            throw vocalErr;
+          }
+          console.error("Vocal isolation failed, falling back to original audio:", vocalErr);
+          toast.warning(`Falha no isolamento de voz: ${vocalErr.message || vocalErr}. Prosseguindo com o áudio original.`);
+        }
+      }
+
+      setTranscribingProgress('Decodificando áudio...');
+      const audioBuffer = await decodeAudioFile(audioFileToTranscribe);
       let finalLines: TranscriptionLine[] = [];
 
       // --- FLUXO DE TRANSCRIÇÃO DIRETA ---
@@ -2018,17 +2053,20 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
 Você é um especialista em transcrição e inteligência artificial de altíssima precisão para músicas.
 
 Sua tarefa consiste em duas etapas obrigatórias:
-1. IDENTIFICAR a música original com base nas linhas transcritas fornecidas (que podem conter erros fonéticos, mas mantêm o sentido geral e palavras-chave da composição oficial do artista). A faixa possui o título provisório de "${trackTitle}".
+1. IDENTIFICAR a música original com base nas linhas transcritas fornecidas (que contêm erros fonéticos e distorções causadas pelo acompanhamento instrumental, mas mantêm o sentido geral e palavras-chave da composição oficial do artista). A faixa possui o título provisório de "${trackTitle}".
 2. RECUPERAR da sua memória a letra oficial real da música identificada e CORRIGIR cada linha transcrita para corresponder EXATAMENTE à letra oficial.
 
+Tipos de Erros da Transcrição que você deve corrigir:
+1. Erros Fonéticos / Homófonos: Palavras parecidas em som, mas incorretas no contexto (ex: "CEO" no lugar de "sea, oh", "sale" no lugar de "sail", "soak" no lugar de "sulking", "wrought" no lugar de "writing", "Thirties turn" no lugar de "Third things third").
+2. Distorções Graves / Hallucinações: Devido à velocidade do canto e ao ruído dos instrumentos, a IA pode transcrever frases totalmente diferentes ou sem nexo (ex: transcrever "Why? You burned me down, you kill me" no lugar de "Pain! You break me down and build me up", ou "they been flowing and hippin', they livinippin'" no lugar de "ever lived, ebbing and flowing", ou "My life, my hurt, my doubt, we can't run" no lugar de "My life, my love, my drive, it came from pain"). Você DEVE substituir a frase inteira de entrada pela frase oficial correspondente que pertence àquela posição cronológica na música.
+
 Diretrizes obrigatórias:
-1. Descubra qual é a música oficial. Por exemplo, se a transcrição contiver frases como "First things first, I'ma say all the words inside my head", você deve identificar que se trata de "Believer" do Imagine Dragons.
-2. Substitua os erros de transcrição fonética (como "master of my CEO", "one at the sale", "Believe her", "Thirties turn", "choking in the ground", etc.) pela grafia correta da letra oficial da música identificada.
-3. O tempo de início e fim gerado pelo modelo de transcrição local é absoluto e definitivo. Cada linha de entrada representa uma frase cantada em um instante exato do áudio. Portanto, a sua correção de texto deve ser uma substituição direta, servindo apenas para corrigir a ortografia da frase que foi pronunciada naquele momento específico do áudio, sem embaralhar ou adiantar/atrasar a letra da música.
-4. NÃO invente versos, palavras ou expressões que não existem na letra oficial da música (como "living in a world of don't", "rained all night", "did it for the love", "fifties", etc.). Se o cantor não canta aquela frase na versão oficial da música, você NÃO deve inseri-la de forma alguma.
-5. O array retornado "corrected_texts" DEVE ter exatamente o mesmo número de elementos do array de entrada "texts" (exatamente ${lines.length} itens). Cada elemento do resultado deve corresponder rigorosamente ao mesmo índice da entrada, servindo como uma substituição direta (correspondência estrita de 1 para 1).
-6. Não junte linhas e não divida linhas em múltiplas frases.
-7. Se uma frase da transcrição original for apenas ruído, silêncio, vocalização avulsa (como "ooh", "hey") ou um trecho repetitivo que não faça parte das estrofes principais da letra oficial, você pode mantê-la ou limpá-la, mas DEVE preservar a linha no array (nunca remova o item ou mude o tamanho da lista).
+1. Descubra qual é a música oficial.
+2. Cada linha de entrada representa um segmento de áudio cantado em uma marca de tempo exata. O seu papel é substituir o texto incorreto/distorcido de cada linha pelo respectivo texto oficial daquela posição cronológica na música, sem alterar a segmentação (o número de linhas).
+3. O array retornado "corrected_texts" DEVE ter exatamente o mesmo número de elementos do array de entrada "texts" (exatamente ${lines.length} itens). Cada elemento do resultado deve corresponder rigorosamente ao mesmo índice da entrada, servindo como uma substituição direta (correspondência estrita de 1 para 1). Não mude o tamanho do array de forma alguma!
+4. Não junte linhas e não divida linhas em múltiplas frases. Mantenha os breaks de linhas exatamente como estão.
+5. Se uma linha da transcrição original for apenas ruído, silêncio ou vocalização avulsa (como "ooh", "hey") que não faça parte das estrofes oficiais, você pode mantê-la ou limpá-la, mas DEVE preservar a linha no array (nunca remova o item ou altere a quantidade de elementos).
+6. NÃO invente palavras ou expressões extras que não façam parte da letra real oficial da música identificada.
 
 Retorne obrigatoriamente um JSON no seguinte formato:
 {
@@ -2054,7 +2092,19 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
           parts: [{ text: promptText }]
         }],
         generationConfig: {
-          responseMimeType: 'application/json'
+          responseMimeType: 'application/json',
+          temperature: 0.0,
+          responseSchema: {
+            type: 'OBJECT',
+            properties: {
+              detected_song: { type: 'STRING' },
+              corrected_texts: {
+                type: 'ARRAY',
+                items: { type: 'STRING' }
+              }
+            },
+            required: ['detected_song', 'corrected_texts']
+          }
         }
       })
     }, 'Gemini Corretor');
@@ -2547,6 +2597,25 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
                     </p>
                   </div>
                 )}
+
+                <div className="flex flex-col space-y-1.5 py-1 border-t border-border/20 mt-1">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="useVocalIsolation"
+                      checked={useVocalIsolation}
+                      onChange={(e) => setUseVocalIsolation(e.target.checked)}
+                      disabled={isTranscribingAi}
+                      className="w-4 h-4 rounded border-border text-violet-600 focus:ring-violet-500 cursor-pointer accent-violet-600"
+                    />
+                    <label htmlFor="useVocalIsolation" className="text-[10px] font-bold text-foreground cursor-pointer select-none">
+                      Isolar voz por IA (Demucs Cloud) antes de transcrever
+                    </label>
+                  </div>
+                  <p className="text-[9px] text-muted-foreground leading-normal font-semibold pl-6">
+                    Recomendado para músicas com instrumental barulhento. Remove o acompanhamento musical antes de enviar para o Whisper, minimizando erros e alucinações. (Grátis)
+                  </p>
+                </div>
 
                 {activeTrack.aiTranscriptionProgress ? (
                   <div className="flex flex-col gap-2 w-full">

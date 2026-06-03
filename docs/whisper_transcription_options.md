@@ -132,9 +132,12 @@ Para resolver isso sem perder os tempos de marcação do áudio (timestamps), im
 
 ---
 
-## 8. Estudo Futuro: Pré-processamento com Isolamento de Voz (Vocals Isolation)
+## 8. Pré-processamento: Isolamento de Voz por IA (Vocals Isolation)
 
-Como alternativa futura para melhorar a qualidade das transcrições offline do Whisper Local diretamente no navegador:
-* **Conceito**: Separar a trilha de voz (a capela) da trilha de instrumentos (instrumental) antes de alimentar o decodificador do Whisper.
-* **Ferramentas**: Uso de modelos de separação de fontes (como *Demucs* ou *Spleeter*) portados para ONNX Runtime (Web) ou bibliotecas de processamento de sinal que limpem o ruído de fundo (bateria, guitarras distorcidas) que mascaram as plosivas e fricativas.
-* **Benefício**: Ao transcrever uma trilha de voz isolada e limpa, a precisão do Whisper (mesmo nos modelos leves como o `tiny`) se aproxima de 100%, reduzindo a necessidade de correções semânticas posteriores.
+Para melhorar a precisão da transcrição (especialmente no **Whisper Local** ou sob instrumentais com muito ruído/bateria/guitarras), implementamos a funcionalidade opcional de **Isolamento de Voz**:
+* **Funcionamento**: Antes de decodificar e enviar o áudio para o Whisper, se habilitado pelo usuário na UI, o áudio original é processado para extrair a trilha vocal a capela através da função `separateVocalsCloud` em `src/utils/vocalSeparationCloud.ts`.
+* **Tecnologia Gratuita**: Utiliza APIs de Spaces públicos do HuggingFace executando o modelo de alta precisão **HTDemucs (Meta AI)** via a biblioteca `@gradio/client`. O serviço é 100% gratuito e não necessita de chaves de API.
+* **Integração de Fluxo**: O app solicita e baixa a faixa isolada de vocais (`vocals.wav`, correspondente ao índice `0` de saída do Space), decodifica esse resultado limpo em um `AudioBuffer` e passa-o para o motor do Whisper selecionado.
+* **Benefício**: Ao transcrever uma trilha de voz isolada e limpa (a capela) livre de baterias ou guitarras, o Whisper reduz drasticamente as alucinações e erros fonéticos causados por ruído instrumental de fundo.
+* **Resiliência e Fallback**: Caso os servidores públicos do HuggingFace estejam offline ou apresentem lentidão na fila, o aplicativo exibe um aviso de alerta e faz o fallback automático, decodificando e transcrevendo o áudio original com instrumental para não travar a experiência do usuário.
+
