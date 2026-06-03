@@ -98,7 +98,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   const isTranscribeCancelledRef = useRef(false);
   const [isConfirmRestartModalOpen, setIsConfirmRestartModalOpen] = useState(false);
   const [transcriptionProvider, setTranscriptionProvider] = useState<'gemini' | 'openai' | 'groq' | 'local'>(() => {
-    return (localStorage.getItem('memorize_transcription_provider') as any) || 'groq';
+    return (localStorage.getItem('memorize_transcription_provider') as any) || 'local';
   });
 
   const [localModelSize, setLocalModelSize] = useState<'onnx-community/whisper-tiny' | 'onnx-community/whisper-base' | 'onnx-community/whisper-small'>(() => {
