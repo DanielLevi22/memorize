@@ -67,10 +67,15 @@ De acordo com o seletor do usuário (tendo **Groq Whisper** como padrão), a tra
     * `onnx-community/whisper-tiny` (~75MB): Mais rápido e leve.
     * `onnx-community/whisper-base` (~140MB): Excelente equilíbrio e precisão de palavras.
     * `onnx-community/whisper-small` (~460MB): Altíssima precisão e qualidade de transcrição (requer WebGPU ou CPU forte).
-* **Como Funciona**:
+* **Como Funciona & Parâmetros de Robustez**:
   1. **Thread Separada**: O runtime do ONNX e a biblioteca `@huggingface/transformers` rodam em uma thread paralela no worker para evitar travar a interface visual (UI) do usuário.
-  2. **Parâmetros Anti-Alucinação**: Para evitar palavras inexistentes em silêncios, usamos `temperature: 0.0` (decodificação estritamente determinística).
-  3. **Retorno**: Retorna os trechos (`result.chunks`) mapeando o texto e os timestamps originais (`[startTime, endTime]`). **Não inclui tradução**.
+  2. **Parâmetros Anti-Alucinação e Filtro de Silêncio**: Para mitigar loops de repetição de texto (hallucination loops) e garantir o alinhamento correto em introduções musicais silenciosas, o tocador executa a decodificação com as seguintes salvaguardas:
+     - `temperature: 0.0`: Decodificação estritamente determinística (busca gulosa).
+     - `no_speech_threshold: 0.6`: Limiar de ausência de voz. Se a probabilidade de um segmento ser silêncio/música pura exceder 60%, o Whisper o descarta. Isso evita que a primeira palavra da letra seja sincronizada erroneamente no início (0.0s) de introduções instrumentais longas.
+     - `logprob_threshold: -1.0`: Descarte por baixa probabilidade. Se o modelo tiver pouca certeza sobre as palavras transcritas, o trecho é rejeitado.
+     - `compression_ratio_threshold: 2.4`: Prevenção de repetição. Se o texto gerado começar a repetir as mesmas sequências em loop (alta taxa de compressão), o decodificador descarta o trecho repetitivo.
+  3. **Mapeamento e Segurança contra Nulos**: O mapeamento de carimbos de tempo dos segmentos convertidos no worker faz a sanitização de `null`/`undefined` nos valores de `timestamp` retornados pelo Whisper antes de realizar formatações numéricas como `.toFixed()`, eliminando travamentos de execução no front-end.
+  4. **Retorno**: Retorna os trechos (`result.chunks`) mapeando o texto e os timestamps originais (`[startTime, endTime]`). **Não inclui tradução**.
 
 ### 3.5. Tratamento de Rate Limit (HTTP 429) e Retentativa Automática
 Durante requisições em lote ou alta frequência de uso, as APIs de nuvem podem retornar o status `429 Too Many Requests`. O Memorize trata isso de forma transparente:

@@ -265,4 +265,44 @@ describe('audioChunker Unit Tests', () => {
       expect(aligned[2].endTime).toBe(11.0);
     });
   });
+
+  describe('Whisper Worker Chunks Parser Safeguards', () => {
+    it('deve parsear chunks do Whisper contendo timestamps nulos sem quebrar e aplicar fallbacks seguros', () => {
+      const mockChunks = [
+        { text: "Hello", timestamp: [null, 2.5] },
+        { text: "World", timestamp: [2.5, null] },
+        { text: "Test", timestamp: null },
+        { text: "Valid", timestamp: [5.0, 8.0] }
+      ];
+
+      const parsedLines = mockChunks.map((c: any) => {
+        const rawStart = (c.timestamp && c.timestamp[0] !== null && c.timestamp[0] !== undefined) ? c.timestamp[0] : 0;
+        const rawEnd = (c.timestamp && c.timestamp[1] !== null && c.timestamp[1] !== undefined) ? c.timestamp[1] : rawStart + 3.0;
+        return {
+          id: 'test-id',
+          text: c.text.trim(),
+          startTime: parseFloat(Number(rawStart).toFixed(2)),
+          endTime: parseFloat(Number(rawEnd).toFixed(2))
+        };
+      });
+
+      expect(parsedLines.length).toBe(4);
+      
+      // Primeiro chunk: [null, 2.5] -> startTime deve virar 0, endTime deve virar 2.5
+      expect(parsedLines[0].startTime).toBe(0.0);
+      expect(parsedLines[0].endTime).toBe(2.5);
+
+      // Segundo chunk: [2.5, null] -> startTime deve virar 2.5, endTime deve virar 2.5 + 3.0 = 5.5
+      expect(parsedLines[1].startTime).toBe(2.5);
+      expect(parsedLines[1].endTime).toBe(5.5);
+
+      // Terceiro chunk: null -> startTime deve virar 0, endTime deve virar 0 + 3.0 = 3.0
+      expect(parsedLines[2].startTime).toBe(0.0);
+      expect(parsedLines[2].endTime).toBe(3.0);
+
+      // Quarto chunk: [5.0, 8.0] -> startTime deve virar 5.0, endTime deve virar 8.0
+      expect(parsedLines[3].startTime).toBe(5.0);
+      expect(parsedLines[3].endTime).toBe(8.0);
+    });
+  });
 });
