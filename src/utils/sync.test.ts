@@ -42,7 +42,7 @@ vi.mock('../db/db', () => {
   const notesStore = { value: [] as any[] };
   const revisionsStore = { value: [] as any[] };
   const presetsStore = { value: [] as any[] };
-  const readingsStore = { value: [] as any[] };
+  const textsStore = { value: [] as any[] };
   const sessionsStore = { value: [] as any[] };
   const collectionsStore = { value: [] as any[] };
   const chatStore = { value: [] as any[] };
@@ -54,7 +54,7 @@ vi.mock('../db/db', () => {
       notes: createMockTable(notesStore),
       revisions: createMockTable(revisionsStore),
       presets: createMockTable(presetsStore),
-      readings: createMockTable(readingsStore),
+      texts: createMockTable(textsStore),
       readingSessions: createMockTable(sessionsStore),
       readingCollections: createMockTable(collectionsStore),
       chatMessages: createMockTable(chatStore),
@@ -138,11 +138,11 @@ describe('sync: Sincronização e Mesclagem de Banco de Dados', () => {
     });
 
     // @ts-ignore
-    db.readings.toArray.mockImplementation(async () => mockReadings);
+    db.texts.toArray.mockImplementation(async () => mockReadings);
     // @ts-ignore
-    db.readings.add.mockImplementation(async (item) => { mockReadings.push(item); return item.id; });
+    db.texts.add.mockImplementation(async (item) => { mockReadings.push(item); return item.id; });
     // @ts-ignore
-    db.readings.put.mockImplementation(async (item) => {
+    db.texts.put.mockImplementation(async (item) => {
       const idx = mockReadings.findIndex(x => x.id === item.id);
       if (idx !== -1) mockReadings[idx] = item;
       else mockReadings.push(item);

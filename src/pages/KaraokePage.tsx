@@ -7,7 +7,8 @@ import {
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../components/ui/dialog';
 import { db } from '../db/db';
-import type { Playlist, AudioTrack, TranscriptionLine } from '../types';
+import { useLiveQuery } from 'dexie-react-hooks';
+import type { Playlist, AudioTrack, TranscriptionLine, ReadingCollection } from '../types';
 import { Card as ShadcnCard } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
@@ -25,6 +26,13 @@ const cleanString = (str: string) => {
     .replace(/\s+/g, " ")
     .trim();
 };
+
+interface FeedbackBalloon {
+  id: string;
+  text: string;
+  colorClass: string;
+  xOffset: number;
+}
 
 interface KaraokePageProps {
   initialTrackId: string | null;
@@ -48,6 +56,18 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
 
   // Selection state
   const [activeTrack, setActiveTrack] = useState<AudioTrack | null>(null);
+
+  // Load active text resource reactively
+  const activeReadingText = useLiveQuery(async () => {
+    if (!activeTrack?.textId) return null;
+    return await db.texts.get(activeTrack.textId);
+  }, [activeTrack?.textId]);
+
+  // Folder selection modal states for readings visibility
+  const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
+  const [availableFolders, setAvailableFolders] = useState<ReadingCollection[]>([]);
+  const [selectedFolderId, setSelectedFolderId] = useState<string>('loose');
+  const [newFolderName, setNewFolderName] = useState<string>('');
 
   // Player States
   const [isPlaying, setIsPlaying] = useState(false);
@@ -73,6 +93,8 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   const [syncingLineIdx, setSyncingLineIdx] = useState(0);
   const [isTranscribingAi, setIsTranscribingAi] = useState(false);
   const [transcribingProgress, setTranscribingProgress] = useState('');
+  const [transcribingPercent, setTranscribingPercent] = useState(0);
+  const isTranscribeCancelledRef = useRef(false);
 
   // Speech Recognition States
   const [isListeningSpeech, setIsListeningSpeech] = useState(false);
@@ -80,6 +102,10 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   const [speechSimilarity, setSpeechSimilarity] = useState<number | null>(null);
   const [speechWordDiffs, setSpeechWordDiffs] = useState<DiffWord[]>([]);
   const [lineScores, setLineScores] = useState<Record<number, number>>({});
+  const lineScoresRef = useRef<Record<number, number>>({});
+  useEffect(() => {
+    lineScoresRef.current = lineScores;
+  }, [lineScores]);
 
   // Audio Context and Visualizer Refs
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -111,6 +137,51 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   const activeLineRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
+  // Mic visualizer refs
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micAudioContextRef = useRef<AudioContext | null>(null);
+  const micAnalyserRef = useRef<AnalyserNode | null>(null);
+  const micAnimationRef = useRef<number | null>(null);
+  const micCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const triggeredBalloonsRef = useRef<Set<number>>(new Set());
+  const prevActiveLineIdxRef = useRef<number>(-1);
+
+  // Feedback balloons state
+  const [feedbackBalloons, setFeedbackBalloons] = useState<FeedbackBalloon[]>([]);
+
+  // Progressive count animation for pronunciation score similarity
+  const [displayedSimilarity, setDisplayedSimilarity] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (speechSimilarity === null) {
+      setDisplayedSimilarity(null);
+      return;
+    }
+
+    let start = 0;
+    const end = speechSimilarity;
+    if (start === end) {
+      setDisplayedSimilarity(end);
+      return;
+    }
+
+    const duration = 650; // ms duration
+    const stepTime = Math.max(Math.floor(duration / Math.max(end, 1)), 15);
+    const increment = Math.ceil(end / (duration / stepTime));
+
+    const timer = setInterval(() => {
+      start += increment;
+      if (start >= end) {
+        setDisplayedSimilarity(end);
+        clearInterval(timer);
+      } else {
+        setDisplayedSimilarity(start);
+      }
+    }, stepTime);
+
+    return () => clearInterval(timer);
+  }, [speechSimilarity]);
+
   const [activeAudioUrl, setActiveAudioUrl] = useState<string>('');
 
   useEffect(() => {
@@ -121,9 +192,59 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     activeLineIdxRef.current = activeLineIdx;
   }, [activeLineIdx]);
 
+  // Clear triggered balloons set when song changes or restarts
   useEffect(() => {
-    activeLinesRef.current = activeTrack?.transcriptionLines || [];
-  }, [activeTrack]);
+    triggeredBalloonsRef.current = new Set();
+    prevActiveLineIdxRef.current = -1;
+  }, [activeTrack?.id]);
+
+  // Trigger feedback balloons on line transition using highest score reached
+  useEffect(() => {
+    const prevIdx = prevActiveLineIdxRef.current;
+    if (prevIdx >= 0 && prevIdx !== activeLineIdx) {
+      const score = lineScores[prevIdx];
+      if (score !== undefined && !triggeredBalloonsRef.current.has(prevIdx)) {
+        triggeredBalloonsRef.current.add(prevIdx);
+        triggerFeedbackBalloon(score);
+      }
+    }
+    prevActiveLineIdxRef.current = activeLineIdx;
+  }, [activeLineIdx, lineScores]);
+
+  // Auto-start speech recognition when entering pronunciation challenge or changing tracks
+  useEffect(() => {
+    if (transcriptionViewMode === 'pronunciation') {
+      const timer = setTimeout(() => {
+        if (!isListeningSpeech) {
+          startSpeechRecognition();
+        }
+      }, 300);
+      return () => clearTimeout(timer);
+    } else {
+      if (isListeningSpeech) {
+        stopSpeechRecognition();
+      }
+    }
+  }, [transcriptionViewMode, activeTrack?.id]);
+
+  // Memoized lines matching the TranscriptionLine structure, backed by either activeReadingText or activeTrack.transcriptionLines
+  const displayedLines = React.useMemo(() => {
+    if (activeReadingText?.lines) {
+      return activeReadingText.lines.map((l: any) => ({
+        id: l.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15)),
+        text: l.original,
+        translation: l.translated || '',
+        startTime: l.startTime ?? 0,
+        endTime: l.endTime,
+        difficulty: l.difficulty || 'none'
+      }));
+    }
+    return activeTrack?.transcriptionLines || [];
+  }, [activeReadingText, activeTrack]);
+
+  useEffect(() => {
+    activeLinesRef.current = displayedLines;
+  }, [displayedLines]);
 
   // Load playlists and all tracks on mount
   useEffect(() => {
@@ -174,8 +295,8 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
 
   // Find active line index based on progress
   useEffect(() => {
-    if (activeTrack && activeTrack.transcriptionLines && activeTrack.transcriptionLines.length > 0) {
-      const lines = activeTrack.transcriptionLines;
+    if (activeTrack && displayedLines && displayedLines.length > 0) {
+      const lines = displayedLines;
       let activeIdx = -1;
       for (let i = 0; i < lines.length; i++) {
         if (lines[i].startTime <= progress) {
@@ -188,7 +309,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     } else {
       setActiveLineIdx(-1);
     }
-  }, [progress, activeTrack]);
+  }, [progress, activeTrack, displayedLines]);
 
   // Auto-scroll active line in view
   useEffect(() => {
@@ -326,8 +447,8 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
 
   // Loop active line logic if isLoopingLine is true
   useEffect(() => {
-    if (isLoopingLine && activeLineIdx >= 0 && activeTrack?.transcriptionLines && audioRef.current) {
-      const lines = activeTrack.transcriptionLines;
+    if (isLoopingLine && activeLineIdx >= 0 && displayedLines.length > 0 && audioRef.current) {
+      const lines = displayedLines;
       const currentLine = lines[activeLineIdx];
       const nextLine = lines[activeLineIdx + 1];
       const endOfLine = nextLine ? nextLine.startTime : duration;
@@ -337,12 +458,12 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
         setProgress(currentLine.startTime);
       }
     }
-  }, [progress, isLoopingLine, activeLineIdx, activeTrack, duration]);
+  }, [progress, isLoopingLine, activeLineIdx, displayedLines, duration]);
 
   // Dictation mode auto-pause logic
   useEffect(() => {
-    if (isDictationMode && activeLineIdx >= 0 && activeTrack?.transcriptionLines && audioRef.current && isPlaying) {
-      const lines = activeTrack.transcriptionLines;
+    if (isDictationMode && activeLineIdx >= 0 && displayedLines.length > 0 && audioRef.current && isPlaying) {
+      const lines = displayedLines;
       const nextLine = lines[activeLineIdx + 1];
       const endOfLine = nextLine ? nextLine.startTime : duration;
       
@@ -352,7 +473,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
         lastPausedLineIdxRef.current = activeLineIdx;
       }
     }
-  }, [progress, isDictationMode, activeLineIdx, activeTrack, duration, isPlaying]);
+  }, [progress, isDictationMode, activeLineIdx, displayedLines, duration, isPlaying]);
 
   useEffect(() => {
     lastPausedLineIdxRef.current = -1;
@@ -582,6 +703,188 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     }
   };
 
+  // Microphone Visualizer and Balloon Feedback Functions
+  const cleanupMicVisualizer = () => {
+    if (micAnimationRef.current) {
+      cancelAnimationFrame(micAnimationRef.current);
+      micAnimationRef.current = null;
+    }
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach(track => {
+        try {
+          track.stop();
+        } catch (e) {
+          console.error('Error stopping mic track:', e);
+        }
+      });
+      micStreamRef.current = null;
+    }
+    if (micAudioContextRef.current) {
+      try {
+        if (micAudioContextRef.current.state !== 'closed') {
+          micAudioContextRef.current.close();
+        }
+      } catch (e) {
+        console.error('Error closing mic AudioContext:', e);
+      }
+      micAudioContextRef.current = null;
+    }
+    micAnalyserRef.current = null;
+  };
+
+  const drawMicWaveform = () => {
+    if (!micCanvasRef.current || !micAnalyserRef.current) {
+      micAnimationRef.current = requestAnimationFrame(drawMicWaveform);
+      return;
+    }
+
+    const canvas = micCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      micAnimationRef.current = requestAnimationFrame(drawMicWaveform);
+      return;
+    }
+
+    const analyser = micAnalyserRef.current;
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    analyser.getByteFrequencyData(dataArray);
+
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    if (canvas.width !== rect.width * dpr || canvas.height !== rect.height * dpr) {
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      ctx.scale(dpr, dpr);
+    }
+
+    const width = rect.width;
+    const height = rect.height;
+
+    ctx.clearRect(0, 0, width, height);
+
+    const barWidth = 4.5;
+    const barGap = 3.5;
+    const totalBarWidth = barWidth + barGap;
+    const barCount = Math.floor(width / totalBarWidth);
+
+    const gradient = ctx.createLinearGradient(0, 0, width, 0);
+    gradient.addColorStop(0, '#3b82f6');   // Blue
+    gradient.addColorStop(0.4, '#6366f1'); // Indigo
+    gradient.addColorStop(0.7, '#8b5cf6'); // Violet
+    gradient.addColorStop(1, '#ec4899');   // Pink
+
+    ctx.fillStyle = gradient;
+    ctx.strokeStyle = gradient;
+    ctx.lineWidth = barWidth;
+    ctx.lineCap = 'round';
+
+    ctx.shadowBlur = 4;
+    ctx.shadowColor = 'rgba(99, 102, 241, 0.35)';
+
+    const centerY = height / 2;
+    const startX = (width - (barCount * totalBarWidth - barGap)) / 2;
+
+    for (let i = 0; i < barCount; i++) {
+      const dataIdx = Math.floor((i / barCount) * bufferLength * 0.55);
+      const rawValue = dataArray[dataIdx] || 0;
+      const percent = rawValue / 255;
+
+      const edgeWindow = Math.sin((i / (barCount - 1)) * Math.PI);
+
+      const minHeight = 4;
+      const maxHeight = height * 0.85;
+      const barHeight = minHeight + percent * maxHeight * edgeWindow;
+
+      const x = startX + i * totalBarWidth + barWidth / 2;
+
+      if (barHeight <= barWidth) {
+        ctx.beginPath();
+        ctx.arc(x, centerY, barWidth / 2, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        const topY = centerY - (barHeight - barWidth) / 2;
+        const bottomY = centerY + (barHeight - barWidth) / 2;
+        ctx.beginPath();
+        ctx.moveTo(x, topY);
+        ctx.lineTo(x, bottomY);
+        ctx.stroke();
+      }
+    }
+
+    ctx.shadowBlur = 0;
+
+    micAnimationRef.current = requestAnimationFrame(drawMicWaveform);
+  };
+
+  const startMicVisualizer = async () => {
+    cleanupMicVisualizer();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micStreamRef.current = stream;
+
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      const audioCtx = new AudioContextClass();
+      micAudioContextRef.current = audioCtx;
+
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 1024;
+      micAnalyserRef.current = analyser;
+
+      const source = audioCtx.createMediaStreamSource(stream);
+      source.connect(analyser);
+
+      drawMicWaveform();
+    } catch (err) {
+      console.error('Failed to start mic visualizer:', err);
+    }
+  };
+
+  const triggerFeedbackBalloon = (score: number) => {
+    let list: string[] = [];
+    let color = '';
+
+    if (score >= 90) {
+      list = ['Excelente! 🌟', 'Perfeito! 🏆', 'Incrível! 🔥', 'Espetacular! ⚡'];
+      color = 'from-emerald-500 to-teal-500 shadow-emerald-500/30';
+    } else if (score >= 80) {
+      list = ['Ótimo! ⭐', 'Arrasou! 🎉', 'Muito afinado! 🎵', 'Continue assim! 💪'];
+      color = 'from-cyan-500 to-blue-500 shadow-cyan-500/30';
+    } else if (score >= 65) {
+      list = ['Muito bom! 👍', 'Mandou bem! 😎', 'No ritmo! 🥁', 'Continue assim! 💪'];
+      color = 'from-indigo-500 to-purple-500 shadow-indigo-500/30';
+    } else if (score >= 45) {
+      list = ['Médio! 🙂', 'Bom começo! 👍', 'Quase lá! ✨', 'Vamos lá! 🎙️'];
+      color = 'from-amber-500 to-orange-500 shadow-amber-500/30';
+    } else {
+      list = ['Ruim 😢', 'Tente de novo! 🎙️', 'Mais uma vez! 🔁', 'Não desista! ❤️'];
+      color = 'from-rose-500 to-pink-500 shadow-rose-500/30';
+    }
+
+    const randomText = list[Math.floor(Math.random() * list.length)];
+    const randomOffset = Math.floor(Math.random() * 120) - 60;
+    const id = Math.random().toString(36).substring(2, 9);
+
+    const newBalloon = {
+      id,
+      text: randomText,
+      colorClass: color,
+      xOffset: randomOffset
+    };
+
+    setFeedbackBalloons(prev => [...prev, newBalloon]);
+
+    setTimeout(() => {
+      setFeedbackBalloons(prev => prev.filter(b => b.id !== id));
+    }, 2600);
+  };
+
+  useEffect(() => {
+    return () => {
+      cleanupMicVisualizer();
+    };
+  }, []);
+
   // Playback Control Functions
   const cleanupAudio = () => {
     cleanupVisualizer();
@@ -725,6 +1028,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
       recognitionRef.current = null;
     }
     setIsListeningSpeech(false);
+    cleanupMicVisualizer();
   };
 
   const startSpeechRecognition = () => {
@@ -746,6 +1050,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     setSpeechWordDiffs([]);
 
     try {
+      startMicVisualizer();
       const recognition = new SpeechRecognition();
       recognition.continuous = true;
       recognition.interimResults = true;
@@ -794,11 +1099,24 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
           const diffResult = diffWords(spokenText, expectedText);
           setSpeechWordDiffs(diffResult);
 
+          // Update the line's score to be the maximum achieved during this line's singing window
+          setLineScores(prev => {
+            const currentScore = prev[currentIdx] || 0;
+            if (roundedSimilarity > currentScore) {
+              return {
+                ...prev,
+                [currentIdx]: roundedSimilarity
+              };
+            }
+            return prev;
+          });
+
           if (finalTranscript) {
-            setLineScores(prev => ({
-              ...prev,
-              [currentIdx]: roundedSimilarity
-            }));
+            const finalScore = Math.max(roundedSimilarity, lineScoresRef.current[currentIdx] || 0);
+            if (!triggeredBalloonsRef.current.has(currentIdx)) {
+              triggeredBalloonsRef.current.add(currentIdx);
+              triggerFeedbackBalloon(finalScore);
+            }
             
             if (roundedSimilarity >= 80) {
               toast.success(`Excelente! Precisão de ${roundedSimilarity}%`);
@@ -828,6 +1146,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
           }
         } else {
           setIsListeningSpeech(false);
+          cleanupMicVisualizer();
         }
       };
 
@@ -836,6 +1155,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     } catch (error) {
       console.error('Failed to start speech recognition:', error);
       setIsListeningSpeech(false);
+      cleanupMicVisualizer();
     }
   };
 
@@ -870,14 +1190,39 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   };
 
   // Sincronia de Letra & Editor
-  const handleOpenTranscription = (track: AudioTrack) => {
+  const handleOpenTranscription = async (track: AudioTrack) => {
     cleanupAudio();
     setActiveTrack(track);
     setTranscriptionTab('view');
     setProgress(0);
     setDuration(0);
-    setTranscriptionText(track.transcriptionLines?.map(l => l.text).join('\n') || '');
-    setTempLines(track.transcriptionLines || []);
+
+    let originalText = '';
+    let initialLines: any[] = [];
+    
+    if (track.textId) {
+      try {
+        const textRes = await db.texts.get(track.textId);
+        if (textRes) {
+          originalText = textRes.lines.map(l => l.original).join('\n');
+          initialLines = textRes.lines.map(l => ({
+            id: l.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15)),
+            text: l.original,
+            translation: l.translated || '',
+            startTime: l.startTime ?? 0,
+            endTime: l.endTime
+          }));
+        }
+      } catch (err) {
+        console.error('Erro ao buscar texto unificado:', err);
+      }
+    } else if (track.transcriptionLines) {
+      originalText = track.transcriptionLines.map(l => l.text).join('\n');
+      initialLines = track.transcriptionLines;
+    }
+
+    setTranscriptionText(originalText);
+    setTempLines(initialLines);
     setSyncingLineIdx(0);
     setIsEditingLyrics(true);
     handlePlayTrack(track);
@@ -888,13 +1233,64 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     const sortedLines = [...tempLines].sort((a, b) => a.startTime - b.startTime);
 
     try {
-      await db.audioTracks.update(activeTrack.id, {
-        transcriptionLines: sortedLines,
-        updatedAt: Date.now()
-      });
+      let textId = activeTrack.textId;
+      if (!textId) {
+        textId = typeof crypto !== 'undefined' && crypto.randomUUID 
+          ? crypto.randomUUID() 
+          : Math.random().toString(36).substring(2, 15);
+        
+        await db.texts.add({
+          id: textId,
+          title: activeTrack.title,
+          description: `Letra/Transcrição de: ${activeTrack.title}`,
+          type: 'transcription',
+          showInReadings: false,
+          fullTextOriginal: sortedLines.map(l => l.text).join('\n'),
+          fullTextTranslated: sortedLines.map(l => l.translation || '').join('\n'),
+          lines: sortedLines.map(l => ({
+            id: l.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15)),
+            original: l.text,
+            translated: l.translation || '',
+            highlights: [],
+            mastered: false,
+            startTime: l.startTime,
+            endTime: l.endTime
+          })),
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        });
+
+        await db.audioTracks.update(activeTrack.id, {
+          textId: textId,
+          updatedAt: Date.now()
+        });
+        
+        activeTrack.textId = textId;
+      } else {
+        const existingText = await db.texts.get(textId);
+        await db.texts.update(textId, {
+          title: activeTrack.title,
+          fullTextOriginal: sortedLines.map(l => l.text).join('\n'),
+          fullTextTranslated: sortedLines.map(l => l.translation || '').join('\n'),
+          lines: sortedLines.map(l => {
+            const existingLine = existingText?.lines?.find((el: any) => el.id === l.id);
+            return {
+              id: l.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15)),
+              original: l.text,
+              translated: l.translation || '',
+              highlights: existingLine?.highlights || [],
+              mastered: existingLine?.mastered || false,
+              startTime: l.startTime,
+              endTime: l.endTime
+            };
+          }),
+          updatedAt: Date.now()
+        });
+      }
+
       toast.success('Transcrição e sincronização salvas com sucesso!');
       
-      const updatedTrack = { ...activeTrack, transcriptionLines: sortedLines };
+      const updatedTrack = { ...activeTrack, textId };
       setActiveTrack(updatedTrack);
       setAllTracks(prev => prev.map(t => t.id === activeTrack.id ? updatedTrack : t));
       setIsEditingLyrics(false);
@@ -904,7 +1300,117 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     }
   };
 
-  const handleStartAiTranscription = async () => {
+  const handleToggleReadingVisibility = async () => {
+    if (!activeTrack) return;
+    
+    let textId = activeTrack.textId;
+    let isVisible = false;
+
+    if (textId) {
+      const txt = await db.texts.get(textId);
+      if (txt) {
+        isVisible = !!txt.showInReadings;
+      }
+    }
+
+    if (isVisible) {
+      if (textId) {
+        await db.texts.update(textId, {
+          showInReadings: false,
+          updatedAt: Date.now()
+        });
+        toast.success('Esta letra agora está oculta nas Leituras 📖.');
+      }
+    } else {
+      const folders = await db.readingCollections.toArray();
+      setAvailableFolders(folders);
+      setSelectedFolderId('loose');
+      setNewFolderName('');
+      setIsFolderModalOpen(true);
+    }
+  };
+
+  const handleConfirmFolderSelection = async () => {
+    if (!activeTrack) return;
+    
+    let textId = activeTrack.textId;
+    const sortedLines = [...tempLines].sort((a, b) => a.startTime - b.startTime);
+
+    try {
+      let finalCollectionId: string | undefined = undefined;
+      
+      if (selectedFolderId === 'new') {
+        if (!newFolderName.trim()) {
+          toast.error('O nome da pasta é obrigatório para criar uma nova pasta.');
+          return;
+        }
+        const newCollId = typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : Math.random().toString(36).substring(2, 15);
+        
+        await db.readingCollections.add({
+          id: newCollId,
+          title: newFolderName.trim(),
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        });
+        finalCollectionId = newCollId;
+      } else if (selectedFolderId !== 'loose') {
+        finalCollectionId = selectedFolderId;
+      }
+
+      if (!textId) {
+        textId = typeof crypto !== 'undefined' && crypto.randomUUID 
+          ? crypto.randomUUID() 
+          : Math.random().toString(36).substring(2, 15);
+        
+        await db.texts.add({
+          id: textId,
+          title: activeTrack.title,
+          description: `Letra/Transcrição de: ${activeTrack.title}`,
+          type: 'transcription',
+          showInReadings: true,
+          fullTextOriginal: sortedLines.map(l => l.text).join('\n'),
+          fullTextTranslated: sortedLines.map(l => l.translation || '').join('\n'),
+          lines: sortedLines.map(l => ({
+            id: l.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15)),
+            original: l.text,
+            translated: l.translation || '',
+            highlights: [],
+            mastered: false,
+            startTime: l.startTime,
+            endTime: l.endTime
+          })),
+          collectionId: finalCollectionId,
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        });
+
+        await db.audioTracks.update(activeTrack.id, {
+          textId: textId,
+          updatedAt: Date.now()
+        });
+        
+        activeTrack.textId = textId;
+        const updatedTrack = { ...activeTrack, textId };
+        setActiveTrack(updatedTrack);
+        setAllTracks(prev => prev.map(t => t.id === activeTrack.id ? updatedTrack : t));
+      } else {
+        await db.texts.update(textId, {
+          showInReadings: true,
+          collectionId: finalCollectionId,
+          updatedAt: Date.now()
+        });
+      }
+
+      setIsFolderModalOpen(false);
+    } catch (err) {
+      console.error(err);
+      toast.error('Erro ao salvar pasta e visibilidade.');
+    }
+  };
+
+  const handleStartAiTranscription = async (forceRestart = false) => {
     if (!activeTrack) return;
     const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
     if (!geminiApiKey.trim()) {
@@ -914,15 +1420,46 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
 
     try {
       setIsTranscribingAi(true);
+      isTranscribeCancelledRef.current = false;
+      setTranscribingPercent(0);
       setTranscribingProgress('Decodificando áudio localmente...');
 
       const audioBuffer = await decodeAudioFile(activeTrack.audioFile);
-      const splitPoints = findSilenceSplitPoints(audioBuffer);
 
+      let splitPoints: number[] = [];
       let finalLines: TranscriptionLine[] = [];
+      let startIdx = 0;
+
+      if (forceRestart) {
+        await db.audioTracks.update(activeTrack.id, {
+          aiTranscriptionProgress: undefined,
+          updatedAt: Date.now()
+        });
+        activeTrack.aiTranscriptionProgress = undefined;
+        setActiveTrack({ ...activeTrack });
+        setAllTracks(prev => prev.map(t => t.id === activeTrack.id ? { ...t, aiTranscriptionProgress: undefined } : t));
+      }
+
+      if (!forceRestart && activeTrack.aiTranscriptionProgress) {
+        const progressState = activeTrack.aiTranscriptionProgress;
+        splitPoints = progressState.splitPoints;
+        finalLines = progressState.lines;
+        startIdx = progressState.lastProcessedChunkIndex;
+      } else {
+        // Find split points using target size 10 seconds
+        splitPoints = findSilenceSplitPoints(audioBuffer, 10);
+      }
+
       const totalChunks = splitPoints.length + 1;
 
-      for (let i = 0; i <= splitPoints.length; i++) {
+      for (let i = startIdx; i <= splitPoints.length; i++) {
+        if (isTranscribeCancelledRef.current) {
+          throw new Error('CanceledByUser');
+        }
+
+        const percent = Math.round((i / totalChunks) * 100);
+        setTranscribingPercent(percent);
+
         const start = i === 0 ? 0 : splitPoints[i - 1];
         const end = i === splitPoints.length ? audioBuffer.duration : splitPoints[i];
         
@@ -939,9 +1476,38 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
         }));
 
         finalLines = [...finalLines, ...adjustedLines];
+
+        // Save progress to database
+        const nextProgress = {
+          lastProcessedChunkIndex: i + 1,
+          splitPoints,
+          lines: finalLines
+        };
+
+        await db.audioTracks.update(activeTrack.id, {
+          aiTranscriptionProgress: nextProgress,
+          updatedAt: Date.now()
+        });
+
+        // Update local state reactively
+        activeTrack.aiTranscriptionProgress = nextProgress;
+        setActiveTrack({ ...activeTrack });
+        setAllTracks(prev => prev.map(t => t.id === activeTrack.id ? { ...t, aiTranscriptionProgress: nextProgress } : t));
       }
 
-      const postProcessedLines = adjustTimestampsSafeguard(finalLines, audioBuffer.duration);
+      setTranscribingPercent(100);
+
+      // Clear the temporary AI progress from db.audioTracks on completion
+      await db.audioTracks.update(activeTrack.id, {
+        aiTranscriptionProgress: undefined,
+        updatedAt: Date.now()
+      });
+      activeTrack.aiTranscriptionProgress = undefined;
+      setActiveTrack({ ...activeTrack });
+      setAllTracks(prev => prev.map(t => t.id === activeTrack.id ? { ...t, aiTranscriptionProgress: undefined } : t));
+
+      // Call adjustTimestampsSafeguard properly with minSpacing=0.5 and trackDuration=audioBuffer.duration
+      const postProcessedLines = adjustTimestampsSafeguard(finalLines, 0.5, audioBuffer.duration);
 
       setTempLines(postProcessedLines);
       setTranscriptionText(postProcessedLines.map(l => l.text).join('\n'));
@@ -950,8 +1516,12 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
       toast.success('Áudio transcrito e traduzido com sucesso pelo Gemini 2.5 Flash!');
       setTranscriptionTab('view');
     } catch (err: any) {
-      console.error("[TranscriptionError]", err);
-      toast.error(err.message || 'Erro durante a transcrição.');
+      if (err.message === 'CanceledByUser') {
+        toast.info('Transcrição cancelada pelo usuário. O progresso parcial foi salvo.');
+      } else {
+        console.error("[TranscriptionError]", err);
+        toast.error(err.message || 'Erro durante a transcrição.');
+      }
     } finally {
       setIsTranscribingAi(false);
       setTranscribingProgress('');
@@ -973,19 +1543,24 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
 Você é uma IA especializada em transcrição de áudio e tradução pedagógica de idiomas.
 Sua tarefa é transcrever o áudio fornecido e gerar a tradução de cada frase para fins de estudo de idiomas.
 
+ATENÇÃO REGRAS CRÍTICAS DE SEGURANÇA:
+1. Se o áudio contiver apenas silêncio, ruídos ou música instrumental sem vocais falados/cantados, você deve retornar OBRIGATORIAMENTE o JSON com a lista vazia: {"lines": []}. Não invente palavras se não houver ninguém cantando ou falando.
+2. NUNCA coloque exemplos deste prompt (como a frase "Hello, how are you?") no resultado, a menos que a pessoa no áudio esteja literalmente falando/cantando essa frase específica.
+3. Não inclua metadados, introduções ou explicações. Retorne puramente o bloco JSON válido.
+
 Sua resposta deve ser obrigatoriamente um objeto JSON com uma lista de "lines", onde cada linha possui:
-1. "startTime": Tempo de início em segundos (float).
-2. "endTime": Tempo de fim em segundos (float).
-3. "text": Texto transcrito exatamente como falado (em inglês/idioma original do áudio).
-4. "translation": Tradução da linha para o português do Brasil.
+1. "startTime": Tempo de início em segundos relativo ao trecho de áudio enviado (float).
+2. "endTime": Tempo de fim em segundos relativo ao trecho de áudio enviado (float).
+3. "text": Texto transcrito exatamente como cantado/falado (no idioma original do áudio).
+4. "translation": Tradução fiel e fluida da linha para o português do Brasil.
 
 O JSON deve seguir exatamente este formato:
 {
   "lines": [
-    { "startTime": 1.2, "endTime": 3.5, "text": "Hello, how are you?", "translation": "Olá, como você está?" }
+    { "startTime": 1.2, "endTime": 3.5, "text": "Texto transcrito original", "translation": "Tradução em português" }
   ]
 }
-Não adicione explicações, comentários ou markdown fora do bloco JSON.
+Não adicione markdown fora do bloco JSON.
 `;
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
@@ -1240,33 +1815,53 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
       <div className="flex-1 flex flex-col min-h-0 mt-4 relative z-10">
         {/* Sub-tabs switch between view and adjust, only if not actively syncing */}
         {transcriptionTab !== 'sync' && (
-          <div className="flex flex-wrap items-center gap-1.5 bg-muted/40 border border-border/30 rounded-xl p-1 shrink-0 mb-4 max-w-fit relative z-20">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4 w-full relative z-20">
+            <div className="flex flex-wrap items-center gap-1.5 bg-muted/40 border border-border/30 rounded-xl p-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => setTranscriptionTab('view')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  transcriptionTab === 'view'
+                    ? 'bg-primary text-primary-foreground shadow-sm animate-fadeIn'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                }`}
+              >
+                <FileText size={12} />
+                <span>Letra Texto</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleLoadTextToTempLines();
+                  setTranscriptionTab('adjust');
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  transcriptionTab === 'adjust'
+                    ? 'bg-primary text-primary-foreground shadow-sm animate-fadeIn'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                }`}
+              >
+                <Settings2 size={12} />
+                <span>Ajustar Frases (Tempos)</span>
+              </button>
+            </div>
+
+            {/* Toggle Visibilidade nas Leituras */}
             <button
               type="button"
-              onClick={() => setTranscriptionTab('view')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                transcriptionTab === 'view'
-                  ? 'bg-primary text-primary-foreground shadow-sm animate-fadeIn'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+              onClick={handleToggleReadingVisibility}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer shadow-sm border ${
+                activeReadingText?.showInReadings
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                  : 'bg-card border-border hover:text-foreground hover:bg-muted text-muted-foreground'
               }`}
             >
-              <FileText size={12} />
-              <span>Letra Texto</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                handleLoadTextToTempLines();
-                setTranscriptionTab('adjust');
-              }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                transcriptionTab === 'adjust'
-                  ? 'bg-primary text-primary-foreground shadow-sm animate-fadeIn'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
-              }`}
-            >
-              <Settings2 size={12} />
-              <span>Ajustar Frases (Tempos)</span>
+              <span>📖 {activeReadingText?.showInReadings ? 'Visível nas Leituras' : 'Oculto nas Leituras'}</span>
+              {activeReadingText?.showInReadings && activeReadingText?.collectionId && (
+                <span className="text-[8px] opacity-75 font-semibold leading-none self-center normal-case">
+                  (na pasta)
+                </span>
+              )}
             </button>
           </div>
         )}
@@ -1353,14 +1948,46 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
                   </p>
                 </div>
 
-                <Button
-                  onClick={handleStartAiTranscription}
-                  disabled={isTranscribingAi}
-                  className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-extrabold text-xs h-10 rounded-xl shadow-md shadow-violet-500/25 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 transition-all active:scale-[0.98]"
-                >
-                  <Sparkles size={13} />
-                  Auto-Transcrever e Traduzir
-                </Button>
+                {activeTrack.aiTranscriptionProgress ? (
+                  <div className="flex flex-col gap-2 w-full">
+                    <div className="text-[9px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5 rounded-xl flex flex-col gap-0.5">
+                      <span>Progresso anterior encontrado:</span>
+                      <span className="font-extrabold">Trecho {activeTrack.aiTranscriptionProgress.lastProcessedChunkIndex} de {activeTrack.aiTranscriptionProgress.splitPoints.length + 1} processados.</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        onClick={() => handleStartAiTranscription(false)}
+                        disabled={isTranscribingAi}
+                        className="flex-1 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-extrabold text-xs h-10 rounded-xl shadow-md shadow-violet-500/25 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 transition-all active:scale-[0.98]"
+                      >
+                        <Play size={13} />
+                        Continuar
+                      </Button>
+                      <Button
+                        onClick={() => {
+                          if (confirm('Tem certeza que deseja apagar o progresso anterior e começar do zero?')) {
+                            handleStartAiTranscription(true);
+                          }
+                        }}
+                        disabled={isTranscribingAi}
+                        variant="outline"
+                        className="border-border/60 hover:bg-muted text-foreground font-extrabold text-xs h-10 px-3 rounded-xl flex items-center justify-center cursor-pointer disabled:opacity-50 transition-all active:scale-[0.98]"
+                        title="Recomeçar do zero"
+                      >
+                        <RefreshCw size={13} />
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Button
+                    onClick={() => handleStartAiTranscription(false)}
+                    disabled={isTranscribingAi}
+                    className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-extrabold text-xs h-10 rounded-xl shadow-md shadow-violet-500/25 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 transition-all active:scale-[0.98]"
+                  >
+                    <Sparkles size={13} />
+                    Auto-Transcrever e Traduzir
+                  </Button>
+                )}
               </div>
             </div>
           </div>
@@ -1722,7 +2349,7 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
 
                   <div className="mt-3 space-y-1.5 flex-1 max-h-[190px] overflow-y-auto no-scrollbar pr-1">
                     {playlistTracks.map(track => {
-                      const hasTranscription = track.transcriptionLines && track.transcriptionLines.length > 0;
+                      const hasTranscription = !!track.textId || (!!track.transcriptionLines && track.transcriptionLines.length > 0);
                       return (
                         <div
                           key={track.id}
@@ -1876,270 +2503,325 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
           <ShadcnCard className="bg-card/40 backdrop-blur-md border border-border/50 p-5 rounded-2xl shadow-xl flex flex-col flex-1 h-full lg:h-[calc(100vh-180px)] lg:max-h-[calc(100vh-180px)] min-h-[400px] relative overflow-hidden">
             <div className="absolute top-0 right-0 w-48 h-48 bg-primary/5 rounded-full blur-[60px] pointer-events-none" />
 
-            {/* Cabeçalho do Estúdio */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border/40 shrink-0 relative z-10">
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={isEditingLyrics ? () => setIsEditingLyrics(false) : handleCloseStudio}
-                  className="p-1.5 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer border border-border/40 bg-card/65 shadow-sm"
-                  title={isEditingLyrics ? "Voltar ao Player" : "Voltar ao estúdio"}
-                >
-                  <ArrowLeft size={16} />
-                </button>
-                <div className="flex flex-col min-w-0">
-                  <h3 className="text-xs font-black text-foreground truncate max-w-[200px] sm:max-w-xs">
-                    {activeTrack.title}
-                  </h3>
-                  <p className="text-[9px] text-muted-foreground font-semibold truncate leading-normal">
-                    Estudo e Prática
-                  </p>
-                </div>
-              </div>
-
-              {/* Toggles de Estudo no Topo */}
-              <div className="flex items-center gap-2">
-                {/* Loop de Frase */}
-                <button
-                  onClick={() => setIsLoopingLine(!isLoopingLine)}
-                  className={`p-1.5 rounded-xl border transition-colors cursor-pointer shadow-sm text-xs font-bold flex items-center gap-1.5 ${
-                    isLoopingLine
-                      ? 'bg-amber-500/15 border-amber-500/35 text-amber-600 dark:text-amber-400 shadow-sm shadow-amber-500/10'
-                      : 'border-border/50 bg-card text-muted-foreground hover:text-foreground hover:bg-muted'
-                  }`}
-                  title={isLoopingLine ? 'Desativar loop da frase atual' : 'Ativar loop da frase atual'}
-                >
-                  <Repeat size={14} className={isLoopingLine ? 'animate-pulse' : ''} />
-                  <span className="hidden sm:inline text-[10px]">Loop Frase</span>
-                </button>
-
-                {/* Modo Ditado */}
-                <button
-                  onClick={() => setIsDictationMode(!isDictationMode)}
-                  className={`p-1.5 rounded-xl border transition-colors cursor-pointer shadow-sm text-xs font-bold flex items-center gap-1.5 ${
-                    isDictationMode
-                      ? 'bg-sky-500/15 border-sky-500/35 text-sky-600 dark:text-sky-400 shadow-sm shadow-sky-500/10'
-                      : 'border-border/50 bg-card text-muted-foreground hover:text-foreground hover:bg-muted'
-                  }`}
-                  title={isDictationMode ? 'Desativar Modo Ditado (Auto-pause)' : 'Ativar Modo Ditado (Pausar áudio ao final de cada frase)'}
-                >
-                  <Mic size={14} className={isDictationMode ? 'animate-pulse' : ''} />
-                  <span className="hidden sm:inline text-[10px]">Modo Ditado</span>
-                </button>
-
-                {/* Alternar tradução */}
-                <button
-                  onClick={() => setShowTranslation(!showTranslation)}
-                  className={`p-1.5 rounded-xl border transition-colors cursor-pointer shadow-sm ${
-                    showTranslation
-                      ? 'bg-primary/10 border-primary/20 text-primary hover:bg-primary/20'
-                      : 'border-border/50 bg-card text-muted-foreground hover:text-foreground hover:bg-muted'
-                  }`}
-                  title={showTranslation ? 'Ocultar traduções' : 'Mostrar traduções'}
-                >
-                  <Languages size={14} />
-                </button>
-
-                {/* Editar Letras */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isEditingLyrics) {
-                      setIsEditingLyrics(false);
-                    } else {
-                      setTranscriptionText(activeTrack.transcriptionLines?.map(l => l.text).join('\n') || '');
-                      setTempLines(activeTrack.transcriptionLines || []);
-                      setSyncingLineIdx(0);
-                      setTranscriptionTab('view');
-                      setIsEditingLyrics(true);
-                    }
-                  }}
-                  className={`p-1.5 rounded-xl border transition-colors cursor-pointer shadow-sm text-xs font-bold flex items-center gap-1.5 ${
-                    isEditingLyrics
-                      ? 'bg-primary/15 border-primary/35 text-primary hover:bg-primary/20 shadow-sm shadow-primary/10'
-                      : 'border-border/50 bg-card text-muted-foreground hover:text-foreground hover:bg-muted'
-                  }`}
-                  title={isEditingLyrics ? "Sair da Edição" : "Editar Letras"}
-                >
-                  <Settings2 size={14} />
-                  <span className="hidden sm:inline text-[10px]">Editar Letra</span>
-                </button>
-
-                {/* Alternar Tela Cheia */}
-                <button
-                  onClick={() => setIsFullscreenMode(!isFullscreenMode)}
-                  className={`p-1.5 rounded-xl border transition-colors cursor-pointer shadow-sm ${
-                    isFullscreenMode
-                      ? 'bg-primary/15 border-primary/35 text-primary hover:bg-primary/20 shadow-sm shadow-primary/10'
-                      : 'border-border/50 bg-card text-muted-foreground hover:text-foreground hover:bg-muted'
-                  }`}
-                  title={isFullscreenMode ? 'Sair da Tela Cheia' : 'Tela Cheia'}
-                >
-                  {isFullscreenMode ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                </button>
-              </div>
-            </div>
-
-            {/* Barra de Seleção de Modos */}
-            {!isEditingLyrics && (
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-3 pb-2 border-b border-border/20 shrink-0 relative z-10 animate-fadeIn">
-                <div className="flex flex-wrap items-center gap-1.5 bg-muted/40 border border-border/30 rounded-xl p-1 shrink-0">
+            {/* Header Controls Wrapper */}
+            <div className="flex flex-col gap-1 shrink-0 relative z-30">
+              {/* Cabeçalho do Estúdio */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border/40 shrink-0 relative z-10">
+                <div className="flex items-center gap-3">
                   <button
-                    type="button"
-                    onClick={() => {
-                      setTranscriptionViewMode('normal');
-                      stopSpeechRecognition();
-                      setIsEditingLyrics(false);
-                    }}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                      transcriptionViewMode === 'normal' && !isEditingLyrics
-                        ? 'bg-primary text-primary-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
-                    }`}
+                    onClick={isEditingLyrics ? () => setIsEditingLyrics(false) : handleCloseStudio}
+                    className="p-1.5 rounded-xl hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer border border-border/40 bg-card/65 shadow-sm"
+                    title={isEditingLyrics ? "Voltar ao Player" : "Voltar ao estúdio"}
                   >
-                    <FileText size={12} />
-                    <span>Padrão</span>
+                    <ArrowLeft size={16} />
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTranscriptionViewMode('playback');
-                      stopSpeechRecognition();
-                      setIsEditingLyrics(false);
-                    }}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                      transcriptionViewMode === 'playback' && !isEditingLyrics
-                        ? 'bg-primary text-primary-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
-                    }`}
-                  >
-                    <Music size={12} />
-                    <span>Playback / Karaokê</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTranscriptionViewMode('pronunciation');
-                      setIsEditingLyrics(false);
-                    }}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                      transcriptionViewMode === 'pronunciation' && !isEditingLyrics
-                        ? 'bg-primary text-primary-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
-                    }`}
-                  >
-                    <Mic size={12} />
-                    <span>Desafio de Pronúncia</span>
-                  </button>
+                  <div className="flex flex-col min-w-0">
+                    <h3 className="text-xs font-black text-foreground truncate max-w-[200px] sm:max-w-xs">
+                      {activeTrack.title}
+                    </h3>
+                    <p className="text-[9px] text-muted-foreground font-semibold truncate leading-normal">
+                      Estudo e Prática
+                    </p>
+                  </div>
                 </div>
 
-                {/* Dica de Modo & Vocal Controls */}
-                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                  {transcriptionViewMode === 'pronunciation' ? (
-                    <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 px-3 py-1.5 rounded-xl text-[10px] font-black shadow-sm">
-                      <Headphones size={12} className="shrink-0 animate-bounce" />
-                      <span>Use fones — evite captar a caixa de som!</span>
-                    </div>
-                  ) : null}
+                {/* Toggles de Estudo no Topo */}
+                <div className="flex items-center gap-2">
+                  {/* Loop de Frase */}
+                  <button
+                    onClick={() => setIsLoopingLine(!isLoopingLine)}
+                    className={`p-1.5 rounded-xl border transition-colors cursor-pointer shadow-sm text-xs font-bold flex items-center gap-1.5 ${
+                      isLoopingLine
+                        ? 'bg-amber-500/15 border-amber-500/35 text-amber-600 dark:text-amber-400 shadow-sm shadow-amber-500/10'
+                        : 'border-border/50 bg-card text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                    title={isLoopingLine ? 'Desativar loop da frase atual' : 'Ativar loop da frase atual'}
+                  >
+                    <Repeat size={14} className={isLoopingLine ? 'animate-pulse' : ''} />
+                    <span className="hidden sm:inline text-[10px]">Loop Frase</span>
+                  </button>
 
-                  <div className="flex items-center gap-1.5 bg-muted/40 border border-border/30 rounded-xl p-1">
-                    <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/50 px-1.5 select-none hidden sm:block">
-                      Voz
+                  {/* Modo Ditado */}
+                  <button
+                    onClick={() => setIsDictationMode(!isDictationMode)}
+                    className={`p-1.5 rounded-xl border transition-colors cursor-pointer shadow-sm text-xs font-bold flex items-center gap-1.5 ${
+                      isDictationMode
+                        ? 'bg-sky-500/15 border-sky-500/35 text-sky-600 dark:text-sky-400 shadow-sm shadow-sky-500/10'
+                        : 'border-border/50 bg-card text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                    title={isDictationMode ? 'Desativar Modo Ditado (Auto-pause)' : 'Ativar Modo Ditado (Pausar áudio ao final de cada frase)'}
+                  >
+                    <Mic size={14} className={isDictationMode ? 'animate-pulse' : ''} />
+                    <span className="hidden sm:inline text-[10px]">Modo Ditado</span>
+                  </button>
+
+                  {/* Importar para Leituras */}
+                  <button
+                    type="button"
+                    onClick={handleToggleReadingVisibility}
+                    className={`p-1.5 rounded-xl border transition-colors cursor-pointer shadow-sm text-xs font-bold flex items-center gap-1.5 ${
+                      activeReadingText?.showInReadings
+                        ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-600 dark:text-emerald-400 shadow-sm shadow-emerald-500/10'
+                        : 'border-border/50 bg-card text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                    title={activeReadingText?.showInReadings ? "Configurar Pasta de Importação" : "Importar música para o menu de Leitura"}
+                  >
+                    <span>📖</span>
+                    <span className="hidden sm:inline text-[10px]">
+                      {activeReadingText?.showInReadings ? 'Importado' : 'Importar'}
                     </span>
-                    <div className="w-px h-4 bg-border/40 hidden sm:block" />
+                  </button>
+
+                  {/* Alternar tradução */}
+                  <button
+                    onClick={() => setShowTranslation(!showTranslation)}
+                    className={`p-1.5 rounded-xl border transition-colors cursor-pointer shadow-sm ${
+                      showTranslation
+                        ? 'bg-primary/10 border-primary/20 text-primary hover:bg-primary/20'
+                        : 'border-border/50 bg-card text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                    title={showTranslation ? 'Ocultar traduções' : 'Mostrar traduções'}
+                  >
+                    <Languages size={14} />
+                  </button>
+
+                  {/* Editar Letras */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isEditingLyrics) {
+                        setIsEditingLyrics(false);
+                      } else {
+                        setTranscriptionText(displayedLines.map((l: any) => l.text).join('\n'));
+                        setTempLines(displayedLines);
+                        setSyncingLineIdx(0);
+                        setTranscriptionTab('view');
+                        setIsEditingLyrics(true);
+                      }
+                    }}
+                    className={`p-1.5 rounded-xl border transition-colors cursor-pointer shadow-sm text-xs font-bold flex items-center gap-1.5 ${
+                      isEditingLyrics
+                        ? 'bg-primary/15 border-primary/35 text-primary hover:bg-primary/20 shadow-sm shadow-primary/10'
+                        : 'border-border/50 bg-card text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                    title={isEditingLyrics ? "Sair da Edição" : "Editar Letras"}
+                  >
+                    <Settings2 size={14} />
+                    <span className="hidden sm:inline text-[10px]">Editar Letra</span>
+                  </button>
+
+                  {/* Alternar Tela Cheia */}
+                  <button
+                    onClick={() => setIsFullscreenMode(!isFullscreenMode)}
+                    className={`p-1.5 rounded-xl border transition-colors cursor-pointer shadow-sm ${
+                      isFullscreenMode
+                        ? 'bg-primary/15 border-primary/35 text-primary hover:bg-primary/20 shadow-sm shadow-primary/10'
+                        : 'border-border/50 bg-card text-muted-foreground hover:text-foreground hover:bg-muted'
+                    }`}
+                    title={isFullscreenMode ? 'Sair da Tela Cheia' : 'Tela Cheia'}
+                  >
+                    {isFullscreenMode ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Barra de Seleção de Modos */}
+              {!isEditingLyrics && (
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-3 pb-2 border-b border-border/20 shrink-0 relative z-10 animate-fadeIn">
+                  <div className="flex flex-wrap items-center gap-1.5 bg-muted/40 border border-border/30 rounded-xl p-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTranscriptionViewMode('normal');
+                        stopSpeechRecognition();
+                        setIsEditingLyrics(false);
+                      }}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                        transcriptionViewMode === 'normal' && !isEditingLyrics
+                          ? 'bg-primary text-primary-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                      }`}
+                    >
+                      <FileText size={12} />
+                      <span>Padrão</span>
+                    </button>
 
                     <button
                       type="button"
-                      onClick={() => toggleVocalReduction(!isVocalReductionActive)}
-                      title="Atenuar voz com cancelamento de phase estéreo."
-                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                        isVocalReductionActive
-                          ? 'bg-rose-500/20 text-rose-500 dark:text-rose-400'
-                          : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+                      onClick={() => {
+                        setTranscriptionViewMode('playback');
+                        stopSpeechRecognition();
+                        setIsEditingLyrics(false);
+                      }}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                        transcriptionViewMode === 'playback' && !isEditingLyrics
+                          ? 'bg-primary text-primary-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
                       }`}
                     >
-                      <Volume2 size={11} className={isVocalReductionActive ? 'animate-pulse' : ''} />
-                      <span className="hidden sm:inline">Atenuar</span>
+                      <Music size={12} />
+                      <span>Playback / Karaokê</span>
                     </button>
 
-                    <div className="w-px h-4 bg-border/40" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTranscriptionViewMode('pronunciation');
+                        setIsEditingLyrics(false);
+                      }}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                        transcriptionViewMode === 'pronunciation' && !isEditingLyrics
+                          ? 'bg-primary text-primary-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                      }`}
+                    >
+                      <Mic size={12} />
+                      <span>Desafio de Pronúncia</span>
+                    </button>
+                  </div>
 
-                    {activeTrack.instrumentalFile ? (
+                  {/* Dica de Modo & Vocal Controls */}
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                    {transcriptionViewMode === 'pronunciation' ? (
+                      <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 px-3 py-1.5 rounded-xl text-[10px] font-black shadow-sm">
+                        <Headphones size={12} className="shrink-0 animate-bounce" />
+                        <span>Use fones — evite captar a caixa de som!</span>
+                      </div>
+                    ) : null}
+
+                    <div className="flex items-center gap-1.5 bg-muted/40 border border-border/30 rounded-xl p-1">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/50 px-1.5 select-none hidden sm:block">
+                        Voz
+                      </span>
+                      <div className="w-px h-4 bg-border/40 hidden sm:block" />
+
                       <button
                         type="button"
-                        onClick={() => toggleIaInstrumental(!isIaInstrumentalActive)}
-                        title="Alterna para o instrumental sem voz por IA."
+                        onClick={() => toggleVocalReduction(!isVocalReductionActive)}
+                        title="Atenuar voz com cancelamento de phase estéreo."
                         className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                          isIaInstrumentalActive
-                            ? 'bg-violet-500/20 text-violet-500 dark:text-violet-400'
+                          isVocalReductionActive
+                            ? 'bg-rose-500/20 text-rose-500 dark:text-rose-400'
                             : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
                         }`}
                       >
-                        <Sparkles size={11} className={isIaInstrumentalActive ? 'animate-pulse' : ''} />
-                        <span>{isIaInstrumentalActive ? 'Sem voz ✓' : 'Sem voz'}</span>
+                        <Volume2 size={11} className={isVocalReductionActive ? 'animate-pulse' : ''} />
+                        <span className="hidden sm:inline">Atenuar</span>
                       </button>
-                    ) : isProcessingCloudSeparation ? (
-                      <div className="flex items-center gap-2 px-2.5 py-1.5 min-w-[160px]">
-                        <div className="w-2.5 h-2.5 border-2 border-sky-500 border-t-transparent rounded-full animate-spin shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[9px] font-bold text-sky-500 truncate">{cloudSeparationMessage}</p>
-                          <div className="w-full bg-sky-500/20 rounded-full h-0.5 mt-0.5">
-                            <div className="bg-sky-500 h-0.5 rounded-full transition-all" style={{ width: `${cloudSeparationProgress}%` }} />
+
+                      <div className="w-px h-4 bg-border/40" />
+
+                      {activeTrack.instrumentalFile ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleIaInstrumental(!isIaInstrumentalActive)}
+                          title="Alterna para o instrumental sem voz por IA."
+                          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                            isIaInstrumentalActive
+                              ? 'bg-violet-500/20 text-violet-500 dark:text-violet-400'
+                              : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+                          }`}
+                        >
+                          <Sparkles size={11} className={isIaInstrumentalActive ? 'animate-pulse' : ''} />
+                          <span>{isIaInstrumentalActive ? 'Sem voz ✓' : 'Sem voz'}</span>
+                        </button>
+                      ) : isProcessingCloudSeparation ? (
+                        <div className="flex items-center gap-2 px-2.5 py-1.5 min-w-[160px]">
+                          <div className="w-2.5 h-2.5 border-2 border-sky-500 border-t-transparent rounded-full animate-spin shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[9px] font-bold text-sky-500 truncate">{cloudSeparationMessage}</p>
+                            <div className="w-full bg-sky-500/20 rounded-full h-0.5 mt-0.5">
+                              <div className="bg-sky-500 h-0.5 rounded-full transition-all" style={{ width: `${cloudSeparationProgress}%` }} />
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={handleStartCloudVocalSeparation}
-                        title="Remover a voz usando IA na nuvem (Demucs)."
-                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider text-sky-500 dark:text-sky-400 hover:bg-sky-500/10 transition-all cursor-pointer"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
-                        <span>Remover voz</span>
-                      </button>
-                    )}
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleStartCloudVocalSeparation}
+                          title="Remover a voz usando IA na nuvem (Demucs)."
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider text-sky-500 dark:text-sky-400 hover:bg-sky-500/10 transition-all cursor-pointer"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
+                          <span>Remover voz</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
             {isEditingLyrics ? (
               renderTranscriptionPanel()
             ) : (
               /* Painel Central das Letras */
               <div className="flex-1 flex flex-col min-h-0 relative mt-3 pb-2">
-              <div className="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-card/30 to-transparent pointer-events-none z-10" />
+                {/* Floating Feedback Balloons Global Overlay */}
+                {transcriptionViewMode === 'pronunciation' && (
+                  <div className="absolute inset-0 pointer-events-none z-40 overflow-hidden">
+                    {feedbackBalloons.map(balloon => (
+                      <div
+                        key={balloon.id}
+                        className={`absolute px-5 py-2.5 rounded-full text-xs sm:text-sm font-black text-white shadow-xl animate-float-balloon bg-gradient-to-r ${balloon.colorClass} select-none whitespace-nowrap`}
+                        style={{
+                          left: `calc(50% + ${balloon.xOffset}px)`,
+                          bottom: '45%', // visual center of the card
+                          transform: 'translateX(-50%)'
+                        }}
+                      >
+                        {balloon.text}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-card/30 to-transparent pointer-events-none z-10" />
 
               <div ref={scrollContainerRef} className="flex-1 overflow-y-auto no-scrollbar px-6 space-y-5 pt-8 pb-36 select-none relative">
-                {activeTrack.transcriptionLines?.map((line, idx) => {
-                  const isActive = activeLineIdx === idx;
-                  
-                  let cardStyles = 'border-transparent text-muted-foreground/60 hover:text-foreground hover:scale-[1.01] font-semibold';
-                  if (isActive) {
-                    if (isCinematic) {
-                      cardStyles = 'bg-primary/[0.03] text-primary text-2xl sm:text-3xl font-black py-6 scale-105 drop-shadow-[0_0_12px_rgba(139,92,246,0.35)] border-primary/25 border';
+                {displayedLines
+                  .map((line: any, idx: number) => ({ ...line, originalIdx: idx }))
+                  .filter((line: any) => {
+                    if (transcriptionViewMode === 'pronunciation') {
+                      return line.originalIdx >= activeLineIdx && line.originalIdx <= activeLineIdx + 3;
+                    }
+                    return true;
+                  })
+                  .map((line: any) => {
+                    const idx = line.originalIdx;
+                    const isActive = activeLineIdx === idx;
+                    
+                    let cardStyles = 'border-transparent text-muted-foreground/60 hover:text-foreground hover:scale-[1.01] font-semibold';
+                    if (isActive) {
+                      if (isCinematic) {
+                        cardStyles = 'bg-primary/[0.03] text-primary text-2xl sm:text-3xl font-black py-6 scale-105 drop-shadow-[0_0_12px_rgba(139,92,246,0.35)] border-primary/25 border';
+                      } else if (transcriptionViewMode === 'pronunciation') {
+                        cardStyles = 'bg-primary/10 text-primary scale-[1.03] font-black border-primary/35 shadow-md shadow-primary/15 ring-1 ring-primary/20';
+                      } else {
+                        cardStyles = 'bg-primary/5 text-primary scale-105 font-extrabold shadow-sm border-primary/20 shadow-primary/5';
+                      }
                     } else {
-                      cardStyles = 'bg-primary/5 text-primary scale-105 font-extrabold shadow-sm border-primary/20 shadow-primary/5';
+                      if (isCinematic) {
+                        cardStyles = 'opacity-20 scale-95 blur-[0.7px] border-transparent text-muted-foreground/40';
+                      } else if (transcriptionViewMode === 'pronunciation') {
+                        cardStyles = 'border-transparent text-muted-foreground/35 scale-[0.98] blur-[0.3px] hover:text-foreground hover:opacity-100 hover:scale-100 transition-all';
+                      } else if (line.difficulty === 'hard') {
+                        cardStyles = 'bg-rose-500/[0.03] border-rose-500/15 text-muted-foreground/75 hover:text-foreground font-semibold hover:border-rose-500/25';
+                      } else if (line.difficulty === 'easy') {
+                        cardStyles = 'bg-emerald-500/[0.02] border-emerald-500/15 text-muted-foreground/75 hover:text-foreground font-semibold hover:border-emerald-500/25';
+                      }
                     }
-                  } else {
-                    if (isCinematic) {
-                      cardStyles = 'opacity-20 scale-95 blur-[0.7px] border-transparent text-muted-foreground/40';
-                    } else if (line.difficulty === 'hard') {
-                      cardStyles = 'bg-rose-500/[0.03] border-rose-500/15 text-muted-foreground/75 hover:text-foreground font-semibold hover:border-rose-500/25';
-                    } else if (line.difficulty === 'easy') {
-                      cardStyles = 'bg-emerald-500/[0.02] border-emerald-500/15 text-muted-foreground/75 hover:text-foreground font-semibold hover:border-emerald-500/25';
-                    }
-                  }
 
-                  return (
+                    return (
                     <div
                       key={line.id || idx}
                       ref={isActive ? activeLineRef : null}
                       onClick={() => handleScrub(line.startTime)}
-                      className={`group relative text-center py-3 px-12 rounded-2xl transition-all duration-300 cursor-pointer border ${cardStyles}`}
+                      className={`group relative text-center py-4 px-12 rounded-2xl transition-all duration-300 cursor-pointer border ${cardStyles}`}
                     >
+
+
                       {transcriptionViewMode === 'pronunciation' && lineScores[idx] !== undefined && (
-                        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 rounded-md text-[9px] font-black">
+                        <div className="absolute right-4 top-4 flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 rounded-md text-[9px] font-black">
                           <span>⭐ {lineScores[idx]}%</span>
                         </div>
                       )}
@@ -2147,9 +2829,11 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
                       <p className={`transition-all ${isActive && !isCinematic ? 'text-sm sm:text-base' : ''}`}>
                         {isActive ? (
                           (() => {
-                            const nextLine = activeTrack.transcriptionLines?.[idx + 1];
-                            const endOfLine = nextLine ? nextLine.startTime : duration;
-                            return renderHighlightedText(line.text, line.startTime, endOfLine);
+                            const nextLine = displayedLines[idx + 1];
+                            const endOfHighlight = (line.endTime !== undefined && line.endTime > line.startTime)
+                              ? line.endTime
+                              : (nextLine ? nextLine.startTime : duration);
+                            return renderHighlightedText(line.text, line.startTime, endOfHighlight);
                           })()
                         ) : (
                           line.text
@@ -2160,6 +2844,8 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
                           {line.translation}
                         </p>
                       )}
+
+
                     </div>
                   );
                 })}
@@ -2169,12 +2855,12 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
 
               {/* Pronunciation Feedback Panel */}
               {transcriptionViewMode === 'pronunciation' && (
-                <div className="mx-6 mb-3 p-4 bg-card border border-border/80 rounded-2xl shadow-xl space-y-3 animate-fadeIn relative overflow-hidden shrink-0">
+                <div className="mx-6 mb-3 p-4 bg-card border border-border/80 rounded-2xl shadow-xl space-y-3 animate-fadeIn relative overflow-hidden shrink-0 select-none">
                   <div className="absolute inset-0 bg-primary/[0.02] pointer-events-none" />
                   
                   <div className="flex items-center justify-between gap-3 relative z-10 border-b border-border/30 pb-2">
                     <div className="flex items-center gap-2">
-                      <span className="flex h-2 w-2 rounded-full bg-primary animate-ping" />
+                      <span className="flex h-2.5 w-2.5 rounded-full bg-primary animate-ping" />
                       <span className="text-[10px] font-black text-foreground uppercase tracking-widest">
                         Reconhecimento de Voz
                       </span>
@@ -2182,40 +2868,50 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
 
                     <button
                       onClick={startSpeechRecognition}
-                      className={`h-8 px-3.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer shadow-md transition-all active:scale-95 ${
+                      className={`h-8 px-3.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer shadow-md transition-all active:scale-95 border ${
                         isListeningSpeech
-                          ? 'bg-rose-500 text-white shadow-rose-500/20 hover:bg-rose-600'
+                          ? 'bg-rose-500/10 border-rose-500/25 text-rose-500 hover:bg-rose-500/20 shadow-sm shadow-rose-500/5'
                           : 'bg-primary text-primary-foreground shadow-primary/20 hover:bg-primary/90'
                       }`}
+                      title={isListeningSpeech ? 'Desativar Microfone' : 'Ativar Microfone'}
                     >
                       <Mic size={12} className={isListeningSpeech ? 'animate-pulse' : ''} />
-                      {isListeningSpeech ? 'Parar Microfone' : 'Ativar Microfone'}
+                      <span>{isListeningSpeech ? 'Parar Microfone' : 'Ativar Microfone'}</span>
                     </button>
                   </div>
 
-                  {activeLineIdx >= 0 && activeTrack.transcriptionLines?.[activeLineIdx] ? (
-                    <div className="space-y-2 relative z-10 select-none">
-                      <div className="flex flex-wrap items-center justify-center gap-1 px-4 py-2 border border-border/40 rounded-xl bg-muted/20 min-h-[46px]">
+                  {activeLineIdx >= 0 && displayedLines[activeLineIdx] ? (
+                    <div className="space-y-3 relative z-10">
+                      {/* Reactive Waveform Visualizer */}
+                      {isListeningSpeech && (
+                        <div className="relative w-full h-14 rounded-xl bg-muted/10 border border-border/25 overflow-hidden flex items-center justify-center animate-fadeIn shadow-inner">
+                          <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 via-violet-500/10 to-pink-500/5 blur-xl opacity-70 pointer-events-none" />
+                          <canvas ref={micCanvasRef} className="w-full h-full block relative z-10" />
+                        </div>
+                      )}
+
+                      {/* Word feedback list */}
+                      <div className="flex flex-wrap items-center justify-center gap-1.5 px-4 py-2 border border-border/30 rounded-xl bg-muted/20 min-h-[42px]">
                         {speechWordDiffs.length > 0 ? (
                           speechWordDiffs.map((word, wIdx) => {
                             let colorClass = 'text-muted-foreground/60 border-transparent';
                             let bgClass = 'bg-transparent';
                             
                             if (word.type === 'correct') {
-                              colorClass = 'text-emerald-600 dark:text-emerald-400 font-bold';
-                              bgClass = 'bg-emerald-500/10 border-emerald-500/20';
+                              colorClass = 'text-emerald-500 dark:text-emerald-400 font-bold';
+                              bgClass = 'bg-emerald-500/15 border-emerald-500/30 dark:border-emerald-500/20 backdrop-blur-md shadow-[0_0_12px_rgba(16,185,129,0.12)]';
                             } else if (word.type === 'incorrect') {
-                              colorClass = 'text-rose-600 dark:text-rose-400 font-bold';
-                              bgClass = 'bg-rose-500/10 border-rose-500/20';
+                              colorClass = 'text-rose-500 dark:text-rose-400 font-bold';
+                              bgClass = 'bg-rose-500/15 border-rose-500/30 dark:border-rose-500/20 backdrop-blur-md shadow-[0_0_12px_rgba(244,63,94,0.12)]';
                             } else if (word.type === 'missing') {
-                              colorClass = 'text-rose-600/80 dark:text-rose-400/80 font-semibold';
-                              bgClass = 'bg-rose-500/5 border-rose-500/10';
+                              colorClass = 'text-rose-500/70 dark:text-rose-400/70 font-semibold';
+                              bgClass = 'bg-rose-500/5 border-rose-500/10 backdrop-blur-sm';
                             }
                             
                             return (
                               <span
                                 key={wIdx}
-                                className={`px-2.5 py-1 rounded-lg border text-xs leading-none transition-all ${colorClass} ${bgClass}`}
+                                className={`px-2.5 py-1 rounded-lg border text-xs leading-none transition-all animate-badge-pop-in ${colorClass} ${bgClass}`}
                               >
                                 {word.word}
                               </span>
@@ -2223,7 +2919,7 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
                           })
                         ) : (
                           <span className="text-[10px] font-extrabold text-muted-foreground/50 italic">
-                            {isListeningSpeech ? 'Cante ou fale a frase ativa agora...' : 'Ative o microfone e comece a cantar!'}
+                            {isListeningSpeech ? 'Cante ou fale a frase ativa agora...' : 'Microfone desativado.'}
                           </span>
                         )}
                       </div>
@@ -2236,15 +2932,15 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
 
                       <div className="flex items-center justify-between gap-4 pt-1">
                         <div className="flex items-center gap-1.5">
-                          {speechSimilarity !== null && (
-                            <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${
-                              speechSimilarity >= 80
-                                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                                : speechSimilarity >= 50
-                                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
-                                : 'bg-rose-500/10 text-rose-500 border border-rose-500/20'
+                          {displayedSimilarity !== null && (
+                            <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-lg text-white shadow-md transition-all duration-300 ${
+                              displayedSimilarity >= 80
+                                ? 'bg-gradient-to-r from-emerald-500 to-teal-600 shadow-emerald-500/25 border border-emerald-500/20'
+                                : displayedSimilarity >= 50
+                                ? 'bg-gradient-to-r from-amber-500 to-orange-600 shadow-amber-500/25 border border-amber-500/20'
+                                : 'bg-gradient-to-r from-rose-500 to-pink-600 shadow-rose-500/25 border border-rose-500/20'
                             }`}>
-                              Precisão: {speechSimilarity}%
+                              Precisão: {displayedSimilarity}%
                             </span>
                           )}
                         </div>
@@ -2265,6 +2961,7 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
                   )}
                 </div>
               )}
+
             </div>
             )}
           </ShadcnCard>
@@ -2395,18 +3092,18 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
                 })()}
 
                 <div className="flex-1 min-w-0">
-                  {activeLineIdx >= 0 && activeTrack?.transcriptionLines?.[activeLineIdx] ? (
+                  {activeLineIdx >= 0 && displayedLines[activeLineIdx] ? (
                     <p className="text-xs sm:text-sm font-extrabold text-primary truncate animate-fadeIn">
-                      {activeTrack.transcriptionLines[activeLineIdx].text}
+                      {displayedLines[activeLineIdx].text}
                     </p>
                   ) : (
                     <p className="text-xs font-bold text-foreground truncate">
                       {activeTrack.title}
                     </p>
                   )}
-                  {activeLineIdx >= 0 && activeTrack?.transcriptionLines?.[activeLineIdx]?.translation && showTranslation && (
+                  {activeLineIdx >= 0 && displayedLines[activeLineIdx]?.translation && showTranslation && (
                     <p className="text-[10px] text-muted-foreground truncate font-medium mt-0.5 animate-fadeIn">
-                      {activeTrack.transcriptionLines[activeLineIdx].translation}
+                      {displayedLines[activeLineIdx].translation}
                     </p>
                   )}
                 </div>
@@ -2616,12 +3313,102 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
               A inteligência artificial do Google está analisando o áudio para segmentar, transcrever e traduzir cada frase automaticamente.
             </p>
           </div>
-          <div className="w-full bg-muted/40 rounded-xl p-3.5 border border-border/30">
-            <div className="flex items-center justify-center gap-2 text-xs font-black text-primary">
+          <div className="w-full bg-muted/40 rounded-xl p-4 border border-border/30 space-y-3">
+            <div className="flex items-center justify-between text-[10px] font-black text-muted-foreground uppercase">
+              <span>Progresso</span>
+              <span className="text-primary">{transcribingPercent}%</span>
+            </div>
+            <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-gradient-to-r from-violet-600 to-indigo-600 rounded-full transition-all duration-300"
+                style={{ width: `${transcribingPercent}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-center gap-2 text-xs font-black text-primary pt-1">
               <RefreshCw size={12} className="animate-spin" />
               <span>{transcribingProgress || "Iniciando processo..."}</span>
             </div>
           </div>
+          <Button
+            onClick={() => {
+              isTranscribeCancelledRef.current = true;
+            }}
+            variant="outline"
+            className="w-full border-border/60 hover:bg-muted text-foreground font-extrabold text-xs h-9 rounded-xl flex items-center justify-center cursor-pointer transition-all active:scale-[0.98]"
+          >
+            Cancelar Transcrição
+          </Button>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Seleção de Pasta para Visibilidade nas Leituras */}
+      <Dialog open={isFolderModalOpen} onOpenChange={setIsFolderModalOpen}>
+        <DialogContent className="sm:max-w-[440px] bg-card border border-border text-foreground p-6 rounded-2xl shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-base font-black tracking-tight text-foreground flex items-center gap-2">
+              <div className="p-1.5 bg-primary/10 text-primary rounded-lg">
+                <FileText size={16} />
+              </div>
+              Organizar em Pasta de Leitura
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground font-semibold">
+              Escolha uma pasta (coleção) existente para adicionar este texto ou crie uma nova.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 pt-3">
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                Selecionar Pasta
+              </label>
+              <select
+                value={selectedFolderId}
+                onChange={(e) => setSelectedFolderId(e.target.value)}
+                className="w-full bg-muted border border-border text-foreground px-3 py-2.5 rounded-xl text-xs outline-none focus:border-primary/50 font-semibold transition-colors"
+              >
+                <option value="loose">Texto Avulso (Sem pasta)</option>
+                <option value="new">+ Criar Nova Pasta...</option>
+                {availableFolders.map((folder) => (
+                  <option key={folder.id} value={folder.id}>
+                    📁 {folder.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedFolderId === 'new' && (
+              <div className="space-y-1.5 animate-fadeIn">
+                <label className="text-[10px] font-bold text-primary uppercase tracking-wider">
+                  Nome da Nova Pasta
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: Músicas do Roxette..."
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  className="w-full bg-muted border border-border text-foreground px-4 py-2.5 rounded-xl text-xs outline-none focus:border-primary/50 font-semibold transition-colors"
+                />
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="pt-5 gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setIsFolderModalOpen(false)}
+              className="hover:bg-muted text-foreground font-bold rounded-xl text-xs h-10 cursor-pointer"
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={handleConfirmFolderSelection}
+              className="bg-primary hover:bg-primary/90 text-primary-foreground font-extrabold rounded-xl text-xs h-10 px-5 cursor-pointer shadow-lg shadow-primary/15"
+            >
+              Confirmar e Salvar 📖
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

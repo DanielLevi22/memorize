@@ -73,7 +73,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   isZenMode,
   setIsZenMode,
 }) => {
-  const readings = useLiveQuery(() => db.readings.orderBy('createdAt').reverse().toArray());
+  const readings = useLiveQuery(() => db.texts.orderBy('createdAt').reverse().filter(t => t.showInReadings !== false).toArray());
   const collections = useLiveQuery(() => db.readingCollections?.orderBy('createdAt').reverse().toArray()) || [];
   const decks = useLiveQuery(() => db.decks.orderBy('name').toArray()) || [];
   
@@ -491,7 +491,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
 
         // Save page bookmark position (always save index if valid)
         if (lastActiveLineIdxRef.current >= 0) {
-          db.readings.update(selectedTextId, { lastLineIndex: lastActiveLineIdxRef.current })
+          db.texts.update(selectedTextId, { lastLineIndex: lastActiveLineIdxRef.current })
             .catch(err => console.error('Erro ao salvar marcador de página:', err));
         }
       }
@@ -512,7 +512,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
           ...l,
           id: l.id || crypto.randomUUID()
         }));
-        db.readings.update(selectedTextId, { lines: updatedLines })
+        db.texts.update(selectedTextId, { lines: updatedLines })
           .catch(err => console.error('Erro ao migrar IDs de linha:', err));
       }
     }
@@ -545,7 +545,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   useEffect(() => {
     const migrateStandaloneTexts = async () => {
       try {
-        const standalone = await db.readings.filter(r => !r.collectionId).toArray();
+        const standalone = await db.texts.filter(r => r.showInReadings !== false && !r.collectionId).toArray();
         if (standalone.length === 0) return;
 
         let targetCollectionId = '';
@@ -573,7 +573,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
 
         // Update all standalone texts
         for (const reading of standalone) {
-          await db.readings.update(reading.id, { collectionId: targetCollectionId });
+          await db.texts.update(reading.id, { collectionId: targetCollectionId });
         }
         console.log(`Migrados ${standalone.length} textos para a coleção ${targetCollectionId}`);
       } catch (error) {
@@ -1150,7 +1150,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   };
 
   const handleSaveReading = async (reading: ReadingText) => {
-    await db.readings.put(reading);
+    await db.texts.put(reading);
   };
 
   const handleDeleteReading = (id: string) => {
@@ -1159,7 +1159,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
 
   const confirmDeleteReading = async () => {
     if (textToDelete) {
-      await db.readings.delete(textToDelete);
+      await db.texts.delete(textToDelete);
       if (selectedTextId === textToDelete) setSelectedTextId(null);
       setTextToDelete(null);
       toast.success("Texto excluído com sucesso!");
@@ -1176,7 +1176,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   const handleSaveEditReading = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingReading || !editReadingTitle.trim()) return;
-    await db.readings.update(editingReading.id, {
+    await db.texts.update(editingReading.id, {
       title: editReadingTitle.trim(),
       description: editReadingDescription.trim() || undefined,
       updatedAt: Date.now()
@@ -1232,12 +1232,12 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
     if (cascade) {
       const associated = readings ? readings.filter(r => r.collectionId === id) : [];
       for (const r of associated) {
-        await db.readings.delete(r.id);
+        await db.texts.delete(r.id);
       }
     } else {
       const associated = readings ? readings.filter(r => r.collectionId === id) : [];
       for (const r of associated) {
-        await db.readings.update(r.id, { collectionId: undefined });
+        await db.texts.update(r.id, { collectionId: undefined });
       }
     }
     await db.readingCollections.delete(id);
@@ -1259,7 +1259,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
     const fullOriginal = updatedLines.map(s => s.original).join(' ');
     const fullTranslated = updatedLines.map(s => s.translated).join(' ');
 
-    await db.readings.update(selectedText.id, {
+    await db.texts.update(selectedText.id, {
       lines: updatedLines,
       fullTextOriginal: fullOriginal,
       fullTextTranslated: fullTranslated,
@@ -1323,7 +1323,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   const handleConfirmSuggestedTitle = async () => {
     if (!selectedTextId || !pdfSuggestedTitleInput.trim()) return;
     try {
-      await db.readings.update(selectedTextId, {
+      await db.texts.update(selectedTextId, {
         title: pdfSuggestedTitleInput.trim(),
         updatedAt: Date.now()
       });
@@ -1374,7 +1374,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
       const updatedRaw = currentRaw ? `${currentRaw}\n\n${appendBlockOriginalText.trim()}` : appendBlockOriginalText.trim();
       const pdfFileToSave = appendBlockPdfBlob || selectedText.pdfFile;
       
-      await db.readings.update(selectedText.id, {
+      await db.texts.update(selectedText.id, {
         lines: updatedLines,
         fullTextOriginal: fullOriginal,
         fullTextTranslated: fullTranslated,
@@ -1418,7 +1418,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
       original: editLineOriginal.trim(),
       translated: editLineTranslated.trim(),
     };
-    await db.readings.update(selectedText.id, { lines: updatedLines, updatedAt: Date.now() });
+    await db.texts.update(selectedText.id, { lines: updatedLines, updatedAt: Date.now() });
     setEditingLineIdx(null);
     setEditLineOriginal('');
     setEditLineTranslated('');
@@ -1427,7 +1427,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   const handleDeleteLine = async (idx: number) => {
     if (!selectedText) return;
     const updatedLines = selectedText.lines.filter((_, i) => i !== idx);
-    await db.readings.update(selectedText.id, { lines: updatedLines, updatedAt: Date.now() });
+    await db.texts.update(selectedText.id, { lines: updatedLines, updatedAt: Date.now() });
     if (editingLineIdx === idx) setEditingLineIdx(null);
   };
 
@@ -1449,7 +1449,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
     const [moved] = updatedLines.splice(dragSrcIdx.current, 1);
     updatedLines.splice(dropIdx, 0, moved);
     dragSrcIdx.current = null;
-    await db.readings.update(selectedText.id, { lines: updatedLines, updatedAt: Date.now() });
+    await db.texts.update(selectedText.id, { lines: updatedLines, updatedAt: Date.now() });
   };
 
   const handleDragEnd = () => {
@@ -1466,7 +1466,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
     updatedLines.splice(toIdx, 0, moved);
 
     setActiveLineIdx(toIdx);
-    await db.readings.update(selectedText.id, { lines: updatedLines, updatedAt: Date.now() });
+    await db.texts.update(selectedText.id, { lines: updatedLines, updatedAt: Date.now() });
 
     setTimeout(() => {
       const el = document.getElementById(`line-card-${toIdx}`);
@@ -1566,7 +1566,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
     // Update session mastered count balance (+1 if mastered, -1 if unmastered)
     sessionMasteredCount.current += newMasteredState ? 1 : -1;
 
-    await db.readings.update(selectedText.id, {
+    await db.texts.update(selectedText.id, {
       lines: updatedLines,
       updatedAt: Date.now(),
     });
@@ -2489,7 +2489,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                                       if (translatedText && selectedText?.id) {
                                         const updatedLines = [...selectedText.lines];
                                         updatedLines[index].translated = translatedText;
-                                        await db.readings.update(selectedText.id, { lines: updatedLines, updatedAt: Date.now() });
+                                        await db.texts.update(selectedText.id, { lines: updatedLines, updatedAt: Date.now() });
                                       }
                                     } catch (err) {
                                       console.error("Failed on-the-fly translation:", err);
@@ -2529,7 +2529,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                                       if (translatedText && selectedText?.id) {
                                         const updatedLines = [...selectedText.lines];
                                         updatedLines[index].translated = translatedText;
-                                        await db.readings.update(selectedText.id, { lines: updatedLines, updatedAt: Date.now() });
+                                        await db.texts.update(selectedText.id, { lines: updatedLines, updatedAt: Date.now() });
                                       }
                                     } catch (err) {
                                       console.error("Failed on-the-fly translation:", err);

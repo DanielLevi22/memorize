@@ -1,5 +1,5 @@
 import { db } from '../db/db';
-import type { Deck, Card, Note, Revision, DeckPreset, ReadingText, ReadingSession, ReadingCollection, ChatMessage } from '../types';
+import type { Deck, Card, Note, Revision, DeckPreset, TextResource, ReadingSession, ReadingCollection, ChatMessage } from '../types';
 
 // Helper to convert Blob to base64 data URL
 function blobToBase64(blob: Blob): Promise<string> {
@@ -25,7 +25,8 @@ export interface ExportPayload {
   notes: any[];
   revisions: Revision[];
   presets: DeckPreset[];
-  readings: any[];
+  texts?: any[]; // Nova tabela unificada
+  readings?: any[]; // Mantido para compatibilidade reversa
   readingSessions: ReadingSession[];
   readingCollections: ReadingCollection[];
   chatMessages: ChatMessage[];
@@ -41,7 +42,7 @@ export async function exportDatabase(): Promise<ExportPayload> {
   const rawNotes = await db.notes.toArray();
   const revisions = await db.revisions.toArray();
   const presets = await db.presets.toArray();
-  const rawReadings = await db.readings.toArray();
+  const rawTexts = await db.texts.toArray();
   const readingSessions = await db.readingSessions.toArray();
   const readingCollections = await db.readingCollections.toArray();
   const chatMessages = await db.chatMessages.toArray();
@@ -68,15 +69,15 @@ export async function exportDatabase(): Promise<ExportPayload> {
     notes.push({ ...rest, audioBase64 });
   }
 
-  // Serializa leituras (PDFs em base64)
-  const readings = [];
-  for (const reading of rawReadings) {
+  // Serializa textos (PDFs em base64)
+  const texts = [];
+  for (const text of rawTexts) {
     let pdfFileBase64 = undefined;
-    if (reading.pdfFile) {
-      pdfFileBase64 = await blobToBase64(reading.pdfFile);
+    if (text.pdfFile) {
+      pdfFileBase64 = await blobToBase64(text.pdfFile);
     }
-    const { pdfFile, ...rest } = reading;
-    readings.push({ ...rest, pdfFileBase64 });
+    const { pdfFile, ...rest } = text;
+    texts.push({ ...rest, pdfFileBase64 });
   }
 
   return {
@@ -87,7 +88,7 @@ export async function exportDatabase(): Promise<ExportPayload> {
     notes,
     revisions,
     presets,
-    readings,
+    texts,
     readingSessions,
     readingCollections,
     chatMessages,
@@ -184,14 +185,22 @@ export async function performMergeSync(remotePayload: ExportPayload): Promise<vo
     return { ...rest, audio } as Card;
   });
 
-  // 6. Sincronizar Textos de Leitura (convertendo PDFs de base64 de volta para Blob)
-  await mergeTable<ReadingText>(db.readings, remotePayload.readings, async (reading) => {
+  // 6. Sincronizar Recursos de Texto (convertendo PDFs de base64 de volta para Blob)
+  const syncTexts = remotePayload.texts || remotePayload.readings || [];
+  await mergeTable<TextResource>(db.texts, syncTexts, async (text) => {
     let pdfFile: Blob | undefined = undefined;
-    if (reading.pdfFileBase64) {
-      pdfFile = await base64ToBlob(reading.pdfFileBase64);
+    if (text.pdfFileBase64) {
+      pdfFile = await base64ToBlob(text.pdfFileBase64);
     }
-    const { pdfFileBase64, ...rest } = reading;
-    return { ...rest, pdfFile } as ReadingText;
+    const { pdfFileBase64, ...rest } = text;
+    // Garante que o tipo esteja presente caso venha de um backup antigo
+    if (!rest.type) {
+      rest.type = 'reading';
+    }
+    if (rest.showInReadings === undefined) {
+      rest.showInReadings = true;
+    }
+    return { ...rest, pdfFile } as TextResource;
   });
 
   // 7. Sincronizar Histórico/Log (Revisões, Sessões de Leitura, Mensagens de Chat)

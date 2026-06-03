@@ -685,7 +685,7 @@ export const PlaylistPage: React.FC<PlaylistPageProps> = ({ onPlayTrackInKaraoke
                                         {track.description}
                                       </span>
                                     )}
-                                    {track.transcriptionLines && track.transcriptionLines.length > 0 && (
+                                    {track.textId && (
                                       <span className="text-[8px] font-black text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1 rounded flex items-center gap-0.5 shrink-0" title="Possui transcrição">
                                         <FileText size={7} />
                                         T
@@ -717,7 +717,7 @@ export const PlaylistPage: React.FC<PlaylistPageProps> = ({ onPlayTrackInKaraoke
                                 </span>
                                 
                                 {/* Cantar no Estúdio (Se tiver transcrição) */}
-                                {track.transcriptionLines && track.transcriptionLines.length > 0 && (
+                                {track.textId && (
                                   <button
                                     type="button"
                                     onClick={(e) => { e.stopPropagation(); onPlayTrackInKaraoke?.(track.id); }}

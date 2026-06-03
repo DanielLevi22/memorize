@@ -153,24 +153,58 @@ export const bufferToWav = (
  */
 export const adjustTimestampsSafeguard = (
   lines: TranscriptionLine[],
-  minSpacing = 0.5
+  minSpacing = 0.5,
+  trackDuration?: number
 ): TranscriptionLine[] => {
   if (lines.length === 0) return [];
   
-  // Cria uma cópia profunda/superficial das linhas e as ordena pelo tempo inicial
+  // Ordena pelo tempo de início inicial
   const sorted = [...lines].sort((a, b) => a.startTime - b.startTime);
   
+  // 1. Ajusta os tempos de início garantindo o distanciamento mínimo
   for (let i = 1; i < sorted.length; i++) {
     const prevTime = sorted[i - 1].startTime;
     const currTime = sorted[i].startTime;
     
-    // Se a diferença de tempo for menor que o distanciamento mínimo, ajustamos
     if (currTime < prevTime + minSpacing) {
       sorted[i] = {
         ...sorted[i],
         startTime: parseFloat((prevTime + minSpacing).toFixed(2))
       };
     }
+  }
+
+  // 2. Ajusta os tempos de término para evitar sobreposição de telas e durações negativas
+  for (let i = 0; i < sorted.length; i++) {
+    const line = sorted[i];
+    const nextLine = sorted[i + 1];
+    
+    let end = line.endTime;
+    
+    // Se o tempo de término for indefinido ou inconsistente com a início, atribuímos uma duração padrão de 3.0s
+    if (end === undefined || end <= line.startTime) {
+      end = line.startTime + 3.0;
+    }
+    
+    // Se ultrapassar o início da próxima linha, limita-se a ela
+    if (nextLine && end > nextLine.startTime) {
+      end = nextLine.startTime;
+    }
+    
+    // Se ultrapassar a duração total da faixa, limita-se a ela
+    if (trackDuration !== undefined && end > trackDuration) {
+      end = trackDuration;
+    }
+    
+    // Garante que haja pelo menos uma duração minúscula positiva
+    if (end <= line.startTime) {
+      end = line.startTime + 0.1;
+    }
+    
+    sorted[i] = {
+      ...line,
+      endTime: parseFloat(end.toFixed(2))
+    };
   }
   
   return sorted;

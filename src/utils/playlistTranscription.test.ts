@@ -157,5 +157,24 @@ describe('audioChunker Unit Tests', () => {
       expect(adjusted[3].text).toBe('D');
       expect(adjusted[3].startTime).toBe(6.3);
     });
+
+    it('deve ajustar endTimes para evitar sobreposição e respeitar a duração total', () => {
+      const lines: TranscriptionLine[] = [
+        { id: '1', text: 'A', startTime: 1.0, endTime: 5.0 }, // Overlaps with B
+        { id: '2', text: 'B', startTime: 3.0, endTime: undefined }, // Missing endTime
+        { id: '3', text: 'C', startTime: 8.0, endTime: 12.0 } // Exceeds duration
+      ];
+
+      const adjusted = adjustTimestampsSafeguard(lines, 0.5, 10.0);
+
+      // Line A (startTime: 1.0): endTime was 5.0, but should be capped at B's startTime (3.0)
+      expect(adjusted[0].endTime).toBe(3.0);
+
+      // Line B (startTime: 3.0): endTime was undefined, should default to 3.0 + 3.0 = 6.0, capped by C's startTime (8.0), so 6.0 is fine
+      expect(adjusted[1].endTime).toBe(6.0);
+
+      // Line C (startTime: 8.0): endTime was 12.0, but should be capped at trackDuration (10.0)
+      expect(adjusted[2].endTime).toBe(10.0);
+    });
   });
 });

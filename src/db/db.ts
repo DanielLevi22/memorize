@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { Deck, Card, Note, Revision, DeckPreset, ReadingText, ReadingSession, ReadingCollection, ChatMessage, AudioTrack, Playlist, CefrExam, CefrExamAttempt } from '../types';
+import type { Deck, Card, Note, Revision, DeckPreset, TextResource, ReadingSession, ReadingCollection, ChatMessage, AudioTrack, Playlist, CefrExam, CefrExamAttempt } from '../types';
 
 class MemorizeDatabase extends Dexie {
   decks!: Table<Deck>;
@@ -7,7 +7,7 @@ class MemorizeDatabase extends Dexie {
   notes!: Table<Note>;
   revisions!: Table<Revision>;
   presets!: Table<DeckPreset>;
-  readings!: Table<ReadingText>;
+  texts!: Table<TextResource>;
   readingSessions!: Table<ReadingSession>;
   readingCollections!: Table<ReadingCollection>;
   chatMessages!: Table<ChatMessage>;
@@ -198,6 +198,103 @@ class MemorizeDatabase extends Dexie {
       cefrExams: 'id, level',
       cefrExamAttempts: 'id, examId, level, timestamp'
     });
+
+    this.version(12).stores({
+      decks: 'id, name, createdAt, updatedAt, presetId',
+      cards: 'id, deckId, dueDate, [deckId+dueDate], noteId, createdAt, updatedAt',
+      revisions: 'id, cardId, timestamp',
+      presets: 'id, name',
+      texts: 'id, title, type, showInReadings, cefrLevel, createdAt, collectionId',
+      readingSessions: 'id, readingId, timestamp',
+      readingCollections: 'id, title, createdAt',
+      notes: 'id, deckId, createdAt',
+      chatMessages: 'id, partnerId, timestamp',
+      audioTracks: 'id, playlistId, title, textId, createdAt',
+      playlists: 'id, name, createdAt',
+      cefrExams: 'id, level',
+      cefrExamAttempts: 'id, examId, level, timestamp',
+      readings: null
+    }).upgrade(async tx => {
+      // 1. Migrar a antiga tabela 'readings' para a nova tabela 'texts'
+      let oldReadings: any[] = [];
+      try {
+        oldReadings = await tx.table('readings').toArray();
+      } catch (e) {
+        console.warn("Tabela 'readings' não encontrada ou sem registros para migrar:", e);
+      }
+
+      const textsToInsert: any[] = [];
+
+      for (const r of oldReadings) {
+        textsToInsert.push({
+          id: r.id,
+          title: r.title,
+          description: r.description,
+          type: 'reading',
+          showInReadings: true,
+          fullTextOriginal: r.fullTextOriginal || '',
+          fullTextTranslated: r.fullTextTranslated || '',
+          rawPdfText: r.rawPdfText,
+          pdfFile: r.pdfFile,
+          lines: r.lines ? r.lines.map((line: any) => ({
+            id: line.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15)),
+            original: line.original,
+            translated: line.translated,
+            highlights: line.highlights || [],
+            mastered: line.mastered || false
+          })) : [],
+          lastLineIndex: r.lastLineIndex,
+          collectionId: r.collectionId,
+          cefrLevel: r.cefrLevel,
+          createdAt: r.createdAt || Date.now(),
+          updatedAt: r.updatedAt || Date.now()
+        });
+      }
+
+      // 2. Migrar as transcriptionLines de 'audioTracks' para a tabela 'texts'
+      const tracks = await tx.table('audioTracks').toArray();
+      const tracksToUpdate: any[] = [];
+
+      for (const track of tracks) {
+        if (track.transcriptionLines && track.transcriptionLines.length > 0) {
+          const textId = track.textId || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15));
+          
+          const textLines = track.transcriptionLines.map((line: any) => ({
+            id: line.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15)),
+            original: line.text,
+            translated: line.translation || '',
+            highlights: [],
+            mastered: false,
+            startTime: line.startTime,
+            endTime: line.endTime
+          }));
+
+          textsToInsert.push({
+            id: textId,
+            title: track.title,
+            description: `Letra/Transcrição de: ${track.title}`,
+            type: 'transcription',
+            showInReadings: false, // Inativo na aba leitura por padrão
+            fullTextOriginal: track.transcriptionLines.map((l: any) => l.text).join('\n'),
+            fullTextTranslated: track.transcriptionLines.map((l: any) => l.translation || '').join('\n'),
+            lines: textLines,
+            createdAt: track.createdAt || Date.now(),
+            updatedAt: track.updatedAt || Date.now()
+          });
+
+          track.textId = textId;
+          delete track.transcriptionLines; // Remover do objeto para economizar espaço
+          tracksToUpdate.push(track);
+        }
+      }
+
+      if (textsToInsert.length > 0) {
+        await tx.table('texts').bulkAdd(textsToInsert);
+      }
+      for (const track of tracksToUpdate) {
+        await tx.table('audioTracks').put(track);
+      }
+    });
   }
 }
 
@@ -215,9 +312,13 @@ export async function seedCefrExams() {
 export async function seedCefrReadings() {
   // Sequeia leituras padrão CEFR sem limpar leituras customizadas do usuário
   for (const reading of cefrReadingsSeedData) {
-    const existing = await db.readings.get(reading.id);
+    const existing = await db.texts.get(reading.id);
     if (!existing) {
-      await db.readings.put(reading);
+      await db.texts.put({
+        ...reading,
+        type: 'reading',
+        showInReadings: true
+      });
     }
   }
 }

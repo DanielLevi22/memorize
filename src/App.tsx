@@ -1852,7 +1852,7 @@ function App() {
         )}
 
         {/* Header (Dashboard View) */}
-        {currentView === 'dashboard' && !isReadingZenMode && (
+        {currentView === 'dashboard' && !isReadingZenMode && !isKaraokeFullscreen && (
           <header className="flex items-center justify-between p-4 border-b border-border bg-background/80 backdrop-blur-md sticky top-0 z-10 w-full">
             {/* O botão hambúrguer do menu controla a sidebar */}
             <Button 

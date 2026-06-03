@@ -49,7 +49,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({
   const [expandedAttemptId, setExpandedAttemptId] = useState<string | null>(null);
 
   const hasA1Deck = useLiveQuery(() => db.decks.get('essential-a1-vocabulary'));
-  const levelReadings = useLiveQuery(() => db.readings.where('cefrLevel').equals(selectedDetailLevel).toArray(), [selectedDetailLevel]);
+  const levelReadings = useLiveQuery(() => db.texts.where('cefrLevel').equals(selectedDetailLevel).filter(t => t.showInReadings !== false).toArray(), [selectedDetailLevel]);
 
   // Sync with localStorage changes
   useEffect(() => {

@@ -93,6 +93,8 @@ export const ReadingImportModal: React.FC<ReadingImportModalProps> = ({
       const reading: ReadingText = {
         id: newId,
         title: title.trim(),
+        type: 'reading',
+        showInReadings: true,
         fullTextOriginal: '',
         fullTextTranslated: '',
         lines: [],

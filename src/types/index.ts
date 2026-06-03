@@ -156,22 +156,26 @@ export interface DeckPreset {
   lapseMultiplier: number;
 }
 
-/** Um texto/lição de leitura importado */
-export interface ReadingText {
+/** Um texto/lição de leitura importado ou transcrição */
+export interface TextResource {
   id: string;                   // UUID
   title: string;                // Título do texto
   description?: string;         // Descrição opcional do texto
+  type: 'reading' | 'transcription'; // Tipo de recurso de texto
+  showInReadings: boolean;      // Determina visibilidade na aba de Leitura
   fullTextOriginal: string;     // Texto completo no idioma original
   fullTextTranslated: string;   // Texto completo traduzido
   rawPdfText?: string;          // Texto bruto original do PDF (inclui notas, explicações e formatação original)
   pdfFile?: Blob;               // O arquivo PDF bruto salvo no IndexedDB
-  lines: ReadingLine[];         // Frases separadas (array inline)
+  lines: TextLine[];            // Frases separadas (array inline)
   lastLineIndex?: number;       // Última linha lida/ativa (para auto-bookmark)
   collectionId?: string;        // ID da coleção/pasta à qual o texto pertence
   cefrLevel?: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2'; // Nível CEFR associado ao texto
   createdAt: number;            // timestamp MS
   updatedAt: number;            // timestamp MS
 }
+
+export type ReadingText = TextResource;
 
 /** Coleção / Pasta de leituras agrupadas */
 export interface ReadingCollection {
@@ -182,14 +186,18 @@ export interface ReadingCollection {
   updatedAt: number;            // timestamp MS
 }
 
-/** Uma linha/frase individual dentro de um ReadingText */
-export interface ReadingLine {
+/** Uma linha/frase individual dentro de um TextResource */
+export interface TextLine {
   id?: string;                  // Opcional ID único para animações e chaves React
   original: string;             // Frase no idioma original
   translated: string;           // Tradução da frase
   highlights: string[];         // Palavras-chave para destacar (no texto original)
   mastered: boolean;            // Se o usuário marcou como dominada ✅
+  startTime?: number;           // Tempo de início em segundos (opcional para áudio)
+  endTime?: number;             // Tempo de término em segundos (opcional para áudio)
 }
+
+export type ReadingLine = TextLine;
 
 /** Uma sessão de leitura de texto para telemetria e estatísticas */
 export interface ReadingSession {
@@ -242,6 +250,12 @@ export interface TranscriptionLine {
   difficulty?: 'none' | 'easy' | 'hard'; // Nível de dificuldade para foco visual
 }
 
+export interface AiTranscriptionProgress {
+  lastProcessedChunkIndex: number;
+  splitPoints: number[];
+  lines: TranscriptionLine[];
+}
+
 export interface AudioTrack {
   id: string; // UUID
   playlistId: string; // ID da playlist correspondente
@@ -250,7 +264,9 @@ export interface AudioTrack {
   audioFile: Blob; // Arquivo de áudio (MP3/WAV/etc.)
   instrumentalFile?: Blob; // Arquivo de áudio sem a voz do cantor (gerado por IA)
   repeatTimes?: number; // Quantidade de repetições: 0 = infinito, 1 = 1x (padrão), 2+ = N vezes
-  transcriptionLines?: TranscriptionLine[]; // Linhas sincronizadas de texto/transcrição
+  transcriptionLines?: TranscriptionLine[]; // Legado: Linhas sincronizadas de texto/transcrição
+  textId?: string; // ID do recurso de texto correspondente na tabela 'texts'
+  aiTranscriptionProgress?: AiTranscriptionProgress; // Progresso da transcrição por IA
   createdAt: number;
   updatedAt: number;
 }
