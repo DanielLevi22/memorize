@@ -102,6 +102,7 @@ function App() {
   const [isDesktopSidebarOpen, setIsDesktopSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke'>('dashboard');
   const [activeKaraokeTrackId, setActiveKaraokeTrackId] = useState<string | null>(null);
+  const [isKaraokeFullscreen, setIsKaraokeFullscreen] = useState(false);
   const [guideInitialTab, setGuideInitialTab] = useState<'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math'>('overview');
   const [searchTerm, setSearchTerm] = useState('');
   const [isPomodoroOpen, setIsPomodoroOpen] = useState(false);
@@ -1291,7 +1292,7 @@ function App() {
       <Toaster position="bottom-right" richColors />
       
       <aside className={`hidden md:flex flex-col border-r border-border bg-card h-screen sticky top-0 justify-between shrink-0 transition-all duration-300 ${
-        isDesktopSidebarOpen && !isReadingZenMode && currentView === 'dashboard' ? 'w-[260px] p-6 opacity-100' : 'w-0 p-0 border-r-0 opacity-0 overflow-hidden'
+        isDesktopSidebarOpen && !isReadingZenMode && !isKaraokeFullscreen && currentView === 'dashboard' ? 'w-[260px] p-6 opacity-100' : 'w-0 p-0 border-r-0 opacity-0 overflow-hidden'
       }`}>
         <div className="space-y-6">
           {/* User Profile Header & Collapse Button */}
@@ -1950,7 +1951,11 @@ function App() {
 
         {/* Main Content Area */}
         {currentView === 'dashboard' && (
-          <main className={`flex-1 overflow-y-auto w-full ${isReadingZenMode ? 'p-0 pb-0' : 'p-5 pb-24'}`}>
+          <main className={`flex-1 w-full flex flex-col min-h-0 ${
+            activeTab === 'karaoke' && activeKaraokeTrackId 
+              ? `overflow-hidden ${isKaraokeFullscreen ? 'p-2 pb-16' : 'p-4 pb-16'}` 
+              : `overflow-y-auto ${isReadingZenMode ? 'p-0 pb-0' : 'p-5 pb-24'}`
+          }`}>
             
             {/* TAB 1: DASHBOARD (DECKS) */}
             {activeTab === 'dashboard' && (
@@ -2139,8 +2144,13 @@ function App() {
             {activeTab === 'karaoke' && (
               <KaraokePage
                 initialTrackId={activeKaraokeTrackId}
-                onClearTrack={() => setActiveKaraokeTrackId(null)}
+                onClearTrack={() => {
+                  setActiveKaraokeTrackId(null);
+                  setIsKaraokeFullscreen(false);
+                }}
                 setActiveTab={setActiveTab}
+                isFullscreenMode={isKaraokeFullscreen}
+                setIsFullscreenMode={setIsKaraokeFullscreen}
               />
             )}
             {/* TAB 7: GUIA E AJUDA */}

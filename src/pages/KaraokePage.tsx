@@ -2,8 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Play, Headphones, Mic, Sparkles, ChevronRight, 
   ArrowLeft, Languages, Volume2, Repeat, FileText, 
-  CheckCircle2, Music, Settings2, Download, Upload, RefreshCw
+  CheckCircle2, Music, Settings2, Download, Upload, RefreshCw,
+  Maximize2, Minimize2, Trash2, Plus, HelpCircle, Save
 } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../components/ui/dialog';
 import { db } from '../db/db';
 import type { Playlist, AudioTrack, TranscriptionLine } from '../types';
 import { Card as ShadcnCard } from '../components/ui/card';
@@ -28,9 +30,17 @@ interface KaraokePageProps {
   initialTrackId: string | null;
   onClearTrack: () => void;
   setActiveTab: (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke') => void;
+  isFullscreenMode?: boolean;
+  setIsFullscreenMode?: (fs: boolean) => void;
 }
 
-export const KaraokePage: React.FC<KaraokePageProps> = ({ initialTrackId, onClearTrack, setActiveTab }) => {
+export const KaraokePage: React.FC<KaraokePageProps> = ({ 
+  initialTrackId, 
+  onClearTrack, 
+  setActiveTab,
+  isFullscreenMode = false,
+  setIsFullscreenMode = () => {}
+}) => {
   // DB States
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [playlistCoverUrls, setPlaylistCoverUrls] = useState<Record<string, string>>({});
@@ -56,7 +66,8 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({ initialTrackId, onClea
 
   // Lyrics editor states
   const [isEditingLyrics, setIsEditingLyrics] = useState(false);
-  const [transcriptionTab, setTranscriptionTab] = useState<'view' | 'edit'>('view');
+  const [transcriptionTab, setTranscriptionTab] = useState<'view' | 'sync' | 'adjust'>('view');
+  const [isSyncInstructionsOpen, setIsSyncInstructionsOpen] = useState(false);
   const [transcriptionText, setTranscriptionText] = useState('');
   const [tempLines, setTempLines] = useState<TranscriptionLine[]>([]);
   const [syncingLineIdx, setSyncingLineIdx] = useState(0);
@@ -181,8 +192,18 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({ initialTrackId, onClea
 
   // Auto-scroll active line in view
   useEffect(() => {
-    if (activeLineRef.current) {
-      activeLineRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (activeLineRef.current && scrollContainerRef.current) {
+      const container = scrollContainerRef.current;
+      const element = activeLineRef.current;
+      const elementTop = element.offsetTop;
+      const elementHeight = element.offsetHeight;
+      const containerHeight = container.clientHeight;
+      const targetScrollTop = elementTop - (containerHeight / 2) + (elementHeight / 2);
+      
+      container.scrollTo({
+        top: targetScrollTop,
+        behavior: 'smooth'
+      });
     }
   }, [activeLineIdx]);
 
@@ -192,6 +213,116 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({ initialTrackId, onClea
     setSpeechSimilarity(null);
     setSpeechWordDiffs([]);
   }, [activeLineIdx]);
+
+  // Whenever tempLines changes, keep transcriptionText updated
+  useEffect(() => {
+    if (tempLines.length > 0) {
+      const text = tempLines.map(l => l.text).join('\n');
+      setTranscriptionText(text);
+    }
+  }, [tempLines]);
+
+  const handleLoadTextToTempLines = () => {
+    const rawLines = transcriptionText.split('\n').map(l => l.trim()).filter(Boolean);
+    const currentText = tempLines.map(l => l.text).join('\n');
+    const newText = rawLines.join('\n');
+    if (currentText !== newText || tempLines.length === 0) {
+      setTempLines(rawLines.map(text => ({
+        id: crypto.randomUUID(),
+        text,
+        startTime: 0,
+        endTime: undefined
+      })));
+    }
+  };
+
+  const adjustLineTime = (idx: number, delta: number) => {
+    setTempLines(prev => prev.map((line, i) => {
+      if (i === idx) {
+        const newTime = Math.max(0, parseFloat((line.startTime + delta).toFixed(2)));
+        return { ...line, startTime: newTime };
+      }
+      return line;
+    }));
+  };
+
+  const updateLineText = (idx: number, text: string) => {
+    setTempLines(prev => prev.map((line, i) => {
+      if (i === idx) return { ...line, text };
+      return line;
+    }));
+  };
+
+  const updateLineTranslation = (idx: number, translation: string) => {
+    setTempLines(prev => prev.map((line, i) => {
+      if (i === idx) return { ...line, translation };
+      return line;
+    }));
+  };
+
+  const updateLineStartTimeDirectly = (idx: number, val: string) => {
+    const num = parseFloat(val);
+    if (!isNaN(num)) {
+      setTempLines(prev => prev.map((line, i) => {
+        if (i === idx) return { ...line, startTime: Math.max(0, num) };
+        return line;
+      }));
+    }
+  };
+
+  const deleteLine = (idx: number) => {
+    setTempLines(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const insertLineAfter = (idx: number) => {
+    setTempLines(prev => {
+      const newLine: TranscriptionLine = {
+        id: crypto.randomUUID(),
+        text: '',
+        startTime: prev[idx] ? parseFloat((prev[idx].startTime + 1.0).toFixed(2)) : 0,
+        endTime: undefined
+      };
+      const copy = [...prev];
+      copy.splice(idx + 1, 0, newLine);
+      return copy;
+    });
+  };
+
+  const insertLineAtStart = () => {
+    setTempLines(prev => {
+      const newLine: TranscriptionLine = {
+        id: crypto.randomUUID(),
+        text: '',
+        startTime: 0,
+        endTime: undefined
+      };
+      return [newLine, ...prev];
+    });
+  };
+
+  const insertLineAtEnd = () => {
+    setTempLines(prev => {
+      const lastLine = prev[prev.length - 1];
+      const newLine: TranscriptionLine = {
+        id: crypto.randomUUID(),
+        text: '',
+        startTime: lastLine ? parseFloat((lastLine.startTime + 1.0).toFixed(2)) : 0,
+        endTime: undefined
+      };
+      return [...prev, newLine];
+    });
+  };
+
+  const handlePlayFromTime = (time: number) => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = time;
+      setProgress(time);
+      if (!isPlaying) {
+        audioRef.current.play().catch(e => console.warn(e));
+        setIsPlaying(true);
+      }
+    }
+  };
 
   // Loop active line logic if isLoopingLine is true
   useEffect(() => {
@@ -712,6 +843,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({ initialTrackId, onClea
     cleanupAudio();
     setActiveTrack(null);
     onClearTrack();
+    setIsFullscreenMode(false);
   };
 
   const getGradientFromTitle = (title: string) => {
@@ -893,16 +1025,26 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
       toast.error('Escreva ou cole a letra da música primeiro!');
       return;
     }
+    setIsSyncInstructionsOpen(true);
+  };
+
+  const startManualSyncAfterConfirm = () => {
+    setIsSyncInstructionsOpen(false);
     const rawLines = transcriptionText.split('\n').map(l => l.trim()).filter(Boolean);
-    const newLines = rawLines.map(text => ({
-      id: crypto.randomUUID(),
-      text,
-      startTime: 0,
-      endTime: undefined
-    }));
+    const newLines = rawLines.map((text, idx) => {
+      const existing = tempLines[idx];
+      return {
+        id: existing?.text === text ? existing.id : crypto.randomUUID(),
+        text,
+        startTime: 0,
+        endTime: undefined,
+        translation: existing?.text === text ? existing.translation : undefined,
+        difficulty: existing?.text === text ? existing.difficulty : undefined
+      };
+    });
     setTempLines(newLines);
     setSyncingLineIdx(0);
-    setTranscriptionTab('edit');
+    setTranscriptionTab('sync');
     if (audioRef.current) {
       audioRef.current.currentTime = 0;
       setProgress(0);
@@ -1047,7 +1189,7 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
   // Hotkey listener for manual sync (Space/Enter to stamp, Backspace to undo)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!isEditingLyrics || transcriptionTab !== 'edit') return;
+      if (!isEditingLyrics || transcriptionTab !== 'sync') return;
       
       const activeEl = document.activeElement;
       if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
@@ -1096,8 +1238,41 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
 
     return (
       <div className="flex-1 flex flex-col min-h-0 mt-4 relative z-10">
+        {/* Sub-tabs switch between view and adjust, only if not actively syncing */}
+        {transcriptionTab !== 'sync' && (
+          <div className="flex flex-wrap items-center gap-1.5 bg-muted/40 border border-border/30 rounded-xl p-1 shrink-0 mb-4 max-w-fit relative z-20">
+            <button
+              type="button"
+              onClick={() => setTranscriptionTab('view')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                transcriptionTab === 'view'
+                  ? 'bg-primary text-primary-foreground shadow-sm animate-fadeIn'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+              }`}
+            >
+              <FileText size={12} />
+              <span>Letra Texto</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                handleLoadTextToTempLines();
+                setTranscriptionTab('adjust');
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                transcriptionTab === 'adjust'
+                  ? 'bg-primary text-primary-foreground shadow-sm animate-fadeIn'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+              }`}
+            >
+              <Settings2 size={12} />
+              <span>Ajustar Frases (Tempos)</span>
+            </button>
+          </div>
+        )}
+
         {transcriptionTab === 'view' ? (
-          <div className="flex-1 flex flex-col min-h-0 space-y-4">
+          <div className="flex-1 flex flex-col min-h-0 space-y-4 animate-fadeIn">
             <div className="flex-1 flex flex-col min-h-0 relative">
               <label className="text-xs font-bold text-muted-foreground/80 block mb-1.5 uppercase tracking-widest">
                 Letra Original (uma frase por linha)
@@ -1184,20 +1359,210 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
               </div>
             </div>
           </div>
-        ) : (
-          /* Aba de Sincronia Manual Ativa */
+        ) : transcriptionTab === 'adjust' ? (
+          /* Aba de Ajuste Manual de Tempos e Frases */
           <div className="flex-1 flex flex-col min-h-0 space-y-4 animate-fadeIn">
-            <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 text-[10px] text-amber-600 dark:text-amber-400 font-semibold leading-normal shrink-0">
-              <p className="font-bold flex items-center gap-1.5 mb-1 text-[11px] uppercase tracking-wider">
-                <Settings2 size={13} /> Modo Sincronização Manual Ativado
-              </p>
-              Instruções de Teclado:<br />
-              • Pressione <kbd className="bg-card px-1.5 py-0.5 rounded border border-border/30 font-mono text-[9px]">ESPAÇO</kbd> ou <kbd className="bg-card px-1.5 py-0.5 rounded border border-border/30 font-mono text-[9px]">ENTER</kbd> no momento exato em que a linha destacada for falada no áudio.<br />
-              • Pressione <kbd className="bg-card px-1.5 py-0.5 rounded border border-border/30 font-mono text-[9px]">BACKSPACE</kbd> para voltar e refazer a última marcação de tempo.
+            <div className="flex-1 overflow-y-auto no-scrollbar pr-1 border border-border/40 rounded-2xl bg-muted/10 p-4 space-y-3 min-h-[300px]">
+              <div className="flex items-center justify-between pb-2 border-b border-border/20">
+                <h4 className="text-[10px] font-black text-foreground uppercase tracking-widest flex items-center gap-1.5">
+                  Ajuste Fino de Tempos e Frases
+                </h4>
+                <Button
+                  onClick={insertLineAtStart}
+                  variant="outline"
+                  size="sm"
+                  className="h-8 border-border/60 hover:bg-muted text-foreground font-bold text-[10px] rounded-lg flex items-center gap-1 cursor-pointer"
+                >
+                  <Plus size={12} />
+                  Inserir no Início
+                </Button>
+              </div>
+
+              {tempLines.length === 0 ? (
+                <div className="flex flex-col items-center justify-center text-center py-12 px-4 space-y-3.5 border-2 border-dashed border-border/40 rounded-xl bg-card/25 my-4">
+                  <div className="p-3 bg-muted/40 rounded-full text-muted-foreground/60 border border-border/20 shadow-inner">
+                    <Plus size={24} />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs font-bold text-foreground">Sem frases configuradas</p>
+                    <p className="text-[10px] text-muted-foreground max-w-xs leading-normal">
+                      Insira frases individualmente com tempo abaixo, ou volte na aba <strong>Letra Texto</strong> para colar toda a letra de uma vez.
+                    </p>
+                  </div>
+                  <Button
+                    onClick={insertLineAtStart}
+                    size="sm"
+                    className="bg-primary hover:bg-primary/95 text-primary-foreground font-extrabold text-[10px] h-8 px-4 rounded-lg cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Plus size={12} />
+                    Adicionar Primeira Frase
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  {tempLines.map((line, idx) => (
+                    <div key={line.id || idx} className="bg-card/60 border border-border/40 rounded-xl p-3.5 space-y-3 relative hover:border-border/80 transition-all">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[10px] font-black text-muted-foreground/60 bg-muted/50 w-6 h-6 rounded-full flex items-center justify-center shrink-0">
+                          #{idx + 1}
+                        </span>
+
+                        {/* Inputs */}
+                        <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                          <div className="space-y-1">
+                            <span className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-wider block">Texto da Frase</span>
+                            <input
+                              type="text"
+                              value={line.text}
+                              onChange={(e) => updateLineText(idx, e.target.value)}
+                              className="w-full bg-muted/20 border border-border/30 rounded-lg px-2.5 py-1 text-xs font-semibold focus:border-primary focus:ring-1 focus:ring-primary/20 text-foreground"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <span className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-wider block">Tradução</span>
+                            <input
+                              type="text"
+                              value={line.translation || ''}
+                              onChange={(e) => updateLineTranslation(idx, e.target.value)}
+                              placeholder="Tradução da frase..."
+                              className="w-full bg-muted/20 border border-border/30 rounded-lg px-2.5 py-1 text-xs font-medium focus:border-primary focus:ring-1 focus:ring-primary/20 text-foreground"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Direto Tempo Input */}
+                        <div className="w-20 space-y-1 shrink-0">
+                          <span className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-wider block">Tempo (s)</span>
+                          <input
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            value={line.startTime}
+                            onChange={(e) => updateLineStartTimeDirectly(idx, e.target.value)}
+                            className="w-full bg-muted/20 border border-border/30 rounded-lg px-2.5 py-1 text-xs font-bold font-mono focus:border-primary focus:ring-1 focus:ring-primary/20 text-foreground text-center"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Ações da Linha */}
+                      <div className="flex flex-wrap items-center justify-between gap-3 pt-2.5 border-t border-border/20">
+                        <div className="flex items-center gap-1.5">
+                          <Button
+                            onClick={() => handlePlayFromTime(line.startTime)}
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-primary hover:bg-primary/10 text-[9px] font-extrabold rounded-md flex items-center gap-1 px-2.5 shrink-0"
+                            title="Ouvir áudio a partir deste ponto"
+                          >
+                            <Play size={10} className="fill-current" />
+                            Ouvir Trecho
+                          </Button>
+
+                          {/* Ajustadores Rápidos */}
+                          <span className="text-[9px] font-bold text-muted-foreground/40 uppercase select-none px-1">Ajuste rápido:</span>
+                          <button
+                            type="button"
+                            onClick={() => adjustLineTime(idx, -0.5)}
+                            className="h-6 px-1.5 bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground text-[9px] font-mono font-bold rounded border border-border/30 cursor-pointer animate-none"
+                            title="Voltar 0.5s"
+                          >
+                            -0.5s
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => adjustLineTime(idx, -0.1)}
+                            className="h-6 px-1.5 bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground text-[9px] font-mono font-bold rounded border border-border/30 cursor-pointer animate-none"
+                            title="Voltar 0.1s"
+                          >
+                            -0.1s
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => adjustLineTime(idx, 0.1)}
+                            className="h-6 px-1.5 bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground text-[9px] font-mono font-bold rounded border border-border/30 cursor-pointer animate-none"
+                            title="Avançar 0.1s"
+                          >
+                            +0.1s
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => adjustLineTime(idx, 0.5)}
+                            className="h-6 px-1.5 bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground text-[9px] font-mono font-bold rounded border border-border/30 cursor-pointer animate-none"
+                            title="Avançar 0.5s"
+                          >
+                            +0.5s
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <Button
+                            onClick={() => insertLineAfter(idx)}
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 text-[9px] font-bold rounded-md flex items-center gap-1 px-2"
+                            title="Inserir nova frase abaixo"
+                          >
+                            <Plus size={10} />
+                            Inserir
+                          </Button>
+                          <Button
+                            onClick={() => deleteLine(idx)}
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-rose-500 hover:bg-rose-500/10 text-[9px] font-bold rounded-md flex items-center gap-1 px-2"
+                            title="Excluir esta frase"
+                          >
+                            <Trash2 size={10} />
+                            Excluir
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+
+                  <div className="flex justify-center pt-2">
+                    <Button
+                      onClick={insertLineAtEnd}
+                      variant="outline"
+                      className="w-full max-w-xs border-dashed border-border/60 hover:bg-muted text-muted-foreground hover:text-foreground font-bold text-[10px] h-9 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Plus size={12} />
+                      Adicionar Nova Frase no Final
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Salvar Botão no Ajuste */}
+            <div className="flex items-center justify-between gap-3 pt-3 border-t border-border/20 shrink-0">
+              <span className="text-[10px] text-muted-foreground font-bold leading-normal">
+                Dica: Ordene e ajuste os tempos de cada linha. Ao finalizar, salve as alterações.
+              </span>
+              <Button
+                onClick={handleSaveTranscription}
+                disabled={tempLines.length === 0}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs h-11 rounded-xl shadow-lg flex items-center justify-center gap-1.5 cursor-pointer px-6"
+              >
+                <Save size={13} />
+                Salvar Sincronia e Frases
+              </Button>
+            </div>
+          </div>
+        ) : (
+          /* Aba de Sincronia Manual Ativa (sync) */
+          <div className="flex-1 flex flex-col min-h-0 space-y-4 animate-fadeIn">
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2 text-[10px] text-amber-600 dark:text-amber-400 font-bold flex items-center justify-between shrink-0">
+              <span className="flex items-center gap-1.5">
+                <Settings2 size={11} /> Sincronia Manual Ativa
+              </span>
+              <span>
+                Atalhos: <kbd className="bg-card px-1 rounded border border-border/30 font-mono text-[9px]">ESPAÇO / ENTER</kbd> Carimbar • <kbd className="bg-card px-1 rounded border border-border/30 font-mono text-[9px]">BACKSPACE</kbd> Desfazer
+              </span>
             </div>
 
             {/* Lista de Letras para Carimbagem */}
-            <div className="flex-1 overflow-y-auto pr-1 border border-border/40 rounded-2xl bg-muted/10 p-3 space-y-1.5 min-h-[180px]">
+            <div className="flex-1 overflow-y-auto no-scrollbar pr-1 border border-border/40 rounded-2xl bg-muted/10 p-3 space-y-1.5 min-h-[180px]">
               {tempLines.map((line, idx) => {
                 const isCurrent = syncingLineIdx === idx;
                 const isStamped = idx < syncingLineIdx;
@@ -1350,7 +1715,7 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
                     </div>
                   </div>
 
-                  <div className="mt-3 space-y-1.5 flex-1 max-h-[190px] overflow-y-auto pr-1">
+                  <div className="mt-3 space-y-1.5 flex-1 max-h-[190px] overflow-y-auto no-scrollbar pr-1">
                     {playlistTracks.map(track => {
                       const hasTranscription = track.transcriptionLines && track.transcriptionLines.length > 0;
                       return (
@@ -1409,99 +1774,101 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
     return (
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-stretch flex-1 min-h-0 w-full animate-fadeIn">
         
-        {/* COLUNA 1: Visualizador de Disco de Vinil (Esquerda) — Oculto em mobile */}
-        <div className="hidden lg:flex lg:col-span-1 flex-col items-center justify-center relative">
-          <ShadcnCard className="bg-card/40 backdrop-blur-md border border-border/50 p-6 rounded-3xl shadow-xl flex flex-col items-center justify-between w-full h-full min-h-[495px] relative overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-b from-primary/5 via-transparent to-transparent pointer-events-none" />
+        {/* COLUNA 1: Visualizador de Disco de Vinil (Esquerda) — Oculto em mobile ou Tela Cheia */}
+        {!isFullscreenMode && (
+          <div className="hidden lg:flex lg:col-span-1 flex-col items-center justify-center relative">
+            <ShadcnCard className="bg-card/40 backdrop-blur-md border border-border/50 p-6 rounded-3xl shadow-xl flex flex-col items-center justify-between w-full h-full lg:h-[calc(100vh-180px)] lg:max-h-[calc(100vh-180px)] min-h-[400px] relative overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-b from-primary/5 via-transparent to-transparent pointer-events-none" />
 
-            {/* Cabeçalho */}
-            <div className="flex items-center justify-between w-full border-b border-border/40 pb-2.5 z-10 shrink-0">
-              <h3 className="text-xs font-black text-muted-foreground uppercase tracking-widest">
-                Karaokê Player
-              </h3>
-              {playCount > 1 && (
-                <span className="text-[8px] font-bold uppercase tracking-wider text-amber-500 bg-amber-500/15 border border-amber-500/25 px-1.5 py-0.5 rounded-lg animate-pulse shrink-0">
-                  Repetindo {playCount}x
-                </span>
-              )}
-            </div>
-
-            {/* Disco de vinil giratório com visualizador */}
-            <div className="flex items-center justify-center relative w-full h-56 my-3 shrink-0">
-              {/* Canvas para animação de frequências de áudio */}
-              <canvas
-                ref={canvasRef}
-                width="220"
-                height="220"
-                className="absolute inset-0 m-auto pointer-events-none z-10"
-              />
-
-              {/* Disco em si */}
-              <div className={`w-36 h-36 rounded-full bg-zinc-950 shadow-2xl flex items-center justify-center border-4 border-zinc-800 transition-all duration-300 select-none relative ${
-                isPlaying ? 'animate-spin-slow shadow-primary/20 ring-4 ring-primary/5' : 'scale-95 border-zinc-900 shadow-none'
-              }`}>
-                <div className="absolute inset-2 rounded-full border border-zinc-700/40 pointer-events-none" />
-                <div className="absolute inset-4 rounded-full border border-zinc-700/30 pointer-events-none" />
-                <div className="absolute inset-7 rounded-full border border-zinc-700/20 pointer-events-none" />
-                
-                {/* Imagem de Capa do Álbum no Centro */}
-                {(() => {
-                  const coverSrc = playlistCoverUrls[activeTrack.playlistId];
-                  return coverSrc ? (
-                    <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-primary shadow-lg relative shrink-0">
-                      <img src={coverSrc} alt="capa" className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 m-auto w-2 h-2 rounded-full bg-zinc-950 border border-primary/45" />
-                    </div>
-                  ) : (
-                    <div className={`w-12 h-12 rounded-full border-2 border-primary bg-gradient-to-br flex items-center justify-center text-[7px] text-zinc-50 font-black relative shrink-0 ${getGradientFromTitle(activeTrack.title)}`}>
-                      {activeTrack.title.substring(0, 2).toUpperCase()}
-                      <div className="absolute inset-0 m-auto w-2.5 h-2.5 rounded-full bg-zinc-950 border border-primary/40" />
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-
-            {/* Nome da Faixa */}
-            <div className="space-y-1 w-full px-2 text-center shrink-0 z-10">
-              <h4 className="font-extrabold text-sm text-foreground truncate px-1" title={activeTrack.title}>
-                {activeTrack.title}
-              </h4>
-              <p className="text-[9px] text-muted-foreground font-semibold truncate px-1 leading-normal">
-                {activeTrack.description || 'Tocando no Estúdio'}
-              </p>
-            </div>
-
-            <div className="w-full h-px bg-border/40 my-1" />
-
-            {/* Quick Status de Pontuação */}
-            <div className="w-full text-left space-y-1.5 shrink-0 z-10 px-2 pb-1">
-              <span className="text-[9px] font-black text-muted-foreground/80 flex items-center gap-1.5 uppercase tracking-widest">
-                <CheckCircle2 size={10} /> Desempenho
-              </span>
-              <div className="bg-muted/40 p-2.5 rounded-xl border border-border/30 text-center flex flex-col justify-center space-y-0.5">
-                {Object.keys(lineScores).length > 0 ? (
-                  <>
-                    <span className="text-base font-black text-primary animate-fadeIn">
-                      {Math.round(Object.values(lineScores).reduce((a, b) => a + b, 0) / Object.keys(lineScores).length)}%
-                    </span>
-                    <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider">
-                      Média do Desafio
-                    </span>
-                  </>
-                ) : (
-                  <span className="text-[10px] font-bold text-muted-foreground/60 italic py-1 leading-normal">
-                    Nenhuma pontuação registrada.
+              {/* Cabeçalho */}
+              <div className="flex items-center justify-between w-full border-b border-border/40 pb-2.5 z-10 shrink-0">
+                <h3 className="text-xs font-black text-muted-foreground uppercase tracking-widest">
+                  Karaokê Player
+                </h3>
+                {playCount > 1 && (
+                  <span className="text-[8px] font-bold uppercase tracking-wider text-amber-500 bg-amber-500/15 border border-amber-500/25 px-1.5 py-0.5 rounded-lg animate-pulse shrink-0">
+                    Repetindo {playCount}x
                   </span>
                 )}
               </div>
-            </div>
-          </ShadcnCard>
-        </div>
+
+              {/* Disco de vinil giratório com visualizador */}
+              <div className="flex items-center justify-center relative w-full h-56 my-3 shrink-0">
+                {/* Canvas para animação de frequências de áudio */}
+                <canvas
+                  ref={canvasRef}
+                  width="220"
+                  height="220"
+                  className="absolute inset-0 m-auto pointer-events-none z-10"
+                />
+
+                {/* Disco em si */}
+                <div className={`w-36 h-36 rounded-full bg-zinc-950 shadow-2xl flex items-center justify-center border-4 border-zinc-800 transition-all duration-300 select-none relative ${
+                  isPlaying ? 'animate-spin-slow shadow-primary/20 ring-4 ring-primary/5' : 'scale-95 border-zinc-900 shadow-none'
+                }`}>
+                  <div className="absolute inset-2 rounded-full border border-zinc-700/40 pointer-events-none" />
+                  <div className="absolute inset-4 rounded-full border border-zinc-700/30 pointer-events-none" />
+                  <div className="absolute inset-7 rounded-full border border-zinc-700/20 pointer-events-none" />
+                  
+                  {/* Imagem de Capa do Álbum no Centro */}
+                  {(() => {
+                    const coverSrc = playlistCoverUrls[activeTrack.playlistId];
+                    return coverSrc ? (
+                      <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-primary shadow-lg relative shrink-0">
+                        <img src={coverSrc} alt="capa" className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 m-auto w-2 h-2 rounded-full bg-zinc-950 border border-primary/45" />
+                      </div>
+                    ) : (
+                      <div className={`w-12 h-12 rounded-full border-2 border-primary bg-gradient-to-br flex items-center justify-center text-[7px] text-zinc-50 font-black relative shrink-0 ${getGradientFromTitle(activeTrack.title)}`}>
+                        {activeTrack.title.substring(0, 2).toUpperCase()}
+                        <div className="absolute inset-0 m-auto w-2.5 h-2.5 rounded-full bg-zinc-950 border border-primary/40" />
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Nome da Faixa */}
+              <div className="space-y-1 w-full px-2 text-center shrink-0 z-10">
+                <h4 className="font-extrabold text-sm text-foreground truncate px-1" title={activeTrack.title}>
+                  {activeTrack.title}
+                </h4>
+                <p className="text-[9px] text-muted-foreground font-semibold truncate px-1 leading-normal">
+                  {activeTrack.description || 'Tocando no Estúdio'}
+                </p>
+              </div>
+
+              <div className="w-full h-px bg-border/40 my-1" />
+
+              {/* Quick Status de Pontuação */}
+              <div className="w-full text-left space-y-1.5 shrink-0 z-10 px-2 pb-1">
+                <span className="text-[9px] font-black text-muted-foreground/80 flex items-center gap-1.5 uppercase tracking-widest">
+                  <CheckCircle2 size={10} /> Desempenho
+                </span>
+                <div className="bg-muted/40 p-2.5 rounded-xl border border-border/30 text-center flex flex-col justify-center space-y-0.5">
+                  {Object.keys(lineScores).length > 0 ? (
+                    <>
+                      <span className="text-base font-black text-primary animate-fadeIn">
+                        {Math.round(Object.values(lineScores).reduce((a, b) => a + b, 0) / Object.keys(lineScores).length)}%
+                      </span>
+                      <span className="text-[8px] font-extrabold text-muted-foreground uppercase tracking-wider">
+                        Média do Desafio
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-[10px] font-bold text-muted-foreground/60 italic py-1 leading-normal">
+                      Nenhuma pontuação registrada.
+                    </span>
+                  )}
+                </div>
+              </div>
+            </ShadcnCard>
+          </div>
+        )}
 
         {/* COLUNA 2: Letras & Controles do Estúdio (Direita) */}
-        <div className="lg:col-span-3 flex flex-col h-full space-y-4">
-          <ShadcnCard className="bg-card/40 backdrop-blur-md border border-border/50 p-5 rounded-2xl shadow-xl flex flex-col flex-1 h-full min-h-[495px] relative overflow-hidden">
+        <div className={`${isFullscreenMode ? 'lg:col-span-4' : 'lg:col-span-3'} flex flex-col h-full space-y-4`}>
+          <ShadcnCard className="bg-card/40 backdrop-blur-md border border-border/50 p-5 rounded-2xl shadow-xl flex flex-col flex-1 h-full lg:h-[calc(100vh-180px)] lg:max-h-[calc(100vh-180px)] min-h-[400px] relative overflow-hidden">
             <div className="absolute top-0 right-0 w-48 h-48 bg-primary/5 rounded-full blur-[60px] pointer-events-none" />
 
             {/* Cabeçalho do Estúdio */}
@@ -1566,148 +1933,170 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
                 >
                   <Languages size={14} />
                 </button>
+
+                {/* Editar Letras */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isEditingLyrics) {
+                      setIsEditingLyrics(false);
+                    } else {
+                      setTranscriptionText(activeTrack.transcriptionLines?.map(l => l.text).join('\n') || '');
+                      setTempLines(activeTrack.transcriptionLines || []);
+                      setSyncingLineIdx(0);
+                      setTranscriptionTab('view');
+                      setIsEditingLyrics(true);
+                    }
+                  }}
+                  className={`p-1.5 rounded-xl border transition-colors cursor-pointer shadow-sm text-xs font-bold flex items-center gap-1.5 ${
+                    isEditingLyrics
+                      ? 'bg-primary/15 border-primary/35 text-primary hover:bg-primary/20 shadow-sm shadow-primary/10'
+                      : 'border-border/50 bg-card text-muted-foreground hover:text-foreground hover:bg-muted'
+                  }`}
+                  title={isEditingLyrics ? "Sair da Edição" : "Editar Letras"}
+                >
+                  <Settings2 size={14} />
+                  <span className="hidden sm:inline text-[10px]">Editar Letra</span>
+                </button>
+
+                {/* Alternar Tela Cheia */}
+                <button
+                  onClick={() => setIsFullscreenMode(!isFullscreenMode)}
+                  className={`p-1.5 rounded-xl border transition-colors cursor-pointer shadow-sm ${
+                    isFullscreenMode
+                      ? 'bg-primary/15 border-primary/35 text-primary hover:bg-primary/20 shadow-sm shadow-primary/10'
+                      : 'border-border/50 bg-card text-muted-foreground hover:text-foreground hover:bg-muted'
+                  }`}
+                  title={isFullscreenMode ? 'Sair da Tela Cheia' : 'Tela Cheia'}
+                >
+                  {isFullscreenMode ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                </button>
               </div>
             </div>
 
             {/* Barra de Seleção de Modos */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-3 pb-2 border-b border-border/20 shrink-0 relative z-10">
-              <div className="flex flex-wrap items-center gap-1.5 bg-muted/40 border border-border/30 rounded-xl p-1 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTranscriptionViewMode('normal');
-                    stopSpeechRecognition();
-                    setIsEditingLyrics(false);
-                  }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                    transcriptionViewMode === 'normal' && !isEditingLyrics
-                      ? 'bg-primary text-primary-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
-                  }`}
-                >
-                  <FileText size={12} />
-                  <span>Padrão</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTranscriptionViewMode('playback');
-                    stopSpeechRecognition();
-                    setIsEditingLyrics(false);
-                  }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                    transcriptionViewMode === 'playback' && !isEditingLyrics
-                      ? 'bg-primary text-primary-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
-                  }`}
-                >
-                  <Music size={12} />
-                  <span>Playback / Karaokê</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTranscriptionViewMode('pronunciation');
-                    setIsEditingLyrics(false);
-                  }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                    transcriptionViewMode === 'pronunciation' && !isEditingLyrics
-                      ? 'bg-primary text-primary-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
-                  }`}
-                >
-                  <Mic size={12} />
-                  <span>Desafio de Pronúncia</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTranscriptionText(activeTrack.transcriptionLines?.map(l => l.text).join('\n') || '');
-                    setTempLines(activeTrack.transcriptionLines || []);
-                    setSyncingLineIdx(0);
-                    setTranscriptionTab('view');
-                    setIsEditingLyrics(true);
-                  }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                    isEditingLyrics
-                      ? 'bg-primary text-primary-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
-                  }`}
-                >
-                  <Settings2 size={12} />
-                  <span>Editar Letras 📝</span>
-                </button>
-              </div>
-
-              {/* Dica de Modo & Vocal Controls */}
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                {transcriptionViewMode === 'pronunciation' ? (
-                  <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 px-3 py-1.5 rounded-xl text-[10px] font-black shadow-sm">
-                    <Headphones size={12} className="shrink-0 animate-bounce" />
-                    <span>Use fones — evite captar a caixa de som!</span>
-                  </div>
-                ) : null}
-
-                <div className="flex items-center gap-1.5 bg-muted/40 border border-border/30 rounded-xl p-1">
-                  <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/50 px-1.5 select-none hidden sm:block">
-                    Voz
-                  </span>
-                  <div className="w-px h-4 bg-border/40 hidden sm:block" />
-
+            {!isEditingLyrics && (
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-3 pb-2 border-b border-border/20 shrink-0 relative z-10 animate-fadeIn">
+                <div className="flex flex-wrap items-center gap-1.5 bg-muted/40 border border-border/30 rounded-xl p-1 shrink-0">
                   <button
                     type="button"
-                    onClick={() => toggleVocalReduction(!isVocalReductionActive)}
-                    title="Atenuar voz com cancelamento de fase estéreo."
-                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                      isVocalReductionActive
-                        ? 'bg-rose-500/20 text-rose-500 dark:text-rose-400'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+                    onClick={() => {
+                      setTranscriptionViewMode('normal');
+                      stopSpeechRecognition();
+                      setIsEditingLyrics(false);
+                    }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                      transcriptionViewMode === 'normal' && !isEditingLyrics
+                        ? 'bg-primary text-primary-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
                     }`}
                   >
-                    <Volume2 size={11} className={isVocalReductionActive ? 'animate-pulse' : ''} />
-                    <span className="hidden sm:inline">Atenuar</span>
+                    <FileText size={12} />
+                    <span>Padrão</span>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTranscriptionViewMode('playback');
+                      stopSpeechRecognition();
+                      setIsEditingLyrics(false);
+                    }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                      transcriptionViewMode === 'playback' && !isEditingLyrics
+                        ? 'bg-primary text-primary-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                    }`}
+                  >
+                    <Music size={12} />
+                    <span>Playback / Karaokê</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTranscriptionViewMode('pronunciation');
+                      setIsEditingLyrics(false);
+                    }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                      transcriptionViewMode === 'pronunciation' && !isEditingLyrics
+                        ? 'bg-primary text-primary-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                    }`}
+                  >
+                    <Mic size={12} />
+                    <span>Desafio de Pronúncia</span>
+                  </button>
+                </div>
 
-                  <div className="w-px h-4 bg-border/40" />
+                {/* Dica de Modo & Vocal Controls */}
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  {transcriptionViewMode === 'pronunciation' ? (
+                    <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 px-3 py-1.5 rounded-xl text-[10px] font-black shadow-sm">
+                      <Headphones size={12} className="shrink-0 animate-bounce" />
+                      <span>Use fones — evite captar a caixa de som!</span>
+                    </div>
+                  ) : null}
 
-                  {activeTrack.instrumentalFile ? (
+                  <div className="flex items-center gap-1.5 bg-muted/40 border border-border/30 rounded-xl p-1">
+                    <span className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/50 px-1.5 select-none hidden sm:block">
+                      Voz
+                    </span>
+                    <div className="w-px h-4 bg-border/40 hidden sm:block" />
+
                     <button
                       type="button"
-                      onClick={() => toggleIaInstrumental(!isIaInstrumentalActive)}
-                      title="Alterna para o instrumental sem voz por IA."
+                      onClick={() => toggleVocalReduction(!isVocalReductionActive)}
+                      title="Atenuar voz com cancelamento de phase estéreo."
                       className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                        isIaInstrumentalActive
-                          ? 'bg-violet-500/20 text-violet-500 dark:text-violet-400'
+                        isVocalReductionActive
+                          ? 'bg-rose-500/20 text-rose-500 dark:text-rose-400'
                           : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
                       }`}
                     >
-                      <Sparkles size={11} className={isIaInstrumentalActive ? 'animate-pulse' : ''} />
-                      <span>{isIaInstrumentalActive ? 'Sem voz ✓' : 'Sem voz'}</span>
+                      <Volume2 size={11} className={isVocalReductionActive ? 'animate-pulse' : ''} />
+                      <span className="hidden sm:inline">Atenuar</span>
                     </button>
-                  ) : isProcessingCloudSeparation ? (
-                    <div className="flex items-center gap-2 px-2.5 py-1.5 min-w-[160px]">
-                      <div className="w-2.5 h-2.5 border-2 border-sky-500 border-t-transparent rounded-full animate-spin shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[9px] font-bold text-sky-500 truncate">{cloudSeparationMessage}</p>
-                        <div className="w-full bg-sky-500/20 rounded-full h-0.5 mt-0.5">
-                          <div className="bg-sky-500 h-0.5 rounded-full transition-all" style={{ width: `${cloudSeparationProgress}%` }} />
+
+                    <div className="w-px h-4 bg-border/40" />
+
+                    {activeTrack.instrumentalFile ? (
+                      <button
+                        type="button"
+                        onClick={() => toggleIaInstrumental(!isIaInstrumentalActive)}
+                        title="Alterna para o instrumental sem voz por IA."
+                        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                          isIaInstrumentalActive
+                            ? 'bg-violet-500/20 text-violet-500 dark:text-violet-400'
+                            : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+                        }`}
+                      >
+                        <Sparkles size={11} className={isIaInstrumentalActive ? 'animate-pulse' : ''} />
+                        <span>{isIaInstrumentalActive ? 'Sem voz ✓' : 'Sem voz'}</span>
+                      </button>
+                    ) : isProcessingCloudSeparation ? (
+                      <div className="flex items-center gap-2 px-2.5 py-1.5 min-w-[160px]">
+                        <div className="w-2.5 h-2.5 border-2 border-sky-500 border-t-transparent rounded-full animate-spin shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[9px] font-bold text-sky-500 truncate">{cloudSeparationMessage}</p>
+                          <div className="w-full bg-sky-500/20 rounded-full h-0.5 mt-0.5">
+                            <div className="bg-sky-500 h-0.5 rounded-full transition-all" style={{ width: `${cloudSeparationProgress}%` }} />
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={handleStartCloudVocalSeparation}
-                      title="Remover a voz usando IA na nuvem (Demucs)."
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider text-sky-500 dark:text-sky-400 hover:bg-sky-500/10 transition-all cursor-pointer"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
-                      <span>Remover voz</span>
-                    </button>
-                  )}
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleStartCloudVocalSeparation}
+                        title="Remover a voz usando IA na nuvem (Demucs)."
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider text-sky-500 dark:text-sky-400 hover:bg-sky-500/10 transition-all cursor-pointer"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
+                        <span>Remover voz</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
             {isEditingLyrics ? (
               renderTranscriptionPanel()
@@ -1716,7 +2105,7 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
               <div className="flex-1 flex flex-col min-h-0 relative mt-3 pb-2">
               <div className="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-card/30 to-transparent pointer-events-none z-10" />
 
-              <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-6 space-y-5 pt-8 pb-36 select-none scrollbar-thin relative">
+              <div ref={scrollContainerRef} className="flex-1 overflow-y-auto no-scrollbar px-6 space-y-5 pt-8 pb-36 select-none relative">
                 {activeTrack.transcriptionLines?.map((line, idx) => {
                   const isActive = activeLineIdx === idx;
                   
@@ -1880,7 +2269,11 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
   };
 
   return (
-    <div className="space-y-6 w-full px-4 md:px-8 py-4 relative flex flex-col min-h-[calc(100vh-100px)]">
+    <div className={`space-y-6 w-full px-4 md:px-8 py-4 relative flex flex-col ${
+      activeTrack 
+        ? 'h-full max-h-full min-h-0 flex-1' 
+        : 'min-h-[calc(100vh-100px)]'
+    }`}>
       <style dangerouslySetInnerHTML={{ __html: `
         .custom-slider {
           -webkit-appearance: none;
@@ -1942,6 +2335,13 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
         }
         .animate-spin-slow {
           animation: spin-slow 20s linear infinite;
+        }
+        .no-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+        .no-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
         }
       `}} />
 
@@ -2137,6 +2537,60 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
           </div>
         </div>
       )}
+
+      {/* Modal: Instruções da Sincronização Manual */}
+      <Dialog open={isSyncInstructionsOpen} onOpenChange={setIsSyncInstructionsOpen}>
+        <DialogContent className="sm:max-w-[460px] bg-card border border-border text-foreground p-6 rounded-2xl shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-base font-black tracking-tight text-foreground flex items-center gap-2">
+              <div className="p-1.5 bg-primary/10 text-primary rounded-lg">
+                <HelpCircle size={16} />
+              </div>
+              Passo a Passo: Sincronização Manual
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground font-semibold">
+              Siga as instruções abaixo para sincronizar a letra com o áudio da música.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3.5 pt-3 text-xs leading-relaxed font-medium text-muted-foreground">
+            <div className="flex gap-2.5">
+              <span className="w-5 h-5 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-[10px] shrink-0">1</span>
+              <p>O áudio começará a tocar do início e a primeira frase ficará destacada em roxo/azul aguardando a sua marcação.</p>
+            </div>
+            <div className="flex gap-2.5">
+              <span className="w-5 h-5 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-[10px] shrink-0">2</span>
+              <p>No momento exato em que a frase destacada for falada/cantada, pressione a tecla <kbd className="bg-muted px-1.5 py-0.5 rounded border border-border/45 font-mono text-[9px] text-foreground font-bold">ESPAÇO</kbd>, <kbd className="bg-muted px-1.5 py-0.5 rounded border border-border/45 font-mono text-[9px] text-foreground font-bold">ENTER</kbd> ou clique no botão <strong>Carimbar Linha</strong>.</p>
+            </div>
+            <div className="flex gap-2.5">
+              <span className="w-5 h-5 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-[10px] shrink-0">3</span>
+              <p>A frase seguinte ficará destacada automaticamente. Repita o processo até carimbar todas as frases da música.</p>
+            </div>
+            <div className="flex gap-2.5">
+              <span className="w-5 h-5 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-[10px] shrink-0">4</span>
+              <p>Se errar ou passar do ponto, pressione a tecla <kbd className="bg-muted px-1.5 py-0.5 rounded border border-border/45 font-mono text-[9px] text-foreground font-bold">BACKSPACE</kbd> ou clique em <strong>Desfazer Marco</strong> para retroceder e refazer a marcação da frase anterior.</p>
+            </div>
+          </div>
+
+          <DialogFooter className="pt-4">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setIsSyncInstructionsOpen(false)}
+              className="hover:bg-muted text-foreground font-bold rounded-xl text-xs h-10 cursor-pointer"
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={startManualSyncAfterConfirm}
+              className="bg-primary hover:bg-primary/90 text-primary-foreground font-extrabold rounded-xl text-xs h-10 px-5 cursor-pointer shadow-lg shadow-primary/15 flex items-center gap-1.5"
+            >
+              Começar Sincronia 🚀
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
