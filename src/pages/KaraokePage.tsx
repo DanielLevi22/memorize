@@ -1342,19 +1342,10 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
                 <Button
                   onClick={handleStartAiTranscription}
                   disabled={isTranscribingAi}
-                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs h-10 rounded-xl shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
+                  className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-extrabold text-xs h-10 rounded-xl shadow-md shadow-violet-500/25 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 transition-all active:scale-[0.98]"
                 >
-                  {isTranscribingAi ? (
-                    <>
-                      <RefreshCw size={13} className="animate-spin" />
-                      <span>{transcribingProgress || 'Processando com IA...'}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles size={13} />
-                      <span>Auto-Transcrever e Traduzir</span>
-                    </>
-                  )}
+                  <Sparkles size={13} />
+                  <span>Auto-Transcrever e Traduzir</span>
                 </Button>
               </div>
             </div>
@@ -2589,6 +2580,34 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
               Começar Sincronia 🚀
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Transcrição em Andamento */}
+      <Dialog open={isTranscribingAi} onOpenChange={() => {}}>
+        <DialogContent className="sm:max-w-[420px] bg-card border border-border text-foreground p-6 rounded-2xl shadow-2xl flex flex-col items-center justify-center text-center space-y-4">
+          <div className="relative w-16 h-16 flex items-center justify-center">
+            {/* Outer rotating gradient ring */}
+            <div className="absolute inset-0 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
+            {/* Inner glowing core */}
+            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary shadow-lg shadow-primary/20">
+              <Sparkles size={20} className="animate-pulse" />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <h3 className="text-sm font-black tracking-tight text-foreground uppercase">
+              Transcrição Inteligente Gemini
+            </h3>
+            <p className="text-[11px] text-muted-foreground leading-normal max-w-xs font-semibold">
+              A inteligência artificial do Google está analisando o áudio para segmentar, transcrever e traduzir cada frase automaticamente.
+            </p>
+          </div>
+          <div className="w-full bg-muted/40 rounded-xl p-3.5 border border-border/30">
+            <div className="flex items-center justify-center gap-2 text-xs font-black text-primary">
+              <RefreshCw size={12} className="animate-spin" />
+              <span>{transcribingProgress || "Iniciando processo..."}</span>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
