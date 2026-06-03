@@ -1,93 +1,129 @@
-# Sistema de Transcrição e Sincronização Multiprovedor (Karaokê)
+# Documentação Técnica: Sistema de Transcrição e Sincronização Multiprovedor (Karaokê)
 
-Este documento detalha o funcionamento, arquitetura e configuração do sistema multiprovedor de transcrição e tradução implementado no módulo **Karaokê** do aplicativo Memorize.
+Este documento descreve detalhadamente o funcionamento interno, arquitetura de software, conexões com APIs e o fluxo de dados para a transcrição e tradução de músicas no módulo **Karaokê** do aplicativo Memorize.
 
 ---
 
-## 1. Visão Geral do Sistema
+## 1. Arquitetura do Fluxo de Dados (Fases)
 
-O módulo de Karaokê do Memorize permite carregar áudios de músicas e sincronizá-los com letras de forma dinâmica. Para facilitar esse processo, o aplicativo possui uma ferramenta de transcrição automática baseada em inteligência artificial. 
+A transcrição inteligente de áudio no Memorize é dividida em quatro fases sequenciais:
 
-Para dar flexibilidade ao usuário e permitir tanto uso gratuito/privado local quanto alta precisão em nuvem, implementamos quatro provedores distintos de transcrição:
-
-```mermaid
-graph TD
-    A[Música em Áudio] --> B{Seletor de Provedor}
-    B -->|Gemini API| C[Gemini 2.5 Flash]
-    B -->|OpenAI API| D[OpenAI Whisper Cloud]
-    B -->|Groq API| E[Groq Whisper Veloz]
-    B -->|Local Browser| F[Web Worker: Whisper Local]
-    
-    C --> G[Letra Sincronizada em Português]
-    D --> H[Transcrição Original + Timestamps]
-    E --> H
-    F --> H
-    
-    H --> I[Tradução de Texto via Gemini API]
-    I --> G
+```
+[Áudio Bruto] 
+     │
+     ▼
+[Fase 1: Preparação de Áudio] (Decodificação, detecção de silêncio e fatiamento)
+     │
+     ▼
+[Fase 2: Speech-to-Text] (Execução via Gemini, OpenAI, Groq ou Whisper Local)
+     │
+     ▼
+[Fase 3: Tradução Híbrida] (Tradução secundária em massa via Gemini ou frase a frase via MyMemory)
+     │
+     ▼
+[Fase 4: Alinhamento e Salvamento] (Ordenação cronológica, salvaguarda e salvamento no IndexedDB)
 ```
 
 ---
 
-## 2. Comparativo de Provedores
+## 2. Fase 1: Preparação do Áudio
 
-| Característica | Gemini 2.5 Flash (Google) | OpenAI Whisper (API) | Groq Whisper (API) | Whisper Local (Navegador) |
-| :--- | :--- | :--- | :--- | :--- |
-| **Custo** | Pago (Plano gratuito disponível via Google AI Studio) | Pago (~ \$0.006 por minuto de áudio) | Grátis (Limites de teste) ou Pago | **100% Grátis** (Sem custos de infraestrutura) |
-| **Precisão** | Muito Boa (foca no sentido geral) | **Excelente** (precisão a nível de palavras e marcação de tempo) | **Excelente** (precisão a nível de palavras e marcação de tempo) | Boa (utiliza o modelo compacto `whisper-tiny`) |
-| **Velocidade** | Média (~ 10-15s por música) | Rápida (~ 5-10s por música) | **Extremamente Rápida** (~ 1-2s por música) | Média/Lenta (depende do hardware e processamento local) |
-| **Privacidade** | Áudio enviado aos servidores Google | Áudio enviado aos servidores OpenAI | Áudio enviado aos servidores Groq | **Total** (100% offline após primeiro download do modelo) |
-| **Requisitos** | Chave da API do Gemini | Chave da API da OpenAI | Chave da API da Groq | Download do modelo (~75MB) no primeiro uso |
+Antes de enviar o áudio para qualquer inteligência artificial, o arquivo de áudio carregado pelo usuário precisa ser processado localmente no navegador.
 
----
+### 2.1. Decodificação (`decodeAudioFile` em `src/utils/audioChunker.ts`)
+* O arquivo (Blob ou File) é carregado e decodificado na memória do navegador usando a **Web Audio API** (`AudioContext.decodeAudioData`).
+* Isso gera um `AudioBuffer` que contém a taxa de amostragem original (geralmente 44.1 kHz ou 48 kHz) e os canais de áudio brutos.
 
-## 3. O Fluxo de Tradução Híbrida
+### 2.2. Detecção de Silêncio (`findSilenceSplitPoints` em `src/utils/audioChunker.ts`)
+* Para motores de nuvem (Gemini, OpenAI, Groq), enviar áudios muito grandes de uma vez é ineficiente e sujeito a falhas de limite de requisição. Por isso, dividimos o áudio em pedaços menores (chunks) de aproximadamente **10 segundos**.
+* O algoritmo analisa a amplitude absoluta do canal 0 do `AudioBuffer` em janelas de 100ms em passos de 50ms para localizar os pontos de menor energia (silêncio ou pausa). Isso evita cortar o áudio no meio de uma palavra cantada.
+* Ele gera uma lista de carimbos de tempo (`splitPoints`) indicando onde cortar.
 
-Modelos do Whisper (OpenAI, Groq e Local) transcrevem o áudio no idioma original falado na música (ex: inglês, espanhol, japonês). No entanto, o Memorize precisa exibir a letra sincronizada no idioma original **e** a tradução correspondente em português linha por linha.
-
-Para resolver isso de forma otimizada e econômica, implementamos o **Fluxo Híbrido**:
-1. **Transcrição**: O áudio é enviado ao provedor Whisper escolhido (OpenAI, Groq ou Local). O Whisper retorna o texto original dividido em trechos de tempo com carimbos de início e fim (`startTime` e `endTime`).
-2. **Tradução Otimizada**: Pegamos a lista completa de linhas transcritas (texto puro) e fazemos uma **única chamada de texto rápida** para a API do Gemini 2.5 Flash, solicitando a tradução em massa das linhas para o português.
-3. **Preservação de Tempos**: Como a tradução é puramente textual e segue a mesma ordem das linhas, mantemos os timestamps (`startTime` e `endTime`) calculados com precisão pelo Whisper e acoplamos a tradução correspondente.
-4. **Resultado**: O usuário recebe uma letra sincronizada em tempo real com excelente precisão no idioma nativo e traduções fiéis em português.
+### 2.3. Conversão para WAV (`bufferToWav` em `src/utils/audioChunker.ts`)
+* Para cada chunk fatiado, o trecho correspondente do `AudioBuffer` é extraído e convertido para o formato **WAV (PCM 16-bit, amostrado na taxa nativa)** em um buffer binário (`ArrayBuffer`) e encapsulado em um `Blob`. É este arquivo WAV de 10 segundos que é enviado para as APIs externas.
 
 ---
 
-## 4. Arquitetura do Whisper Local (Web Worker)
+## 3. Fase 2: Transcrição (Speech-to-Text)
 
-Para permitir a transcrição gratuita e offline, foi criada uma integração com o runtime ONNX e a biblioteca `@huggingface/transformers`. O processamento de rede neural é pesado e causaria congelamentos na interface do usuário (UI) se rodasse na thread principal. Por isso, a execução é delegada a um **Web Worker** dedicado.
+De acordo com o seletor do usuário, a transcrição é processada por um dos quatro motores.
 
-### Detalhes de Implementação (`src/workers/whisper.worker.ts`):
-* **Carregamento e Cache**: O worker baixa o modelo pré-treinado `onnx-community/whisper-tiny` (composto de pesos otimizados de ~75MB). Ele é automaticamente guardado no **Cache Storage** do navegador. Execuções posteriores não consomem tráfego de internet.
-* **Aceleração por Hardware**: O pipeline está configurado para tentar usar aceleração via **WebGPU** caso o navegador dê suporte. Se não houver suporte, ele reverte automaticamente para CPU multithreaded via **WebAssembly (WASM)**.
-* **Reamostragem Dinâmica (Resampling)**: O modelo Whisper exige áudio estritamente amostrado a **16.000 Hz** (16kHz). O worker possui uma função interna de interpolação linear (`resampleTo16k`) que converte o buffer bruto de áudio `Float32Array` recebido da API de Áudio do navegador (que geralmente opera em 44.1kHz ou 48kHz) para os 16kHz requeridos antes da inferência.
+### 3.1. Provedor 1: Google Gemini 2.5 Flash (API)
+* **Como Conecta**: Requisição HTTPS `POST` direto para o endpoint de conteúdo multimodal do Google AI Studio.
+* **O que Precisa**: Chave de API `memorize_gemini_api_key` salva nas configurações.
+* **Particularidade**: O Gemini é o único modelo que faz a **transcrição e a tradução no mesmo prompt**. Enviamos o arquivo WAV e um prompt do sistema instruindo o modelo a retornar um formato JSON estrito contendo os tempos (`startTime`, `endTime`), a letra original (`text`) e a tradução em português (`translation`).
 
----
+### 3.2. Provedor 2: OpenAI Whisper (API)
+* **Como Conecta**: Requisição HTTPS `POST` para `https://api.openai.com/v1/audio/transcriptions`.
+* **O que Precisa**: Chave de API `memorize_openai_api_key` salva nas configurações.
+* **Particularidade**: Transcreve o áudio fatiado de 10 segundos. O Whisper retorna um objeto JSON contendo o texto transcrito segmentado em frases (`segments`) com marcações de tempo precisas (`start`, `end`) do idioma falado/cantado na música. **Não inclui tradução**.
 
-## 5. Integração na Interface Gráfica
+### 3.3. Provedor 3: Groq Whisper (API)
+* **Como Conecta**: Requisição HTTPS `POST` para `https://api.groq.com/openai/v1/audio/transcriptions`.
+* **O que Precisa**: Chave de API `memorize_groq_api_key` salva nas configurações.
+* **Particularidade**: Segue o mesmo padrão e protocolo da API da OpenAI, mas é executado nos chips LPU da Groq, o que faz com que cada trecho de 10 segundos seja processado quase instantaneamente (~100ms a 200ms por requisição). **Não inclui tradução**.
 
-### Configurações de API Keys (`SettingsPage.tsx`)
-Na tela de configurações do aplicativo, foi adicionada uma seção de chaves para os novos provedores com suporte a:
-* Armazenamento persistente seguro e privado direto no `localStorage` do navegador do usuário.
-* Visualização oculta (campo de senha) com botão para revelar/ocultar.
-* Validação de estado indicando visualmente se a chave já está configurada (`Configurada ✅`) ou se precisa ser inserida.
-* As chaves cadastradas são:
-  - `memorize_openai_api_key`
-  - `memorize_groq_api_key`
-
-### Seletor de Modelo (`KaraokePage.tsx`)
-No card de controle de transcrição, o botão único de transcrição foi substituído por um conjunto com:
-1. **Dropdown de Seleção**: Um menu suspenso permitindo escolher em tempo real qual provedor usar antes de disparar o processamento.
-2. **Status Visual Otimizado**: Indicadores de progresso detalhados, especialmente para o Whisper Local, mostrando o progresso percentual de download de cada arquivo do modelo ONNX na primeira execução.
-
-### Modal de Confirmação de Reinício
-Para evitar a perda acidental de progresso, ao clicar no botão "Recomeçar do zero" no painel de transcrição do Karaokê, o sistema exibe um modal de confirmação explicando claramente que todos os pedaços já transcritos e salvos temporariamente na base de dados IndexedDB serão perdidos antes de iniciar uma nova transcrição.
+### 3.4. Provedor 4: Whisper Local (Navegador via Web Worker)
+* **Como Conecta**: Comunicação interna orientada a eventos (`postMessage`) com um **Web Worker** dedicado (`src/workers/whisper.worker.ts`).
+* **O que Precisa**: Nenhum dado externo ou chave. Apenas internet na primeira vez para baixar os pesos do modelo (`onnx-community/whisper-tiny` de ~75MB).
+* **Como Funciona no Web Worker**:
+  1. **Thread Separada**: O runtime do ONNX e a biblioteca `@huggingface/transformers` rodam em uma thread paralela no worker para evitar travar a interface visual (UI) do usuário.
+  2. **Reamostragem Dinâmica (`resampleTo16k`)**: O Whisper exige áudio a **16.000 Hz** (16kHz). Como o áudio bruto decodificado pelo navegador geralmente está a 44.1kHz ou 48kHz, o worker executa uma interpolação linear para reamostrar os dados de ponto flutuante (`Float32Array`) para a frequência correta de 16kHz antes da inferência.
+  3. **Inferência ONNX**: Roda o modelo Whisper tiny usando aceleração por **WebGPU** (caso o navegador e a GPU suportem) ou via **WebAssembly (WASM)** em modo multithread na CPU.
+  4. **Retorno**: Retorna os trechos (`result.chunks`) mapeando o texto e os timestamps originais (`[startTime, endTime]`). **Não inclui tradução**.
 
 ---
 
-## 6. Arquivos Relevantes no Projeto
+## 4. Fase 3: Tradução Híbrida (Conexão Secundária)
 
-* **Documentação**: [docs/whisper_transcription_options.md](file:///c:/pessoal/memorize/docs/whisper_transcription_options.md)
-* **Web Worker**: [src/workers/whisper.worker.ts](file:///c:/pessoal/memorize/src/workers/whisper.worker.ts)
-* **Tela de Configurações**: [src/pages/SettingsPage.tsx](file:///c:/pessoal/memorize/src/pages/SettingsPage.tsx)
-* **Tela de Karaokê**: [src/pages/KaraokePage.tsx](file:///c:/pessoal/memorize/src/pages/KaraokePage.tsx)
+Como os motores Whisper (OpenAI, Groq e Local) apenas extraem a voz no idioma falado da música (ex: inglês), precisamos de um processo secundário para traduzir as frases resultantes para o português do Brasil. O aplicativo decide qual API de tradução usar de acordo com a disponibilidade das chaves do usuário:
+
+```
+                  ┌───────────────────────────────┐
+                  │   Whisper finaliza o texto    │
+                  └───────────────┬───────────────┘
+                                  │
+                   Possui API Key do Gemini?
+                     /                         \
+                   Sim                          Não
+                   /                              \
+  ┌─────────────────────────────────┐    ┌──────────────────────────────────┐
+  │   Tradução via Gemini API       │    │   Tradução via MyMemory API      │
+  │   - Uma única chamada em texto  │    │   - Chamadas sequenciais grátis  │
+  │   - Muito rápido e alta qualidade│    │   - Phrase-by-phrase loop        │
+  └─────────────────────────────────┘    └──────────────────────────────────┘
+```
+
+### 4.1. Método de Tradução 1: Otimização em Bloco com Gemini (Ideal)
+* Se o usuário configurou uma chave do Gemini nas configurações (`memorize_gemini_api_key`), o aplicativo executa a função `requestGeminiTranslationOnly`.
+* Em vez de fazer uma chamada para cada frase (o que gastaria muitos créditos/tempo de rede), juntamos apenas os textos de todas as frases transcritas em uma lista JSON e enviamos em uma **única requisição de texto rápida** para a API do Gemini 2.5 Flash.
+* O Gemini devolve um array com as traduções ordenadas. O aplicativo acopla essas traduções aos timestamps originais calculados pelo Whisper.
+
+### 4.2. Método de Tradução 2: Fallback Gratuito com MyMemory (100% Grátis/Offline)
+* Se o usuário **não configurou a chave do Gemini** (caso típico do uso do Whisper Local gratuito), a aplicação utiliza o tradutor público e gratuito **MyMemory** (`mymemory.translated.net`).
+* O aplicativo realiza um loop sequencial por cada linha transcrita, chamando a API gratuita `translateWithMyMemory(linha.text)`.
+* Atualizamos a barra de carregamento no modal com a porcentagem correspondente ao progresso do loop de tradução (`Traduzindo trecho X de Y...`) para dar feedback visual em tempo real.
+* Aplicamos um delay de 100ms entre as requisições para evitar limites de taxa (rate limits) da API pública.
+
+---
+
+## 5. Fase 4: Sincronização, Alinhamento e Edição
+
+Após receber os textos e tempos, aplicamos tratamentos para que a letra funcione perfeitamente no player de Karaokê.
+
+### 5.1. Salvaguarda Cronológica (`adjustTimestampsSafeguard` em `src/utils/audioChunker.ts`)
+Para garantir que as frases fiquem em ordem e não ocorram sobreposições visuais estranhas na tela:
+1. Ordenamos todas as linhas pelo tempo de início (`startTime`).
+2. Garantimos um espaço de tempo mínimo de **0.5 segundos** entre o início de uma frase e a próxima.
+3. Calculamos o tempo de fim (`endTime`) de cada linha. Se estiver zerado ou inválido, definimos uma duração padrão de 3 segundos, limitando-a obrigatoriamente ao início da próxima frase ou à duração total do áudio para evitar sobreposição de textos na tela.
+
+### 5.2. Preservação de Tempos em Edições (`handleLoadTextToTempLines` em `src/pages/KaraokePage.tsx`)
+Quando o usuário decide editar a letra na aba **Letra Texto** (para arrumar palavras que o Whisper entendeu errado):
+* O texto do editor é normalizado convertendo quebras de linha Windows (`\r\n` $\rightarrow$ `\n`).
+* **Se o número de linhas no editor for igual ao número de frases salvas**: O aplicativo substitui apenas o conteúdo do texto original de cada linha, **mantendo intactos** todos os tempos de início e fim (`startTime`, `endTime`) e traduções obtidos pela IA.
+* **Se o número de linhas mudou**: O aplicativo faz uma busca inteligente: para as frases cujo texto é idêntico ao antigo, ele preserva o tempo original. Para as novas frases inseridas, ele herda o tempo da linha correspondente do mesmo índice anterior como fallback, evitando que a música inteira perca a sincronização.
+
+### 5.3. Salvamento Direto e Banco de Dados (IndexedDB)
+* Adicionamos o botão verde **"Salvar Letra Sincronizada"** na aba de Texto. 
+* Ao clicar, as alterações de texto são sincronizadas com a memória usando o método do item 5.2, os dados são validados, formatados como arquivo LRC internamente, e gravados na tabela `texts` no IndexedDB do navegador. O `textId` da tabela `audioTracks` é atualizado para vincular o áudio à letra sincronizada.
+* A Zona de Perigo executa `db.texts.delete(textId)` e limpa o `textId` do áudio, retornando a tela ao estado de introdução inicial.
