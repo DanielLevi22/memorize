@@ -1286,48 +1286,62 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
             </div>
 
             {/* Ações de Letras */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 shrink-0">
-              <div className="space-y-3">
-                <Button
-                  onClick={handleStartManualSync}
-                  className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-black text-xs h-11 rounded-xl shadow-md shadow-primary/10 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.98]"
-                >
-                  <Settings2 size={14} />
-                  Iniciar Sincronia Manual
-                </Button>
-                
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <input
-                      type="file"
-                      accept=".lrc"
-                      onChange={handleImportLRC}
-                      id="lrc-import-input"
-                      className="hidden"
-                    />
-                    <Button
-                      onClick={() => document.getElementById('lrc-import-input')?.click()}
-                      variant="outline"
-                      className="w-full border-border/60 hover:bg-muted text-foreground font-bold text-xs h-10 rounded-xl flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <Upload size={13} />
-                      Importar LRC
-                    </Button>
-                  </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 shrink-0 items-stretch">
+              {/* Card 1: Sincronização Manual */}
+              <div className="bg-muted/30 border border-border/30 rounded-2xl p-4 flex flex-col justify-between space-y-3">
+                <div className="space-y-1">
+                  <h4 className="text-[10px] font-black text-foreground uppercase tracking-widest flex items-center gap-1.5">
+                    <Settings2 size={11} className="text-primary" />
+                    Sincronização Manual & LRC
+                  </h4>
+                  <p className="text-[9px] text-muted-foreground leading-normal font-semibold">
+                    Alinhe os tempos da letra em tempo real enquanto ouve a música, ou faça a importação/exportação de arquivos LRC externos.
+                  </p>
+                </div>
 
-                  {tempLines.length > 0 && (
-                    <Button
-                      onClick={handleExportLRC}
-                      variant="outline"
-                      className="flex-1 border-border/60 hover:bg-muted text-foreground font-bold text-xs h-10 rounded-xl flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <Download size={13} />
-                      Exportar LRC
-                    </Button>
-                  )}
+                <div className="space-y-2">
+                  <Button
+                    onClick={handleStartManualSync}
+                    className="w-full bg-primary hover:bg-primary/95 text-primary-foreground font-extrabold text-xs h-10 rounded-xl shadow-md shadow-primary/10 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.98]"
+                  >
+                    <Settings2 size={13} />
+                    Iniciar Sincronia Manual
+                  </Button>
+
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type="file"
+                        accept=".lrc"
+                        onChange={handleImportLRC}
+                        id="lrc-import-input"
+                        className="hidden"
+                      />
+                      <Button
+                        onClick={() => document.getElementById('lrc-import-input')?.click()}
+                        variant="outline"
+                        className="w-full border-border/60 hover:bg-muted text-foreground font-bold text-xs h-10 rounded-xl flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <Upload size={13} />
+                        Importar LRC
+                      </Button>
+                    </div>
+
+                    {tempLines.length > 0 && (
+                      <Button
+                        onClick={handleExportLRC}
+                        variant="outline"
+                        className="flex-1 border-border/60 hover:bg-muted text-foreground font-bold text-xs h-10 rounded-xl flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <Download size={13} />
+                        Exportar LRC
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </div>
 
+              {/* Card 2: Transcrição por IA */}
               <div className="bg-muted/30 border border-border/30 rounded-2xl p-4 flex flex-col justify-between space-y-3">
                 <div className="space-y-1">
                   <h4 className="text-[10px] font-black text-foreground uppercase tracking-widest flex items-center gap-1.5">
@@ -1335,7 +1349,7 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
                     Transcrição com IA Gemini
                   </h4>
                   <p className="text-[9px] text-muted-foreground leading-normal font-semibold">
-                    Use a inteligência artificial do Google para decodificar o áudio em inglês/idioma original e gerar a tradução para o português automaticamente.
+                    Decodifique o áudio no idioma original e gere a tradução para o português automaticamente usando a IA do Google.
                   </p>
                 </div>
 
@@ -1345,7 +1359,7 @@ Não adicione explicações, comentários ou markdown fora do bloco JSON.
                   className="w-full bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-extrabold text-xs h-10 rounded-xl shadow-md shadow-violet-500/25 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 transition-all active:scale-[0.98]"
                 >
                   <Sparkles size={13} />
-                  <span>Auto-Transcrever e Traduzir</span>
+                  Auto-Transcrever e Traduzir
                 </Button>
               </div>
             </div>
