@@ -351,18 +351,62 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     }
   }, [tempLines]);
 
-  const handleLoadTextToTempLines = () => {
-    const rawLines = transcriptionText.split('\n').map(l => l.trim()).filter(Boolean);
-    const currentText = tempLines.map(l => l.text).join('\n');
+  const handleLoadTextToTempLines = (): TranscriptionLine[] => {
+    // Normaliza quebras de linha para evitar problemas no Windows (\r\n vs \n)
+    const normalizedText = transcriptionText.replace(/\r\n/g, '\n');
+    const rawLines = normalizedText.split('\n').map(l => l.trim()).filter(Boolean);
+    
+    const currentText = tempLines.map(l => l.text.trim()).join('\n');
     const newText = rawLines.join('\n');
+    
     if (currentText !== newText || tempLines.length === 0) {
-      setTempLines(rawLines.map(text => ({
-        id: crypto.randomUUID(),
-        text,
-        startTime: 0,
-        endTime: undefined
-      })));
+      let updated: TranscriptionLine[] = [];
+      if (tempLines.length === 0) {
+        updated = rawLines.map(text => ({
+          id: crypto.randomUUID(),
+          text,
+          startTime: 0,
+          endTime: undefined
+        }));
+      } else {
+        // Se já temos linhas na memória, atualizamos os textos preservando ao máximo os tempos.
+        if (rawLines.length === tempLines.length) {
+          // Caso comum: edição simples de digitação ou correção ortográfica, mantendo a estrutura de frases.
+          updated = tempLines.map((line, idx) => ({
+            ...line,
+            text: rawLines[idx]
+          }));
+        } else {
+          // Caso estrutural: frases foram adicionadas ou removidas.
+          updated = rawLines.map((text, idx) => {
+            // Tenta encontrar uma linha existente com o exato mesmo texto
+            const exactMatch = tempLines.find(l => l.text.trim() === text);
+            if (exactMatch) {
+              return {
+                id: exactMatch.id,
+                text,
+                startTime: exactMatch.startTime,
+                endTime: exactMatch.endTime,
+                translation: exactMatch.translation
+              };
+            }
+            
+            // Caso contrário, herda os tempos do índice correspondente na lista anterior como fallback
+            const fallback = tempLines[idx];
+            return {
+              id: fallback ? fallback.id : crypto.randomUUID(),
+              text,
+              startTime: fallback ? fallback.startTime : (idx > 0 && tempLines[idx - 1] ? tempLines[idx - 1].startTime + 2.0 : 0),
+              endTime: fallback ? fallback.endTime : undefined,
+              translation: fallback ? fallback.translation : undefined
+            };
+          });
+        }
+      }
+      setTempLines(updated);
+      return updated;
     }
+    return tempLines;
   };
 
   const adjustLineTime = (idx: number, delta: number) => {
@@ -1238,7 +1282,8 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
 
   const handleSaveTranscription = async () => {
     if (!activeTrack) return;
-    const sortedLines = [...tempLines].sort((a, b) => a.startTime - b.startTime);
+    const linesToSave = handleLoadTextToTempLines();
+    const sortedLines = [...linesToSave].sort((a, b) => a.startTime - b.startTime);
 
     try {
       let textId = activeTrack.textId;
@@ -2209,6 +2254,23 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
                 )}
               </div>
             </div>
+
+            {/* Salvar Botão na aba Texto se houver linhas transcritas */}
+            {tempLines.length > 0 && (
+              <div className="flex items-center justify-between gap-3 pt-3 border-t border-border/20 shrink-0">
+                <span className="text-[10px] text-muted-foreground font-bold leading-normal">
+                  Dica: A letra foi sincronizada com sucesso. Salve para aplicar ao player.
+                </span>
+                <Button
+                  onClick={handleSaveTranscription}
+                  disabled={tempLines.length === 0}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs h-11 rounded-xl shadow-lg flex items-center justify-center gap-1.5 cursor-pointer px-6 shrink-0"
+                >
+                  <Save size={13} />
+                  Salvar Letra Sincronizada
+                </Button>
+              </div>
+            )}
           </div>
         ) : transcriptionTab === 'adjust' ? (
           /* Aba de Ajuste Manual de Tempos e Frases */
