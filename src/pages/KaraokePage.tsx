@@ -1907,6 +1907,13 @@ Não adicione markdown fora do bloco JSON.
         }
       };
 
+      worker.onerror = (err) => {
+        console.error("Web Worker error:", err);
+        clearInterval(checkCancellation);
+        worker.terminate();
+        reject(new Error("Erro no processador local (Web Worker). Detalhes: " + (err.message || 'Erro de inicialização')));
+      };
+
       const audioData = audioBuffer.getChannelData(0);
       worker.postMessage({
         type: 'start',
