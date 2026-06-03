@@ -69,11 +69,14 @@ De acordo com o seletor do usuário (tendo **Groq Whisper** como padrão), a tra
     * `onnx-community/whisper-small` (~460MB): Altíssima precisão e qualidade de transcrição (requer WebGPU ou CPU forte).
 * **Como Funciona & Parâmetros de Robustez**:
   1. **Thread Separada**: O runtime do ONNX e a biblioteca `@huggingface/transformers` rodam em uma thread paralela no worker para evitar travar a interface visual (UI) do usuário.
-  2. **Parâmetros Anti-Alucinação e Filtro de Silêncio**: Para mitigar loops de repetição de texto (hallucination loops) e garantir o alinhamento correto em introduções musicais silenciosas, o tocador executa a decodificação com as seguintes salvaguardas:
+  2. **Parâmetros Anti-Alucinação e Filtro de Silêncio (Particularidades do transformers.js)**:
+     - **Parâmetros Planos (Flat)**: Ao contrário do Python, o pipeline do transformers.js não desempacota o objeto aninhado `generate_kwargs`. Os argumentos de geração devem ser passados **diretamente no objeto de opções principal** da chamada do pipeline para serem propagados ao `model.generate()`.
+     - **Ausência de Thresholds Nativos**: Parâmetros como `no_speech_threshold`, `logprob_threshold` e `compression_ratio_threshold` não são implementados no gerador do transformers.js e são ignorados.
+     - **Prevenção de Repetição (Estratégia Híbrida)**:
+       * **`repetition_penalty: 1.1`**: Aplica uma penalização leve a tokens já gerados para desestimular repetições desnecessárias quando o sinal de áudio é fraco ou ausente.
+       * **`no_repeat_ngram_size: 8`**: Atua como uma trava de segurança absoluta. Ela proíbe que qualquer sequência de 8 tokens se repita. Sequências curtas legítimas de músicas (como repetir a frase "you made me a" ou palavras como "believer, believer") têm tamanho inferior a 8 e são preservadas. No entanto, loops de repetição infinitos causados por alucinação (ex: repetir *"ooh, ooh..."* ou *"ever did ever did..."*) rapidamente ultrapassam 8 tokens de extensão consecutiva e são imediatamente bloqueados pelo gerador.
+     - **Filtro de Silêncio Inicial (`max_initial_timestamp_index: null`)**: Por padrão, o Whisper restringe o carimbo de tempo inicial a estar dentro do primeiro segundo (`max_initial_timestamp_index = 1`, equivalente a 1.0s). Em introduções musicais ou instrumentais longas (como em *Imagine Dragons - Believer*), essa restrição força o modelo a prever texto logo no começo, resultando em alucinações de soletração precoce. Configurar `max_initial_timestamp_index: null` desativa essa restrição, permitindo que o modelo posicione livremente o primeiro timestamp onde o canto de fato se inicia.
      - `temperature: 0.0`: Decodificação estritamente determinística (busca gulosa).
-     - `no_speech_threshold: 0.6`: Limiar de ausência de voz. Se a probabilidade de um segmento ser silêncio/música pura exceder 60%, o Whisper o descarta. Isso evita que a primeira palavra da letra seja sincronizada erroneamente no início (0.0s) de introduções instrumentais longas.
-     - `logprob_threshold: -1.0`: Descarte por baixa probabilidade. Se o modelo tiver pouca certeza sobre as palavras transcritas, o trecho é rejeitado.
-     - `compression_ratio_threshold: 2.4`: Prevenção de repetição. Se o texto gerado começar a repetir as mesmas sequências em loop (alta taxa de compressão), o decodificador descarta o trecho repetitivo.
   3. **Mapeamento e Segurança contra Nulos**: O mapeamento de carimbos de tempo dos segmentos convertidos no worker faz a sanitização de `null`/`undefined` nos valores de `timestamp` retornados pelo Whisper antes de realizar formatações numéricas como `.toFixed()`, eliminando travamentos de execução no front-end.
   4. **Retorno**: Retorna os trechos (`result.chunks`) mapeando o texto e os timestamps originais (`[startTime, endTime]`). **Não inclui tradução**.
 
@@ -114,3 +117,24 @@ Quando o usuário edita a letra manualmente (aba **Letra Texto**):
 Anteriormente, o sistema tentava fazer o alinhamento forçado da letra fornecida pelo usuário contra o áudio via I.A (Lyrics Alignment). Devido à alta complexidade, custos extras de prompts, e instabilidade de limites de taxa nas APIs, **a estratégia de alinhamento forçado foi descontinuada**. 
 
 Agora, o Karaokê utiliza **estritamente o fluxo de transcrição direta completa do áudio do zero** (sendo o Groq Whisper o modelo padrão veloz), garantindo 100% de estabilidade de tempos e sincronia limpa obtida direto do modelo Speech-to-Text.
+
+---
+
+## 7. Pós-processamento: Correção Inteligente via LLM (Gemini Corretor)
+
+Para os motores Whisper (especialmente o **Whisper Local**), ruídos instrumentais e efeitos na voz podem causar elisão de sílabas e pequenos erros fonéticos (como transcrever *"sea, oh"* como *"CEO"*, *"sail"* como *"sale"*, etc.).
+
+Para resolver isso sem perder os tempos de marcação do áudio (timestamps), implementamos um fluxo automático de **Correção Inteligente**:
+* **Gatilho**: Se o provedor de transcrição não for o Gemini (ex: Whisper Local ou Groq Whisper) e houver uma chave de API do Gemini configurada.
+* **Funcionamento**: A lista de frases transcritas (contendo tempos corretos mas textos com pequenos erros) é enviada em lote ao **Gemini 2.5 Flash** através do método `requestGeminiTextCorrection`.
+* **Prompt**: O Gemini recebe o título da música (obtido de `activeTrack.title`) e a lista de frases brutas, retornando a lista corrigida e alinhada com a letra oficial conhecida da música, mantendo a ordem e quantidade exata de linhas.
+* **Vantagem**: Garante que o texto exibido e a tradução gerada na sequência fiquem 100% limpos e fiéis à letra real da música, aproveitando os tempos precisos de início e fim mapeados localmente.
+
+---
+
+## 8. Estudo Futuro: Pré-processamento com Isolamento de Voz (Vocals Isolation)
+
+Como alternativa futura para melhorar a qualidade das transcrições offline do Whisper Local diretamente no navegador:
+* **Conceito**: Separar a trilha de voz (a capela) da trilha de instrumentos (instrumental) antes de alimentar o decodificador do Whisper.
+* **Ferramentas**: Uso de modelos de separação de fontes (como *Demucs* ou *Spleeter*) portados para ONNX Runtime (Web) ou bibliotecas de processamento de sinal que limpem o ruído de fundo (bateria, guitarras distorcidas) que mascaram as plosivas e fricativas.
+* **Benefício**: Ao transcrever uma trilha de voz isolada e limpa, a precisão do Whisper (mesmo nos modelos leves como o `tiny`) se aproxima de 100%, reduzindo a necessidade de correções semânticas posteriores.

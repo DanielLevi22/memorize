@@ -1572,6 +1572,33 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
       }
       setTranscribingPercent(100);
 
+      // Se usamos Whisper (API ou Local), tentamos primeiro a correção inteligente via Gemini se disponível
+      if (transcriptionProvider !== 'gemini' && finalLines.length > 0) {
+        const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
+        if (geminiApiKey.trim()) {
+          setTranscribingProgress('Corrigindo texto transcrito com Gemini...');
+          try {
+            const correctedTexts = await requestGeminiTextCorrection(finalLines, activeTrack.title, geminiApiKey);
+            if (correctedTexts.length === finalLines.length) {
+              finalLines = finalLines.map((l, idx) => ({
+                ...l,
+                text: correctedTexts[idx].trim()
+              }));
+              toast.success('Texto corrigido com sucesso via Gemini!');
+            } else {
+              console.warn(`Tamanho do texto corrigido (${correctedTexts.length}) não bate com original (${finalLines.length})`);
+              toast.warning('A quantidade de linhas corrigidas retornada pela IA diferiu da original. A correção automática foi ignorada para preservar a sincronia.');
+            }
+          } catch (corrErr: any) {
+            console.warn("Falha ao corrigir textos com Gemini:", corrErr);
+            toast.warning(`A correção de texto automática falhou: ${corrErr.message || corrErr}`);
+          }
+        } else if (transcriptionProvider === 'local') {
+          // Mostrar aviso amigável que a correção inteligente requer chave Gemini
+          toast.info('Dica: Para corrigir erros de ortografia fonética automaticamente após a transcrição local, configure uma API Key do Gemini nas Configurações.');
+        }
+      }
+
       // Se usamos Whisper (API ou Local), traduzimos as frases finais para o português
       if (transcriptionProvider !== 'gemini' && finalLines.length > 0) {
         const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
@@ -1978,6 +2005,64 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
 
     const parsed = JSON.parse(textResponse);
     return parsed.translations || [];
+  };
+
+  const requestGeminiTextCorrection = async (
+    lines: TranscriptionLine[],
+    trackTitle: string,
+    apiKey: string
+  ): Promise<string[]> => {
+    if (lines.length === 0) return [];
+
+    const promptText = `
+Você é um especialista em transcrição e inteligência artificial de altíssima precisão para músicas.
+Sua tarefa é analisar as frases transcritas da música "${trackTitle}" e corrigir quaisquer erros de transcrição fonética, homófonos ou alucinações (como "master of my CEO" em vez de "master of my sea, oh", "one at the sale" em vez de "one at the sail", "Believe her" em vez de "Believer", etc.) para alinhá-las com a letra oficial real da música.
+
+Importante:
+1. O array retornado "corrected_texts" DEVE ter exatamente o mesmo número de elementos do array de entrada "texts" (exatamente ${lines.length} itens). Cada índice do resultado deve corresponder rigorosamente ao mesmo índice da entrada.
+2. Não junte linhas e não divida linhas em múltiplas frases. Mantenha a correspondência estrita de 1 para 1.
+3. Não altere a ordem das linhas.
+4. Se a linha original já estiver correta, ou se corresponder a ruído/silêncio que não pode ser mapeado para a letra oficial, repita o texto original, mas nunca remova o item da lista.
+5. Retorne obrigatoriamente um JSON no seguinte formato:
+{
+  "corrected_texts": [
+    "Texto corrigido da primeira linha",
+    "Texto corrigido da segunda linha"
+  ]
+}
+
+NÃO adicione nenhuma introdução, explicação ou formatação markdown (como blocos de código \`\`\`json). Retorne estritamente apenas o JSON válido.
+
+JSON de entrada:
+${JSON.stringify({ texts: lines.map(l => l.text) })}
+`;
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const response = await fetchWithRetry(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{ text: promptText }]
+        }],
+        generationConfig: {
+          responseMimeType: 'application/json'
+        }
+      })
+    }, 'Gemini Corretor');
+
+    if (!response.ok) {
+      throw new Error("Falha na correção de texto via Gemini: status " + response.status);
+    }
+
+    const data = await response.json();
+    const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!textResponse) {
+      throw new Error('Retorno vazio do Gemini Corretor.');
+    }
+
+    const parsed = JSON.parse(textResponse);
+    return parsed.corrected_texts || [];
   };
 
   // Syncing stamp handlers
