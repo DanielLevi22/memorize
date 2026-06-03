@@ -3251,6 +3251,32 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
     );
   };
 
+  const getProviderModalDetails = () => {
+    switch (transcriptionProvider) {
+      case 'openai':
+        return {
+          title: "Transcrição OpenAI Whisper",
+          description: "O modelo Whisper na nuvem oficial da OpenAI está transcrevendo o áudio, e o Gemini traduzirá as frases para o português."
+        };
+      case 'groq':
+        return {
+          title: "Transcrição Groq Whisper (Veloz)",
+          description: "A infraestrutura ultra-veloz da Groq está transcrevendo o áudio via Whisper, e o Gemini traduzirá as frases para o português."
+        };
+      case 'local':
+        return {
+          title: "Transcrição Whisper Local",
+          description: "O modelo Whisper está rodando de forma 100% privada e local no seu navegador. O áudio é processado inteiramente no seu dispositivo."
+        };
+      case 'gemini':
+      default:
+        return {
+          title: "Transcrição Inteligente Gemini",
+          description: "A inteligência artificial do Google está analisando o áudio para segmentar, transcrever e traduzir cada frase automaticamente."
+        };
+    }
+  };
+
   return (
     <div className={`space-y-6 w-full px-4 md:px-8 py-4 relative flex flex-col ${
       activeTrack 
@@ -3588,10 +3614,10 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
           </div>
           <div className="space-y-1.5">
             <h3 className="text-sm font-black tracking-tight text-foreground uppercase">
-              Transcrição Inteligente Gemini
+              {getProviderModalDetails().title}
             </h3>
             <p className="text-[11px] text-muted-foreground leading-normal max-w-xs font-semibold">
-              A inteligência artificial do Google está analisando o áudio para segmentar, transcrever e traduzir cada frase automaticamente.
+              {getProviderModalDetails().description}
             </p>
           </div>
           <div className="w-full bg-muted/40 rounded-xl p-4 border border-border/30 space-y-3">
