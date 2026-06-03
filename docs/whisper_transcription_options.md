@@ -62,6 +62,11 @@ De acordo com o seletor do usuário (tendo **Groq Whisper** como padrão), a tra
 
 ### 3.4. Provedor 4: Whisper Local (Navegador via Web Worker)
 * **Como Conecta**: Comunicação interna orientada a eventos (`postMessage`) com um **Web Worker** dedicado (`src/workers/whisper.worker.ts`).
+* **Seleção de Tamanho de Modelo**:
+  - O usuário pode selecionar o tamanho do modelo diretamente na interface de seleção quando o motor "Whisper Local" está selecionado:
+    * `onnx-community/whisper-tiny` (~75MB): Mais rápido e leve.
+    * `onnx-community/whisper-base` (~140MB): Excelente equilíbrio e precisão de palavras.
+    * `onnx-community/whisper-small` (~460MB): Altíssima precisão e qualidade de transcrição (requer WebGPU ou CPU forte).
 * **Como Funciona**:
   1. **Thread Separada**: O runtime do ONNX e a biblioteca `@huggingface/transformers` rodam em uma thread paralela no worker para evitar travar a interface visual (UI) do usuário.
   2. **Parâmetros Anti-Alucinação**: Para evitar palavras inexistentes em silêncios, usamos `temperature: 0.0` (decodificação estritamente determinística).

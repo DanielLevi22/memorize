@@ -101,9 +101,17 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     return (localStorage.getItem('memorize_transcription_provider') as any) || 'groq';
   });
 
+  const [localModelSize, setLocalModelSize] = useState<'onnx-community/whisper-tiny' | 'onnx-community/whisper-base' | 'onnx-community/whisper-small'>(() => {
+    return (localStorage.getItem('memorize_local_whisper_model_size') as any) || 'onnx-community/whisper-tiny';
+  });
+
   useEffect(() => {
     localStorage.setItem('memorize_transcription_provider', transcriptionProvider);
   }, [transcriptionProvider]);
+
+  useEffect(() => {
+    localStorage.setItem('memorize_local_whisper_model_size', localModelSize);
+  }, [localModelSize]);
 
   // Speech Recognition States
   const [isListeningSpeech, setIsListeningSpeech] = useState(false);
@@ -1895,7 +1903,8 @@ Não adicione markdown fora do bloco JSON.
       worker.postMessage({
         type: 'start',
         audioData,
-        sampleRate: audioBuffer.sampleRate
+        sampleRate: audioBuffer.sampleRate,
+        modelName: localModelSize
       });
     });
   };
@@ -2408,6 +2417,27 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
                     <option value="local">Whisper Local (No Navegador - 100% Grátis)</option>
                   </select>
                 </div>
+
+                {transcriptionProvider === 'local' && (
+                  <div className="space-y-1.5 w-full">
+                    <label className="text-[8px] font-black text-muted-foreground uppercase tracking-wider block">
+                      Tamanho do Modelo Whisper Local
+                    </label>
+                    <select
+                      value={localModelSize}
+                      onChange={(e) => setLocalModelSize(e.target.value as any)}
+                      disabled={isTranscribingAi}
+                      className="w-full bg-background border border-border text-foreground px-3 py-1.5 rounded-xl text-xs font-bold outline-none focus:border-violet-500/50 cursor-pointer"
+                    >
+                      <option value="onnx-community/whisper-tiny">Tiny (~75MB - Mais Rápido)</option>
+                      <option value="onnx-community/whisper-base">Base (~140MB - Melhor Precisão)</option>
+                      <option value="onnx-community/whisper-small">Small (~460MB - Alta Precisão)</option>
+                    </select>
+                    <p className="text-[9px] text-muted-foreground leading-normal font-semibold mt-1">
+                      Modelos maiores exigem mais processamento. O download inicial é feito apenas uma vez.
+                    </p>
+                  </div>
+                )}
 
                 {activeTrack.aiTranscriptionProgress ? (
                   <div className="flex flex-col gap-2 w-full">
