@@ -1353,6 +1353,43 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     }
   };
 
+  const [isConfirmDeleteLyricsModalOpen, setIsConfirmDeleteLyricsModalOpen] = useState(false);
+
+  const handleDeleteLyrics = async () => {
+    if (!activeTrack || !activeTrack.textId) return;
+    
+    try {
+      const textId = activeTrack.textId;
+      
+      // Exclui do banco de dados na tabela texts
+      await db.texts.delete(textId);
+      
+      // Remove a referência na tabela audioTracks
+      await db.audioTracks.update(activeTrack.id, {
+        textId: undefined,
+        updatedAt: Date.now()
+      });
+      
+      // Limpa os estados locais do player/lyrics
+      setTempLines([]);
+      setTranscriptionText('');
+      setSyncingLineIdx(0);
+      
+      // Atualiza o objeto do track ativo
+      const updatedTrack = { ...activeTrack, textId: undefined };
+      setActiveTrack(updatedTrack);
+      setAllTracks(prev => prev.map(t => t.id === activeTrack.id ? updatedTrack : t));
+      
+      setIsConfirmDeleteLyricsModalOpen(false);
+      setIsEditingLyrics(false); // fecha o editor para que ele veja a tela vazia
+      
+      toast.success('Letra e sincronia excluídas com sucesso.');
+    } catch (err) {
+      console.error("[DeleteLyricsError]", err);
+      toast.error('Erro ao excluir letra e sincronia.');
+    }
+  };
+
   const handleToggleReadingVisibility = async () => {
     if (!activeTrack) return;
     
@@ -2254,6 +2291,29 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
                 )}
               </div>
             </div>
+
+            {/* Zona de Perigo para Letras Existentes */}
+            {activeTrack.textId && (
+              <div className="bg-destructive/5 border border-destructive/20 rounded-2xl p-4 flex flex-col justify-between space-y-3 shrink-0">
+                <div className="space-y-1">
+                  <h4 className="text-[10px] font-black text-destructive uppercase tracking-widest flex items-center gap-1.5">
+                    <Trash2 size={11} className="text-destructive" />
+                    Zona de Perigo
+                  </h4>
+                  <p className="text-[9px] text-muted-foreground leading-normal font-semibold">
+                    Exclua permanentemente a letra, tradução e marcações de tempo desta música do banco de dados local.
+                  </p>
+                </div>
+                <Button
+                  onClick={() => setIsConfirmDeleteLyricsModalOpen(true)}
+                  variant="outline"
+                  className="w-full border-destructive/20 bg-destructive/5 hover:bg-destructive/10 text-destructive hover:bg-destructive hover:text-white font-extrabold text-xs h-10 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.98]"
+                >
+                  <Trash2 size={13} />
+                  Excluir Letra e Sincronia
+                </Button>
+              </div>
+            )}
 
             {/* Salvar Botão na aba Texto se houver linhas transcritas */}
             {tempLines.length > 0 && (
@@ -3681,6 +3741,41 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
               className="flex-1 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs h-10 rounded-xl shadow-lg shadow-rose-500/10 cursor-pointer"
             >
               Confirmar e Apagar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Confirmação de Exclusão de Letra */}
+      <Dialog open={isConfirmDeleteLyricsModalOpen} onOpenChange={setIsConfirmDeleteLyricsModalOpen}>
+        <DialogContent className="sm:max-w-[420px] bg-card border border-border text-foreground p-6 rounded-2xl shadow-2xl flex flex-col justify-start text-left space-y-4">
+          <DialogHeader className="space-y-2">
+            <DialogTitle className="text-base font-black tracking-tight text-foreground flex items-center gap-2">
+              <div className="p-1.5 bg-rose-500/10 text-rose-500 rounded-lg">
+                <Trash2 size={16} />
+              </div>
+              <span>Excluir Letra e Sincronia?</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground leading-normal font-semibold text-left">
+              Atenção: Isso excluirá permanentemente a letra original, a tradução em português e todas as marcações de tempo desta música do seu banco de dados local. Você terá que digitar, importar ou transcrever do zero novamente.
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="flex items-center gap-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsConfirmDeleteLyricsModalOpen(false)}
+              className="flex-1 border-border/60 hover:bg-muted text-foreground font-extrabold text-xs h-10 rounded-xl cursor-pointer"
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={handleDeleteLyrics}
+              className="flex-1 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs h-10 rounded-xl shadow-lg shadow-rose-500/10 cursor-pointer"
+            >
+              Confirmar e Excluir
             </Button>
           </DialogFooter>
         </DialogContent>
