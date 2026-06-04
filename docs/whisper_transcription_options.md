@@ -67,6 +67,8 @@ De acordo com o seletor do usuário (tendo **Groq Whisper** como padrão), a tra
     * `onnx-community/whisper-tiny` (~75MB): Mais rápido e leve.
     * `onnx-community/whisper-base` (~140MB): Excelente equilíbrio e precisão de palavras.
     * `onnx-community/whisper-small` (~460MB): Altíssima precisão e qualidade de transcrição (requer WebGPU ou CPU forte).
+    * `onnx-community/whisper-medium` (~1.5GB): Altíssima precisão multilíngue (exige máquina forte, risco de Out of Memory).
+    * `onnx-community/whisper-large-v3-turbo` (~1.6GB): Máxima precisão e velocidade otimizada de geração (exige máquina forte, risco de Out of Memory).
 * **Como Funciona & Parâmetros de Robustez**:
   1. **Thread Separada**: O runtime do ONNX e a biblioteca `@huggingface/transformers` rodam em uma thread paralela no worker para evitar travar a interface visual (UI) do usuário.
   2. **Parâmetros Anti-Alucinação e Filtro de Silêncio (Particularidades do transformers.js)**:
@@ -134,12 +136,7 @@ Para resolver isso sem perder os tempos de marcação do áudio (timestamps), im
 
 ---
 
-## 8. Pré-processamento: Isolamento de Voz por IA (Vocals Isolation)
+## 8. Pré-processamento: Isolamento de Voz por IA (Removido)
 
-Para melhorar a precisão da transcrição (especialmente no **Whisper Local** ou sob instrumentais com muito ruído/bateria/guitarras), implementamos a funcionalidade opcional de **Isolamento de Voz**:
-* **Funcionamento**: Antes de decodificar e enviar o áudio para o Whisper, se habilitado pelo usuário na UI, o áudio original é processado para extrair a trilha vocal a capela através da função `separateVocalsCloud` em `src/utils/vocalSeparationCloud.ts`.
-* **Tecnologia Gratuita**: Utiliza APIs de Spaces públicos do HuggingFace executando o modelo de alta precisão **HTDemucs (Meta AI)** via a biblioteca `@gradio/client`. O serviço é 100% gratuito e não necessita de chaves de API.
-* **Integração de Fluxo**: O app solicita e baixa a faixa isolada de vocais (`vocals.wav`, correspondente ao índice `0` de saída do Space), decodifica esse resultado limpo em um `AudioBuffer` e passa-o para o motor do Whisper selecionado.
-* **Benefício**: Ao transcrever uma trilha de voz isolada e limpa (a capela) livre de baterias ou guitarras, o Whisper reduz drasticamente as alucinações e erros fonéticos causados por ruído instrumental de fundo.
-* **Resiliência e Fallback**: Caso os servidores públicos do HuggingFace estejam offline ou apresentem lentidão na fila, o aplicativo exibe um aviso de alerta e faz o fallback automático, decodificando e transcrevendo o áudio original com instrumental para não travar a experiência do usuário.
+*Nota: Esta funcionalidade (separação de vocais via Demucs Cloud) foi removida devido à alta latência e à instabilidade em servidores públicos do Hugging Face Spaces, não trazendo benefícios compensatórios frente à lentidão introduzida.*
 

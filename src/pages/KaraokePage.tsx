@@ -101,12 +101,8 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     return (localStorage.getItem('memorize_transcription_provider') as any) || 'local';
   });
 
-  const [localModelSize, setLocalModelSize] = useState<'onnx-community/whisper-tiny' | 'onnx-community/whisper-base' | 'onnx-community/whisper-small'>(() => {
+  const [localModelSize, setLocalModelSize] = useState<'onnx-community/whisper-tiny' | 'onnx-community/whisper-base' | 'onnx-community/whisper-small' | 'onnx-community/whisper-medium' | 'onnx-community/whisper-large-v3-turbo'>(() => {
     return (localStorage.getItem('memorize_local_whisper_model_size') as any) || 'onnx-community/whisper-tiny';
-  });
-
-  const [useVocalIsolation, setUseVocalIsolation] = useState<boolean>(() => {
-    return localStorage.getItem('memorize_use_vocal_isolation') === 'true';
   });
 
   useEffect(() => {
@@ -116,10 +112,6 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   useEffect(() => {
     localStorage.setItem('memorize_local_whisper_model_size', localModelSize);
   }, [localModelSize]);
-
-  useEffect(() => {
-    localStorage.setItem('memorize_use_vocal_isolation', String(useVocalIsolation));
-  }, [useVocalIsolation]);
 
   // Speech Recognition States
   const [isListeningSpeech, setIsListeningSpeech] = useState(false);
@@ -1546,35 +1538,8 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
       isTranscribeCancelledRef.current = false;
       setTranscribingPercent(0);
 
-      let audioFileToTranscribe: Blob = activeTrack.audioFile;
-
-      if (useVocalIsolation) {
-        setTranscribingProgress('Isolando voz por IA na nuvem (Demucs)...');
-        try {
-          const result = await separateVocalsCloud(
-            activeTrack.audioFile,
-            (progress: number, msg: string) => {
-              if (isTranscribeCancelledRef.current) {
-                // Lança erro para interromper a execução caso o usuário clique em Cancelar
-                throw new Error('CanceledByUser');
-              }
-              setTranscribingProgress(`[Isolamento de Voz] ${msg}`);
-              setTranscribingPercent(Math.round(progress * 0.5)); // Mapeia para 0-50%
-            },
-            'vocals'
-          );
-          audioFileToTranscribe = result.instrumentalBlob; // Em 'vocals', o blob retornado é o a capela (voz limpa)
-        } catch (vocalErr: any) {
-          if (vocalErr.message === 'CanceledByUser') {
-            throw vocalErr;
-          }
-          console.error("Vocal isolation failed, falling back to original audio:", vocalErr);
-          toast.warning(`Falha no isolamento de voz: ${vocalErr.message || vocalErr}. Prosseguindo com o áudio original.`);
-        }
-      }
-
       setTranscribingProgress('Decodificando áudio...');
-      const audioBuffer = await decodeAudioFile(audioFileToTranscribe);
+      const audioBuffer = await decodeAudioFile(activeTrack.audioFile);
       let finalLines: TranscriptionLine[] = [];
 
       // --- FLUXO DE TRANSCRIÇÃO DIRETA ---
@@ -2696,31 +2661,14 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
                       <option value="onnx-community/whisper-tiny">Tiny (~75MB - Mais Rápido)</option>
                       <option value="onnx-community/whisper-base">Base (~140MB - Melhor Precisão)</option>
                       <option value="onnx-community/whisper-small">Small (~460MB - Alta Precisão)</option>
+                      <option value="onnx-community/whisper-medium">Medium (~1.5GB - Altíssima Precisão)</option>
+                      <option value="onnx-community/whisper-large-v3-turbo">Large v3 Turbo (~1.6GB - Extrema Precisão)</option>
                     </select>
                     <p className="text-[9px] text-muted-foreground leading-normal font-semibold mt-1">
                       Modelos maiores exigem mais processamento. O download inicial é feito apenas uma vez.
                     </p>
                   </div>
                 )}
-
-                <div className="flex flex-col space-y-1.5 py-1 border-t border-border/20 mt-1">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      id="useVocalIsolation"
-                      checked={useVocalIsolation}
-                      onChange={(e) => setUseVocalIsolation(e.target.checked)}
-                      disabled={isTranscribingAi}
-                      className="w-4 h-4 rounded border-border text-violet-600 focus:ring-violet-500 cursor-pointer accent-violet-600"
-                    />
-                    <label htmlFor="useVocalIsolation" className="text-[10px] font-bold text-foreground cursor-pointer select-none">
-                      Isolar voz por IA (Demucs Cloud) antes de transcrever
-                    </label>
-                  </div>
-                  <p className="text-[9px] text-muted-foreground leading-normal font-semibold pl-6">
-                    Recomendado para músicas com instrumental barulhento. Remove o acompanhamento musical antes de enviar para o Whisper, minimizando erros e alucinações. (Grátis)
-                  </p>
-                </div>
 
                 {activeTrack.aiTranscriptionProgress ? (
                   <div className="flex flex-col gap-2 w-full">
