@@ -113,6 +113,14 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     localStorage.setItem('memorize_local_whisper_model_size', localModelSize);
   }, [localModelSize]);
 
+  // Alignment & Custom Translation Modal States
+  const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
+  const [transcribedLinesTemp, setTranscribedLinesTemp] = useState<TranscriptionLine[]>([]);
+  const [pastedTranslation, setPastedTranslation] = useState('');
+  const [pastedOriginalLyrics, setPastedOriginalLyrics] = useState('');
+  const [isAligningInProgress, setIsAligningInProgress] = useState(false);
+  const [adjustmentActiveTab, setAdjustmentActiveTab] = useState<'translation' | 'original' | 'auto'>('translation');
+
   // Speech Recognition States
   const [isListeningSpeech, setIsListeningSpeech] = useState(false);
   const [speechTranscript, setSpeechTranscript] = useState('');
@@ -1572,155 +1580,21 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
       }
       setTranscribingPercent(100);
 
-      // Se usamos Whisper (API ou Local), tentamos primeiro a correção inteligente via Gemini se disponível
-      if (transcriptionProvider !== 'gemini' && finalLines.length > 0) {
-        const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
-        if (geminiApiKey.trim()) {
-          try {
-            setTranscribingProgress('Buscando letra oficial na internet com Gemini...');
-            const sampleTexts = finalLines.map(l => l.text);
-            const officialLyrics = await requestOfficialLyricsViaSearch(activeTrack.title, sampleTexts, geminiApiKey);
-            console.log("[GeminiCorretor] Letra oficial buscada com sucesso.");
-
-            setTranscribingProgress('Corrigindo texto transcrito com Gemini...');
-            const correctedTexts = await requestGeminiTextCorrection(finalLines, officialLyrics, geminiApiKey);
-            
-            // Função auxiliar de alinhamento inteligente para lidar com diferenças de quantidade de linhas
-            const alignAndCorrectLines = (
-              original: TranscriptionLine[],
-              corrected: string[]
-            ): TranscriptionLine[] => {
-              if (corrected.length === original.length) {
-                return original.map((l, idx) => ({
-                  ...l,
-                  text: corrected[idx].trim()
-                }));
-              }
-
-              console.warn(`[GeminiAlign] Tamanho diferente: originais=${original.length}, corrigidos=${corrected.length}. Executando alinhamento inteligente...`);
-
-              return original.map((line, idx) => {
-                const origText = line.text.trim();
-                if (!origText) return line;
-
-                const windowSize = 8;
-                const startIdx = Math.max(0, idx - windowSize);
-                const endIdx = Math.min(corrected.length - 1, idx + windowSize);
-
-                let bestMatchText = origText;
-                let bestDist = Infinity;
-
-                for (let cIdx = startIdx; cIdx <= endIdx; cIdx++) {
-                  const candidate = corrected[cIdx].trim();
-                  if (!candidate) continue;
-
-                  const dist = getLevenshteinDistance(origText.toLowerCase(), candidate.toLowerCase());
-                  if (dist < bestDist) {
-                    bestDist = dist;
-                    bestMatchText = candidate;
-                  }
-                }
-
-                const maxLen = Math.max(origText.length, bestMatchText.length);
-                const normalizedDist = bestDist / (maxLen || 1);
-
-                // Permite até 60% de diferença de caracteres para alinhar com a letra buscada
-                if (normalizedDist < 0.6) {
-                  return {
-                    ...line,
-                    text: bestMatchText
-                  };
-                }
-                return line;
-              });
-            };
-
-            const alignedLines = alignAndCorrectLines(finalLines, correctedTexts);
-            let changeCount = 0;
-            finalLines = finalLines.map((l, idx) => {
-              const alignedText = alignedLines[idx].text;
-              if (l.text !== alignedText) {
-                changeCount++;
-              }
-              return {
-                ...l,
-                text: alignedText
-              };
-            });
-
-            if (changeCount > 0) {
-              toast.success(`Texto corrigido com sucesso via Gemini! (${changeCount} alterações aplicadas)`);
-            } else {
-              toast.info('Texto analisado pelo Gemini, mas nenhuma alteração foi necessária.');
-            }
-          } catch (corrErr: any) {
-            console.warn("Falha ao corrigir textos com Gemini:", corrErr);
-            toast.warning(`A correção de texto automática falhou: ${corrErr.message || corrErr}`);
-          }
-        } else if (transcriptionProvider === 'local') {
-          // Mostrar aviso amigável que a correção inteligente requer chave Gemini
-          toast.info('Dica: Para corrigir erros de ortografia fonética automaticamente após a transcrição local, configure uma API Key do Gemini nas Configurações.');
-        }
-      }
-
-      // Se usamos Whisper (API ou Local), traduzimos as frases finais para o português
-      if (transcriptionProvider !== 'gemini' && finalLines.length > 0) {
-        const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
-        let hasTranslation = false;
-
-        // O Whisper Local traduz EXCLUSIVAMENTE via MyMemory (para evitar consumo indevido de créditos Gemini)
-        if (transcriptionProvider !== 'local' && geminiApiKey.trim()) {
-          setTranscribingProgress('Traduzindo frases com Gemini...');
-          try {
-            const translations = await requestGeminiTranslationOnly(finalLines, geminiApiKey);
-            finalLines = finalLines.map((l, idx) => ({
-              ...l,
-              translation: translations[idx] || ''
-            }));
-            hasTranslation = true;
-          } catch (transErr) {
-            console.warn("Falha ao traduzir letras pelo Gemini, caindo para MyMemory:", transErr);
-          }
-        }
-
-        if (!hasTranslation) {
-          // Fallback para MyMemory (Grátis / Whisper Local)
-          setTranscribingProgress('Traduzindo frases com MyMemory (Grátis)...');
-          const translatedLines: TranscriptionLine[] = [];
-          for (let idx = 0; idx < finalLines.length; idx++) {
-            if (isTranscribeCancelledRef.current) {
-              throw new Error('CanceledByUser');
-            }
-            const line = finalLines[idx];
-            const transPercent = Math.round((idx / finalLines.length) * 100);
-            setTranscribingPercent(transPercent);
-            setTranscribingProgress(`Traduzindo trecho ${idx + 1} de ${finalLines.length}...`);
-            
-            let translated = '';
-            try {
-              translated = await translateWithMyMemory(line.text);
-              // Pequena pausa de 100ms para evitar sobrecarga/rate limit
-              await new Promise(r => setTimeout(r, 100));
-            } catch (err) {
-              console.error(`Erro ao traduzir "${line.text}" via MyMemory:`, err);
-            }
-            translatedLines.push({
-              ...line,
-              translation: translated
-            });
-          }
-          finalLines = translatedLines;
-        }
-      }
-
-      // Aplicar salvaguarda cronológica final
+      // Aplicar salvaguarda cronológica final nas linhas cruas transcritas
       const postProcessedLines = adjustTimestampsSafeguard(finalLines, 0.5, audioBuffer.duration);
 
       setTempLines(postProcessedLines);
       setTranscriptionText(postProcessedLines.map(l => l.text).join('\n'));
       setSyncingLineIdx(postProcessedLines.length);
-      
-      toast.success('Áudio transcrito e traduzido com sucesso!');
+
+      // Prepara e abre o modal de ajuste e tradução
+      setTranscribedLinesTemp(postProcessedLines);
+      setPastedTranslation('');
+      setPastedOriginalLyrics('');
+      setAdjustmentActiveTab('translation');
+      setIsAdjustmentModalOpen(true);
+
+      toast.success('Transcrição concluída! Configure a tradução ou ajuste a letra original.');
       setTranscriptionTab('view');
     } catch (err: any) {
       if (err.message === 'CanceledByUser') {
@@ -2085,86 +1959,89 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
     return parsed.translations || [];
   };
 
-  const requestOfficialLyricsViaSearch = async (
-    trackTitle: string,
-    sampleTexts: string[],
-    apiKey: string
-  ): Promise<string> => {
-    const promptText = `
-Busque na internet utilizando a ferramenta Google Search pela letra oficial original completa da música.
-Título provisório da faixa: "${trackTitle}"
-Amostra das frases iniciais da música:
-${JSON.stringify(sampleTexts.slice(0, 10))}
 
-Identifique o nome correto da música e do artista. Em seguida, faça uma busca no Google e retorne a letra oficial completa no idioma original (geralmente inglês), linha por linha.
-Retorne apenas o texto da letra oficial encontrada. Não adicione comentários, explicações ou markdown.
-`;
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-    const response = await fetchWithRetry(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{ text: promptText }]
-        }],
-        tools: [{
-          google_search: {}
-        }]
-      })
-    }, 'Gemini Busca Letra');
-
-    if (!response.ok) {
-      throw new Error(`Falha na busca da letra: status ${response.status}`);
+  const alignAndCorrectLines = (
+    original: TranscriptionLine[],
+    corrected: string[]
+  ): TranscriptionLine[] => {
+    if (corrected.length === original.length) {
+      return original.map((l, idx) => ({
+        ...l,
+        text: corrected[idx].trim()
+      }));
     }
 
-    const data = await response.json();
-    const lyricsText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!lyricsText) {
-      throw new Error('Nenhuma letra retornada na busca do Gemini.');
-    }
-    return lyricsText.trim();
+    console.warn(`[GeminiAlign] Tamanho diferente: originais=${original.length}, corrigidos=${corrected.length}. Executando alinhamento inteligente...`);
+
+    return original.map((line, idx) => {
+      const origText = line.text.trim();
+      if (!origText) return line;
+
+      const windowSize = 8;
+      const startIdx = Math.max(0, idx - windowSize);
+      const endIdx = Math.min(corrected.length - 1, idx + windowSize);
+
+      let bestMatchText = origText;
+      let bestDist = Infinity;
+
+      for (let cIdx = startIdx; cIdx <= endIdx; cIdx++) {
+        const candidate = corrected[cIdx].trim();
+        if (!candidate) continue;
+
+        const dist = getLevenshteinDistance(origText.toLowerCase(), candidate.toLowerCase());
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestMatchText = candidate;
+        }
+      }
+
+      const maxLen = Math.max(origText.length, bestMatchText.length);
+      const normalizedDist = bestDist / (maxLen || 1);
+
+      // Permite até 60% de diferença de caracteres para alinhar com a letra buscada
+      if (normalizedDist < 0.6) {
+        return {
+          ...line,
+          text: bestMatchText
+        };
+      }
+      return line;
+    });
   };
 
-  const requestGeminiTextCorrection = async (
+  const requestGeminiTranslationAlignment = async (
     lines: TranscriptionLine[],
-    officialLyrics: string,
+    pastedTranslation: string,
     apiKey: string
   ): Promise<string[]> => {
     if (lines.length === 0) return [];
 
     const promptText = `
-Você é um especialista em transcrição e inteligência artificial de altíssima precisão para músicas.
+Você é um especialista em sincronização de traduções de músicas de altíssima precisão.
 
-Sua tarefa consiste em corrigir as linhas transcritas (que contêm erros fonéticos, homófonos e distorções causadas pelo acompanhamento instrumental) para que correspondam EXATAMENTE à Letra Oficial de Referência fornecida abaixo.
+Abaixo está o JSON contendo as frases originais transcritas do áudio da música (em ordem cronológica):
+${JSON.stringify({ texts: lines.map(l => l.text) })}
 
-Letra Oficial de Referência:
+E abaixo está a tradução correta da música fornecida pelo usuário:
 """
-${officialLyrics}
+${pastedTranslation}
 """
 
+Sua tarefa consiste em alinhar e associar cada frase da tradução fornecida pelo usuário à respectiva frase original transcrita.
 Instruções obrigatórias:
-1. Mapeie cada frase transcrita de entrada ao trecho correspondente na Letra Oficial de Referência (cronologicamente).
-2. Substitua os erros de transcrição fonética (como "CEO" -> "sea, oh", "sale" -> "sail", "soak" -> "sulking", "wrought" -> "writing", "Thirties turn" -> "Third things third") pela grafia correta oficial.
-3. Substitua distorções graves ou trechos alucinados (como "Why? You burned me down, you kill me" -> "Pain! You break me down and build me up", ou "they been flowing and hippin'..." -> "ever lived, ebbing and flowing", ou "My life, my hurt, my doubt, we can't run" -> "My life, my love, my drive, it came from pain") pelo respectivo verso oficial correto correspondente àquela posição cronológica na música.
-4. O array retornado "corrected_texts" DEVE ter exatamente o mesmo número de elementos do array de entrada "texts" (exatamente ${lines.length} itens). Cada elemento do resultado deve corresponder rigorosamente ao mesmo índice da entrada, servindo como uma substituição direta (correspondência estrita de 1 para 1).
-5. Não junte e não divida linhas. Mantenha os breaks de linhas exatamente como estão na entrada.
-6. Se uma linha da transcrição original for apenas ruído, silêncio ou vocalização avulsa (como "ooh", "hey") que não faça parte das estrofes oficiais, você pode mantê-la ou limpá-la, mas DEVE preservar a linha no array (nunca remova o item).
-7. NÃO invente palavras ou expressões extras que não façam parte da letra real oficial da música.
+1. Mapeie cronologicamente as frases da tradução para as frases originais correspondentes.
+2. O array retornado "aligned_translations" DEVE ter exatamente o mesmo número de elementos do array de entrada "texts" (exatamente ${lines.length} itens). Cada elemento do resultado deve ser a tradução correta para a frase de entrada no mesmo índice (correspondência estrita de 1 para 1).
+3. Se a tradução contiver menos linhas, ou se um bloco de tradução cobrir duas frases originais, divida e repita a tradução inteligentemente.
+4. Se houver vocalizações originais (como "ooh", "hey") que não tenham correspondente na tradução, você pode deixar uma string vazia ou manter a vocalização, mas o array deve manter todos os índices.
+5. NÃO retorne nada além do JSON válido.
 
 Retorne obrigatoriamente um JSON no seguinte formato:
 {
-  "detected_song": "Nome da Música - Artista",
-  "corrected_texts": [
-    "Texto oficial correto da primeira linha",
-    "Texto oficial correto da segunda linha"
+  "aligned_translations": [
+    "Tradução correspondente da primeira frase",
+    "Tradução correspondente da segunda frase"
   ]
 }
-
-NÃO adicione nenhuma introdução, explicação ou formatação markdown (como blocos de código \`\`\`json). Retorne estritamente apenas o JSON válido.
-
-JSON de entrada:
-${JSON.stringify({ texts: lines.map(l => l.text) })}
 `;
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
@@ -2181,31 +2058,144 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
           responseSchema: {
             type: 'OBJECT',
             properties: {
-              detected_song: { type: 'STRING' },
-              corrected_texts: {
+              aligned_translations: {
                 type: 'ARRAY',
                 items: { type: 'STRING' }
               }
             },
-            required: ['detected_song', 'corrected_texts']
+            required: ['aligned_translations']
           }
         }
       })
-    }, 'Gemini Corretor');
+    }, 'Gemini Alinhamento Tradução');
 
     if (!response.ok) {
-      throw new Error("Falha na correção de texto via Gemini: status " + response.status);
+      throw new Error(`Falha no alinhamento da tradução via Gemini: status ${response.status}`);
     }
 
     const data = await response.json();
     const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!textResponse) {
-      throw new Error('Retorno vazio do Gemini Corretor.');
+      throw new Error('Retorno vazio do Gemini Alinhamento.');
     }
 
     const parsed = JSON.parse(textResponse);
-    console.log("[GeminiCorretor] Música detectada:", parsed.detected_song);
-    return parsed.corrected_texts || [];
+    return parsed.aligned_translations || [];
+  };
+
+  const handleAlignTranslationWithAi = async () => {
+    if (!pastedTranslation.trim()) {
+      toast.error('Por favor, cole a tradução antes de sincronizar!');
+      return;
+    }
+    const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
+    if (!geminiApiKey.trim()) {
+      toast.error('Configuração Requerida: Adicione sua Chave de API do Gemini nas Configurações.');
+      return;
+    }
+
+    try {
+      setIsAligningInProgress(true);
+      const aligned = await requestGeminiTranslationAlignment(transcribedLinesTemp, pastedTranslation, geminiApiKey);
+      if (aligned.length === 0) {
+        throw new Error('Nenhuma tradução retornada pela IA.');
+      }
+      const updated = transcribedLinesTemp.map((line, idx) => ({
+        ...line,
+        translation: aligned[idx] || ''
+      }));
+      setTempLines(updated);
+      setTranscribedLinesTemp(updated);
+      setTranscriptionText(updated.map(l => l.text).join('\n'));
+      toast.success('Tradução alinhada com sucesso!');
+      setIsAdjustmentModalOpen(false);
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || 'Erro ao sincronizar tradução.');
+    } finally {
+      setIsAligningInProgress(false);
+    }
+  };
+
+  const handleAlignOriginalLyricsOffline = () => {
+    if (!pastedOriginalLyrics.trim()) {
+      toast.error('Por favor, cole a letra original oficial antes de alinhar!');
+      return;
+    }
+
+    try {
+      setIsAligningInProgress(true);
+      const correctedLines = pastedOriginalLyrics.split('\n').map(l => l.trim()).filter(Boolean);
+      const aligned = alignAndCorrectLines(transcribedLinesTemp, correctedLines);
+      setTempLines(aligned);
+      setTranscribedLinesTemp(aligned);
+      setTranscriptionText(aligned.map(l => l.text).join('\n'));
+      toast.success('Letra alinhada offline com sucesso!');
+      setIsAdjustmentModalOpen(false);
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || 'Erro ao alinhar letra original.');
+    } finally {
+      setIsAligningInProgress(false);
+    }
+  };
+
+  const handleGenerateTranslationAi = async () => {
+    const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
+    if (!geminiApiKey.trim()) {
+      toast.error('Configuração Requerida: Adicione sua Chave de API do Gemini nas Configurações.');
+      return;
+    }
+
+    try {
+      setIsAligningInProgress(true);
+      const translations = await requestGeminiTranslationOnly(transcribedLinesTemp, geminiApiKey);
+      const updated = transcribedLinesTemp.map((line, idx) => ({
+        ...line,
+        translation: translations[idx] || ''
+      }));
+      setTempLines(updated);
+      setTranscribedLinesTemp(updated);
+      setTranscriptionText(updated.map(l => l.text).join('\n'));
+      toast.success('Tradução automática por IA concluída!');
+      setIsAdjustmentModalOpen(false);
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || 'Erro ao traduzir com IA.');
+    } finally {
+      setIsAligningInProgress(false);
+    }
+  };
+
+  const handleGenerateTranslationMyMemory = async () => {
+    try {
+      setIsAligningInProgress(true);
+      const updated = [...transcribedLinesTemp];
+      const total = updated.length;
+      for (let i = 0; i < total; i++) {
+        if (!updated[i].text.trim()) continue;
+        try {
+          const trans = await translateWithMyMemory(updated[i].text);
+          updated[i] = {
+            ...updated[i],
+            translation: trans
+          };
+          await new Promise(r => setTimeout(r, 200));
+        } catch (e) {
+          console.error(`Falha ao traduzir linha ${i}:`, e);
+        }
+      }
+      setTempLines(updated);
+      setTranscribedLinesTemp(updated);
+      setTranscriptionText(updated.map(l => l.text).join('\n'));
+      toast.success('Tradução automática MyMemory concluída!');
+      setIsAdjustmentModalOpen(false);
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || 'Erro ao traduzir com MyMemory.');
+    } finally {
+      setIsAligningInProgress(false);
+    }
   };
 
   // Syncing stamp handlers
@@ -2724,6 +2714,32 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
                 )}
               </div>
             </div>
+
+            {tempLines.length > 0 && (
+              <div className="bg-primary/5 border border-primary/20 rounded-2xl p-4 flex flex-col justify-between space-y-3 shrink-0 animate-fadeIn">
+                <div className="space-y-1">
+                  <h4 className="text-[10px] font-black text-primary uppercase tracking-widest flex items-center gap-1.5">
+                    <Languages size={11} className="text-primary" />
+                    Ajustar Letra / Tradução
+                  </h4>
+                  <p className="text-[9px] text-muted-foreground leading-normal font-semibold">
+                    Alinhe uma tradução correta para as frases ou corrija/alinhe a letra original offline.
+                  </p>
+                </div>
+                <Button
+                  onClick={() => {
+                    setTranscribedLinesTemp([...tempLines]);
+                    setPastedTranslation(tempLines.map(l => l.translation || '').join('\n').trim());
+                    setPastedOriginalLyrics(tempLines.map(l => l.text || '').join('\n').trim());
+                    setIsAdjustmentModalOpen(true);
+                  }}
+                  variant="outline"
+                  className="w-full border-primary/20 bg-primary/5 hover:bg-primary/10 text-primary font-extrabold text-xs h-10 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.98]"
+                >
+                  🛠️ Ajustar Letra / Tradução
+                </Button>
+              </div>
+            )}
 
             {/* Zona de Perigo para Letras Existentes */}
             {activeTrack.textId && (
@@ -4209,6 +4225,138 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
               className="flex-1 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs h-10 rounded-xl shadow-lg shadow-rose-500/10 cursor-pointer"
             >
               Confirmar e Excluir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Ajuste Fino de Letra e Tradução */}
+      <Dialog open={isAdjustmentModalOpen} onOpenChange={setIsAdjustmentModalOpen}>
+        <DialogContent className="sm:max-w-[550px] bg-card border border-border text-foreground p-6 rounded-2xl shadow-2xl flex flex-col justify-start text-left space-y-4 animate-scaleUp">
+          <DialogHeader className="space-y-2">
+            <DialogTitle className="text-base font-black tracking-tight text-foreground flex items-center gap-2">
+              <div className="p-1.5 bg-primary/10 text-primary rounded-lg">
+                <Languages size={16} />
+              </div>
+              <span>Letra / Tradução - Ajuste Fino</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground leading-normal font-semibold text-left">
+              Associe uma tradução oficial às marcações de tempo ou ajuste a letra original de forma offline.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Abas */}
+          <div className="flex border-b border-border/40 shrink-0">
+            <button
+              onClick={() => setAdjustmentActiveTab('translation')}
+              className={`flex-1 pb-2.5 text-xs font-black uppercase tracking-wider transition-colors border-b-2 text-center ${
+                adjustmentActiveTab === 'translation'
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Tradução Correta (IA)
+            </button>
+            <button
+              onClick={() => setAdjustmentActiveTab('original')}
+              className={`flex-1 pb-2.5 text-xs font-black uppercase tracking-wider transition-colors border-b-2 text-center ${
+                adjustmentActiveTab === 'original'
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Letra Original (Offline)
+            </button>
+            <button
+              onClick={() => setAdjustmentActiveTab('auto')}
+              className={`flex-1 pb-2.5 text-xs font-black uppercase tracking-wider transition-colors border-b-2 text-center ${
+                adjustmentActiveTab === 'auto'
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Automático (Traduzir)
+            </button>
+          </div>
+
+          {/* Conteúdo das Abas */}
+          <div className="flex-1 min-h-[220px] flex flex-col space-y-3">
+            {adjustmentActiveTab === 'translation' && (
+              <div className="flex-1 flex flex-col space-y-2">
+                <label className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">
+                  Cole a Tradução Oficial / Correta (linha por linha):
+                </label>
+                <textarea
+                  value={pastedTranslation}
+                  onChange={(e) => setPastedTranslation(e.target.value)}
+                  placeholder="Exemplo:&#10;Primeira frase traduzida&#10;Segunda frase traduzida"
+                  className="flex-1 min-h-[160px] w-full bg-muted/20 border border-border/40 rounded-xl p-3 text-xs font-medium resize-none focus:outline-none focus:border-primary/50 text-foreground placeholder:text-muted-foreground/45"
+                />
+                <Button
+                  onClick={handleAlignTranslationWithAi}
+                  disabled={isAligningInProgress || !pastedTranslation.trim()}
+                  className="w-full bg-primary hover:bg-primary/95 text-primary-foreground font-extrabold text-xs h-10 rounded-xl shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isAligningInProgress ? 'Sincronizando com IA...' : 'Sincronizar Tradução com IA'}
+                </Button>
+              </div>
+            )}
+
+            {adjustmentActiveTab === 'original' && (
+              <div className="flex-1 flex flex-col space-y-2">
+                <label className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">
+                  Cole a Letra Original Oficial (linha por linha):
+                </label>
+                <textarea
+                  value={pastedOriginalLyrics}
+                  onChange={(e) => setPastedOriginalLyrics(e.target.value)}
+                  placeholder="Exemplo:&#10;First original line&#10;Second original line"
+                  className="flex-1 min-h-[160px] w-full bg-muted/20 border border-border/40 rounded-xl p-3 text-xs font-medium resize-none focus:outline-none focus:border-primary/50 text-foreground placeholder:text-muted-foreground/45"
+                />
+                <Button
+                  onClick={handleAlignOriginalLyricsOffline}
+                  disabled={isAligningInProgress || !pastedOriginalLyrics.trim()}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs h-10 rounded-xl shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isAligningInProgress ? 'Alinhando...' : 'Alinhar Letra Original (Offline)'}
+                </Button>
+              </div>
+            )}
+
+            {adjustmentActiveTab === 'auto' && (
+              <div className="flex-1 flex flex-col justify-center items-center space-y-4 py-4">
+                <p className="text-xs text-muted-foreground text-center max-w-sm font-semibold">
+                  Se você não possui uma tradução pronta, pode gerar uma tradução automática para as frases identificadas.
+                </p>
+                <div className="flex flex-col sm:flex-row gap-3 w-full max-w-md">
+                  <Button
+                    onClick={handleGenerateTranslationAi}
+                    disabled={isAligningInProgress}
+                    className="flex-1 bg-primary hover:bg-primary/95 text-primary-foreground font-extrabold text-xs h-10 rounded-xl shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    Gerar por IA (Gemini)
+                  </Button>
+                  <Button
+                    onClick={handleGenerateTranslationMyMemory}
+                    disabled={isAligningInProgress}
+                    variant="outline"
+                    className="flex-1 border-border/60 hover:bg-muted text-foreground font-extrabold text-xs h-10 rounded-xl flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    Gerar Grátis (MyMemory)
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="flex items-center gap-2 pt-2 border-t border-border/20 shrink-0">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsAdjustmentModalOpen(false)}
+              className="w-full border-border/60 hover:bg-muted text-foreground font-extrabold text-xs h-10 rounded-xl cursor-pointer"
+            >
+              Cancelar
             </Button>
           </DialogFooter>
         </DialogContent>
