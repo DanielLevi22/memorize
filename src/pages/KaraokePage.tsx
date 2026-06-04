@@ -2054,7 +2054,7 @@ Você é um especialista em transcrição e inteligência artificial de altíssi
 
 Sua tarefa consiste em duas etapas obrigatórias:
 1. IDENTIFICAR a música original com base nas linhas transcritas fornecidas (que contêm erros fonéticos e distorções causadas pelo acompanhamento instrumental, mas mantêm o sentido geral e palavras-chave da composição oficial do artista). A faixa possui o título provisório de "${trackTitle}".
-2. RECUPERAR da sua memória a letra oficial real da música identificada e CORRIGIR cada linha transcrita para corresponder EXATAMENTE à letra oficial.
+2. UTILIZAR a ferramenta Google Search integrada para pesquisar na internet pela letra oficial original completa da música identificada (por exemplo: buscar por "lyrics [nome da música] [artista]"). Use o conteúdo real e oficial retornado da busca para obter a composição original exata e CORRIGIR cada linha transcrita para corresponder EXATAMENTE à letra oficial.
 
 Tipos de Erros da Transcrição que você deve corrigir:
 1. Erros Fonéticos / Homófonos: Palavras parecidas em som, mas incorretas no contexto (ex: "CEO" no lugar de "sea, oh", "sale" no lugar de "sail", "soak" no lugar de "sulking", "wrought" no lugar de "writing", "Thirties turn" no lugar de "Third things third").
@@ -2090,6 +2090,9 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
       body: JSON.stringify({
         contents: [{
           parts: [{ text: promptText }]
+        }],
+        tools: [{
+          google_search: {}
         }],
         generationConfig: {
           responseMimeType: 'application/json',

@@ -122,12 +122,14 @@ Agora, o Karaokê utiliza **estritamente o fluxo de transcrição direta complet
 
 ## 7. Pós-processamento: Correção Inteligente via LLM (Gemini Corretor)
 
-Para os motores Whisper (especialmente o **Whisper Local**), ruídos instrumentais e efeitos na voz podem causar elisão de sílabas e pequenos erros fonéticos (como transcrever *"sea, oh"* como *"CEO"*, *"sail"* como *"sale"*, etc.).
+Para os motores Whisper (especialmente o **Whisper Local**), ruídos instrumentais e efeitos na voz podem causar elisão de sílabas e pequenos erros fonéticos (como transcrever *"sea, oh"* como *"CEO"*, *"sail"* como *"sale"*, etc.) ou distorções severas de frases inteiras.
 
 Para resolver isso sem perder os tempos de marcação do áudio (timestamps), implementamos um fluxo automático de **Correção Inteligente**:
 * **Gatilho**: Se o provedor de transcrição não for o Gemini (ex: Whisper Local ou Groq Whisper) e houver uma chave de API do Gemini configurada.
 * **Funcionamento**: A lista de frases transcritas (contendo tempos corretos mas textos com pequenos erros) é enviada em lote ao **Gemini 2.5 Flash** através do método `requestGeminiTextCorrection`.
-* **Prompt**: O Gemini recebe o título da música (obtido de `activeTrack.title`) e a lista de frases brutas, retornando a lista corrigida e alinhada com a letra oficial conhecida da música, mantendo a ordem e quantidade exata de linhas.
+* **Google Search Grounding (Pesquisa em Tempo Real)**: Para eliminar alucinações de memória da IA, a chamada ativa a ferramenta oficial do Google (`tools: [{ google_search: {} }]`). O prompt ordena explicitamente que o Gemini realize uma busca em tempo real na internet pela letra oficial original e completa da música detectada (ex: pesquisando por "lyrics [nome da música] [artista]").
+* **Prompt e Exemplos Few-Shot**: O prompt guia o modelo no mapeamento de erros fonéticos leves e na substituição completa de frases inventadas ou distorcidas por versos oficiais, fornecendo exemplos para trechos de alta velocidade (como mapear "Why? You burned me down, you kill me" para "Pain! You break me down and build me up").
+* **Esquema de Resposta Estrito (`responseSchema`)**: A API é configurada com um JSON Schema rígido que força o modelo a retornar a estrutura contendo `"detected_song"` e `"corrected_texts"` em correspondência estrita de 1 para 1 (exatamente as mesmas `${lines.length}` linhas), evitando qualquer falha de parsing no frontend.
 * **Vantagem**: Garante que o texto exibido e a tradução gerada na sequência fiquem 100% limpos e fiéis à letra real da música, aproveitando os tempos precisos de início e fim mapeados localmente.
 
 ---
