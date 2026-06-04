@@ -117,7 +117,6 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
   const [transcribedLinesTemp, setTranscribedLinesTemp] = useState<TranscriptionLine[]>([]);
   const [pastedOriginalLyrics, setPastedOriginalLyrics] = useState('');
-  const [isAligningInProgress, setIsAligningInProgress] = useState(false);
 
   // Speech Recognition States
   const [isListeningSpeech, setIsListeningSpeech] = useState(false);
@@ -1587,7 +1586,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
 
       // Prepara e abre o modal de ajuste e tradução
       setTranscribedLinesTemp(postProcessedLines);
-      setPastedOriginalLyrics(postProcessedLines.map(l => l.text).join('\n'));
+      setPastedOriginalLyrics('');
       setIsAdjustmentModalOpen(true);
 
       toast.success('Transcrição concluída! Configure a tradução ou ajuste a letra original.');
@@ -2005,17 +2004,19 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
     });
   };
 
-  const requestGeminiOriginalLyricsAlignment = async (
+  const requestGeminiOriginalAlignmentAndTranslation = async (
     lines: TranscriptionLine[],
     officialLyrics: string,
     apiKey: string
-  ): Promise<string[]> => {
-    if (lines.length === 0) return [];
+  ): Promise<{ alignedLyrics: string[], translations: string[] }> => {
+    if (lines.length === 0) return { alignedLyrics: [], translations: [] };
 
     const promptText = `
-Você é um especialista em transcrição e inteligência artificial de altíssima precisão para músicas.
+Você é um especialista em transcrição, tradução e inteligência artificial de altíssima precisão para músicas.
 
-Sua tarefa consiste em alinhar as linhas transcritas (que contêm erros fonéticos, homófonos e distorções causadas pelo acompanhamento instrumental) para que correspondam EXATAMENTE à Letra Oficial de Referência fornecida abaixo.
+Sua tarefa consiste em duas etapas integradas:
+1. ALINHAR as frases transcritas brutas (que contêm erros de áudio) para corresponderem EXATAMENTE à Letra Oficial de Referência fornecida abaixo.
+2. TRADUZIR cada frase alinhada resultante de forma natural e coloquial para o português do Brasil.
 
 Letra Oficial de Referência:
 """
@@ -2023,16 +2024,22 @@ ${officialLyrics}
 """
 
 Instruções obrigatórias:
-1. Mapeie cada frase transcrita de entrada ao trecho correspondente na Letra Oficial de Referência (cronologicamente).
-2. O array retornado "aligned_original_lyrics" DEVE ter exatamente o mesmo número de elementos do array de entrada "texts" (exatamente ${lines.length} itens). Cada elemento do resultado deve corresponder rigorosamente ao mesmo índice da entrada, servindo como uma substituição direta (correspondência estrita de 1 para 1).
-3. Se uma linha da transcrição original for apenas ruído, silêncio ou vocalização avulsa (como "ooh", "hey") que não faça parte das estrofes oficiais, você pode mantê-la ou limpá-la, mas DEVE preservar a linha no array (nunca remova o item).
-4. Retorne apenas o JSON válido, sem qualquer tipo de formatação ou texto explicativo extra.
+- Mapeie cada frase transcrita de entrada ao trecho correspondente na Letra Oficial de Referência (cronologicamente).
+- O array retornado "aligned_original_lyrics" DEVE ter exatamente o mesmo número de elementos do array de entrada "texts" (exatamente ${lines.length} itens). Cada elemento deve corresponder rigorosamente ao mesmo índice da entrada, servindo como uma substituição direta (1 para 1).
+- O array retornado "translations" DEVE ter exatamente o mesmo número de elementos (exatamente ${lines.length} itens). Cada item deve ser a tradução em português do Brasil correspondente ao verso no mesmo índice.
+- Se uma linha for apenas ruído ou vocalização avulsa, você pode mantê-la ou deixá-la em branco, mas mantenha o tamanho exato dos dois arrays.
+- NÃO utilize ferramentas de busca, web query ou qualquer outro tipo de ferramenta. Apenas processe o texto fornecido.
+- Retorne estritamente o JSON válido e nada mais.
 
 Retorne obrigatoriamente um JSON no seguinte formato:
 {
   "aligned_original_lyrics": [
     "Texto oficial correto da primeira linha",
     "Texto oficial correto da segunda linha"
+  ],
+  "translations": [
+    "Tradução da primeira linha",
+    "Tradução da segunda linha"
   ]
 }
 
@@ -2057,74 +2064,33 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
               aligned_original_lyrics: {
                 type: 'ARRAY',
                 items: { type: 'STRING' }
+              },
+              translations: {
+                type: 'ARRAY',
+                items: { type: 'STRING' }
               }
             },
-            required: ['aligned_original_lyrics']
+            required: ['aligned_original_lyrics', 'translations']
           }
         }
       })
-    }, 'Gemini Alinhamento Letra');
+    }, 'Gemini Alinhamento e Tradução');
 
     if (!response.ok) {
-      throw new Error(`Falha no alinhamento de letra via Gemini: status ${response.status}`);
+      throw new Error(`Falha no processamento via Gemini: status ${response.status}`);
     }
 
     const data = await response.json();
     const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!textResponse) {
-      throw new Error('Retorno vazio do Gemini Alinhamento.');
+      throw new Error('Retorno vazio da API do Gemini.');
     }
 
     const parsed = JSON.parse(textResponse);
-    return parsed.aligned_original_lyrics || [];
-  };
-
-  const translateLinesAndSave = async (alignedLines: TranscriptionLine[]) => {
-    const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
-    let translatedLines = [...alignedLines];
-    
-    if (geminiApiKey.trim()) {
-      try {
-        toast.info('Traduzindo frases com Gemini...');
-        const translations = await requestGeminiTranslationOnly(alignedLines, geminiApiKey);
-        translatedLines = alignedLines.map((line, idx) => ({
-          ...line,
-          translation: translations[idx] || ''
-        }));
-        toast.success('Letra alinhada e tradução com IA concluída!');
-      } catch (e) {
-        console.warn('Falha na tradução automática Gemini, tentando MyMemory...', e);
-        translatedLines = await translateLinesWithMyMemoryFallback(alignedLines);
-      }
-    } else {
-      translatedLines = await translateLinesWithMyMemoryFallback(alignedLines);
-    }
-    
-    setTempLines(translatedLines);
-    setTranscribedLinesTemp(translatedLines);
-    setTranscriptionText(translatedLines.map(l => l.text).join('\n'));
-    setIsAdjustmentModalOpen(false);
-  };
-
-  const translateLinesWithMyMemoryFallback = async (alignedLines: TranscriptionLine[]): Promise<TranscriptionLine[]> => {
-    toast.info('Traduzindo frases com MyMemory (Grátis)...');
-    const updated = [...alignedLines];
-    const total = updated.length;
-    for (let i = 0; i < total; i++) {
-      if (!updated[i].text.trim()) continue;
-      try {
-        const trans = await translateWithMyMemory(updated[i].text);
-        updated[i] = {
-          ...updated[i],
-          translation: trans
-        };
-        await new Promise(r => setTimeout(r, 200));
-      } catch (e) {
-        console.error(`Falha ao traduzir linha ${i} com MyMemory:`, e);
-      }
-    }
-    toast.success('Letra alinhada e tradução gratuita concluída!');
-    return updated;
+    return {
+      alignedLyrics: parsed.aligned_original_lyrics || [],
+      translations: parsed.translations || []
+    };
   };
 
   const handleAlignOriginalLyricsWithAi = async () => {
@@ -2138,24 +2104,31 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
       return;
     }
 
+    // Fecha o modal de ajuste e abre o modal de processamento imediatamente
+    setIsAdjustmentModalOpen(false);
+    setIsTranscribingAi(true);
+    setTranscribingPercent(50);
+    setTranscribingProgress('Alinhando e traduzindo letra com Gemini...');
+
     try {
-      setIsAligningInProgress(true);
-      toast.info('Alinhando letra original com Gemini...');
-      const alignedTexts = await requestGeminiOriginalLyricsAlignment(transcribedLinesTemp, pastedOriginalLyrics, geminiApiKey);
-      if (alignedTexts.length === 0) {
-        throw new Error('Nenhum texto retornado pelo alinhamento da IA.');
-      }
+      const result = await requestGeminiOriginalAlignmentAndTranslation(transcribedLinesTemp, pastedOriginalLyrics, geminiApiKey);
+      
       const alignedLines = transcribedLinesTemp.map((line, idx) => ({
         ...line,
-        text: alignedTexts[idx]?.trim() || line.text
+        text: result.alignedLyrics[idx]?.trim() || line.text,
+        translation: result.translations[idx]?.trim() || ''
       }));
       
-      await translateLinesAndSave(alignedLines);
+      setTempLines(alignedLines);
+      setTranscribedLinesTemp(alignedLines);
+      setTranscriptionText(alignedLines.map(l => l.text).join('\n'));
+      toast.success('Letra alinhada e traduzida com IA com sucesso!');
     } catch (err: any) {
       console.error(err);
       toast.error(err.message || 'Erro ao sincronizar letra com Gemini.');
     } finally {
-      setIsAligningInProgress(false);
+      setIsTranscribingAi(false);
+      setTranscribingProgress('');
     }
   };
 
@@ -2165,19 +2138,72 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
       return;
     }
 
+    // Fecha o modal de ajuste e abre o modal de processamento imediatamente
+    setIsAdjustmentModalOpen(false);
+    setIsTranscribingAi(true);
+    setTranscribingPercent(20);
+    setTranscribingProgress('Alinhando letra original offline...');
+
     try {
-      setIsAligningInProgress(true);
-      toast.info('Alinhando letra original offline...');
       const correctedLines = pastedOriginalLyrics.split('\n').map(l => l.trim()).filter(Boolean);
       const alignedLines = alignAndCorrectLines(transcribedLinesTemp, correctedLines);
       
-      await translateLinesAndSave(alignedLines);
+      setTranscribingPercent(60);
+      setTranscribingProgress('Traduzindo frases...');
+      
+      // Traduzir automaticamente as linhas alinhadas
+      const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
+      let translatedLines = [...alignedLines];
+      
+      if (geminiApiKey.trim()) {
+        try {
+          const translations = await requestGeminiTranslationOnly(alignedLines, geminiApiKey);
+          translatedLines = alignedLines.map((line, idx) => ({
+            ...line,
+            translation: translations[idx] || ''
+          }));
+          toast.success('Letra alinhada e tradução com IA concluída!');
+        } catch (e) {
+          console.warn('Falha na tradução automática Gemini, tentando MyMemory...', e);
+          translatedLines = await translateLinesWithMyMemoryFallbackForProgress(alignedLines);
+        }
+      } else {
+        translatedLines = await translateLinesWithMyMemoryFallbackForProgress(alignedLines);
+      }
+      
+      setTempLines(translatedLines);
+      setTranscribedLinesTemp(translatedLines);
+      setTranscriptionText(translatedLines.map(l => l.text).join('\n'));
     } catch (err: any) {
       console.error(err);
       toast.error(err.message || 'Erro ao alinhar letra original.');
     } finally {
-      setIsAligningInProgress(false);
+      setIsTranscribingAi(false);
+      setTranscribingProgress('');
     }
+  };
+
+  const translateLinesWithMyMemoryFallbackForProgress = async (alignedLines: TranscriptionLine[]): Promise<TranscriptionLine[]> => {
+    const updated = [...alignedLines];
+    const total = updated.length;
+    for (let i = 0; i < total; i++) {
+      if (!updated[i].text.trim()) continue;
+      const pct = 60 + Math.round((i / total) * 40);
+      setTranscribingPercent(pct);
+      setTranscribingProgress(`Traduzindo com MyMemory [${i + 1}/${total}]...`);
+      try {
+        const trans = await translateWithMyMemory(updated[i].text);
+        updated[i] = {
+          ...updated[i],
+          translation: trans
+        };
+        await new Promise(r => setTimeout(r, 200));
+      } catch (e) {
+        console.error(`Falha ao traduzir linha ${i} com MyMemory:`, e);
+      }
+    }
+    toast.success('Letra alinhada e tradução gratuita concluída!');
+    return updated;
   };
 
   // Syncing stamp handlers
@@ -2711,7 +2737,7 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
                 <Button
                   onClick={() => {
                     setTranscribedLinesTemp([...tempLines]);
-                    setPastedOriginalLyrics(tempLines.map(l => l.text || '').join('\n').trim());
+                    setPastedOriginalLyrics('');
                     setIsAdjustmentModalOpen(true);
                   }}
                   variant="outline"
@@ -4242,18 +4268,18 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
             <div className="flex flex-col sm:flex-row gap-3 pt-2 shrink-0">
               <Button
                 onClick={handleAlignOriginalLyricsWithAi}
-                disabled={isAligningInProgress || !pastedOriginalLyrics.trim()}
+                disabled={!pastedOriginalLyrics.trim()}
                 className="flex-1 bg-primary hover:bg-primary/95 text-primary-foreground font-extrabold text-xs h-11 rounded-xl shadow-lg flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 transition-all"
               >
-                {isAligningInProgress ? 'Sincronizando com IA...' : 'Sincronizar com IA (Gemini)'}
+                Sincronizar com IA (Gemini)
               </Button>
               <Button
                 onClick={handleAlignOriginalLyricsOffline}
-                disabled={isAligningInProgress || !pastedOriginalLyrics.trim()}
+                disabled={!pastedOriginalLyrics.trim()}
                 variant="outline"
                 className="flex-1 border-emerald-600/30 bg-emerald-600/5 hover:bg-emerald-600/10 text-emerald-600 dark:text-emerald-400 font-extrabold text-xs h-11 rounded-xl flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 transition-all"
               >
-                {isAligningInProgress ? 'Alinhando offline...' : 'Alinhar Offline (Grátis)'}
+                Alinhar Offline (Grátis)
               </Button>
             </div>
             
