@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Eye, AlertCircle, Volume2, Mic, Lock, Languages, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Eye, AlertCircle, Volume2, Mic, Lock, Languages, RefreshCw, Pause } from 'lucide-react';
 import { toast } from 'sonner';
 import confetti from 'canvas-confetti';
 import type { Card, DeckPreset } from '../types';
@@ -273,6 +273,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
 
             audio.onended = () => {
               setIsPlaying(false);
+              activeAudioRef.current = null;
             };
           }
         } catch (err) {
@@ -344,20 +345,34 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
     if (e) e.stopPropagation();
     if (!currentCard) return;
 
-    // Se já estiver tocando, a gente interrompe a reprodução ativa
+    // Se já estiver tocando, a gente interrompe a reprodução ativa (pausa)
     if (isPlaying) {
       if (activeAudioRef.current) {
         activeAudioRef.current.pause();
-        activeAudioRef.current = null;
       }
       if (typeof window !== 'undefined' && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
+        if (window.speechSynthesis.speaking) {
+          window.speechSynthesis.pause();
+        }
       }
       setIsPlaying(false);
       return;
     }
 
-    // Toca apenas o termo (frente)
+    // Se já estiver pausado (áudio local ou TTS), retoma de onde parou
+    if (activeAudioRef.current && activeAudioRef.current.paused) {
+      setIsPlaying(true);
+      activeAudioRef.current.play().catch(() => setIsPlaying(false));
+      return;
+    }
+
+    if (typeof window !== 'undefined' && window.speechSynthesis && window.speechSynthesis.paused) {
+      setIsPlaying(true);
+      window.speechSynthesis.resume();
+      return;
+    }
+
+    // Toca do início se for a primeira reprodução ou se foi finalizada
     if (currentCard.audio) {
       if (!audioUrl) return;
       try {
@@ -850,7 +865,11 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                   onClick={handlePlayAudio}
                   title="Ouvir pronúncia"
                 >
-                  <Volume2 size={hasCheckedAnswer ? 18 : 28} className={isPlaying ? 'animate-bounce text-primary' : 'text-primary'} />
+                  {isPlaying ? (
+                    <Pause size={hasCheckedAnswer ? 18 : 28} className="text-primary animate-pulse" />
+                  ) : (
+                    <Volume2 size={hasCheckedAnswer ? 18 : 28} className="text-primary" />
+                  )}
                 </Button>
                 
                 {!hasCheckedAnswer && (
@@ -978,7 +997,11 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                     onClick={handlePlayAudio}
                     title="Ouvir pronúncia"
                   >
-                    <Volume2 size={hasCheckedAnswer ? 18 : 24} className={isPlaying ? 'animate-pulse text-primary' : ''} />
+                    {isPlaying ? (
+                      <Pause size={hasCheckedAnswer ? 18 : 24} className="text-primary animate-pulse" />
+                    ) : (
+                      <Volume2 size={hasCheckedAnswer ? 18 : 24} className="text-primary" />
+                    )}
                   </Button>
 
                   <Button
@@ -1100,7 +1123,11 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                     onClick={handlePlayAudio}
                     title="Ouvir pronúncia"
                   >
-                    <Volume2 size={36} className={isPlaying ? 'animate-bounce text-primary' : 'text-primary'} />
+                    {isPlaying ? (
+                      <Pause size={36} className="text-primary animate-pulse" />
+                    ) : (
+                      <Volume2 size={36} className="text-primary" />
+                    )}
                   </Button>
                   <div className="space-y-1">
                     <h2 className="font-extrabold text-lg text-foreground">Ouça a pronúncia</h2>
@@ -1120,7 +1147,11 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                     onClick={handlePlayAudio}
                     title="Ouvir áudio"
                   >
-                    <Volume2 size={16} className={isPlaying ? 'animate-pulse' : ''} />
+                    {isPlaying ? (
+                      <Pause size={16} className="text-primary animate-pulse" />
+                    ) : (
+                      <Volume2 size={16} />
+                    )}
                   </Button>
                   <h2 
                     className="font-extrabold text-2xl tracking-tight text-foreground leading-snug"
@@ -1173,7 +1204,11 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
               onClick={handlePlayAudio}
               title="Ouvir áudio"
             >
-              <Volume2 size={16} className={isPlaying ? 'animate-pulse' : ''} />
+              {isPlaying ? (
+                <Pause size={16} className="text-primary animate-pulse" />
+              ) : (
+                <Volume2 size={16} />
+              )}
             </Button>
 
             <div className="flex-1 flex flex-col justify-center items-center text-center gap-4">
