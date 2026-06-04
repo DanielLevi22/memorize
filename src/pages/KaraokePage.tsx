@@ -116,10 +116,8 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   // Alignment & Custom Translation Modal States
   const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
   const [transcribedLinesTemp, setTranscribedLinesTemp] = useState<TranscriptionLine[]>([]);
-  const [pastedTranslation, setPastedTranslation] = useState('');
   const [pastedOriginalLyrics, setPastedOriginalLyrics] = useState('');
   const [isAligningInProgress, setIsAligningInProgress] = useState(false);
-  const [adjustmentActiveTab, setAdjustmentActiveTab] = useState<'translation' | 'original' | 'auto'>('translation');
 
   // Speech Recognition States
   const [isListeningSpeech, setIsListeningSpeech] = useState(false);
@@ -1589,9 +1587,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
 
       // Prepara e abre o modal de ajuste e tradução
       setTranscribedLinesTemp(postProcessedLines);
-      setPastedTranslation('');
-      setPastedOriginalLyrics('');
-      setAdjustmentActiveTab('translation');
+      setPastedOriginalLyrics(postProcessedLines.map(l => l.text).join('\n'));
       setIsAdjustmentModalOpen(true);
 
       toast.success('Transcrição concluída! Configure a tradução ou ajuste a letra original.');
@@ -2009,39 +2005,39 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
     });
   };
 
-  const requestGeminiTranslationAlignment = async (
+  const requestGeminiOriginalLyricsAlignment = async (
     lines: TranscriptionLine[],
-    pastedTranslation: string,
+    officialLyrics: string,
     apiKey: string
   ): Promise<string[]> => {
     if (lines.length === 0) return [];
 
     const promptText = `
-Você é um especialista em sincronização de traduções de músicas de altíssima precisão.
+Você é um especialista em transcrição e inteligência artificial de altíssima precisão para músicas.
 
-Abaixo está o JSON contendo as frases originais transcritas do áudio da música (em ordem cronológica):
-${JSON.stringify({ texts: lines.map(l => l.text) })}
+Sua tarefa consiste em alinhar as linhas transcritas (que contêm erros fonéticos, homófonos e distorções causadas pelo acompanhamento instrumental) para que correspondam EXATAMENTE à Letra Oficial de Referência fornecida abaixo.
 
-E abaixo está a tradução correta da música fornecida pelo usuário:
+Letra Oficial de Referência:
 """
-${pastedTranslation}
+${officialLyrics}
 """
 
-Sua tarefa consiste em alinhar e associar cada frase da tradução fornecida pelo usuário à respectiva frase original transcrita.
 Instruções obrigatórias:
-1. Mapeie cronologicamente as frases da tradução para as frases originais correspondentes.
-2. O array retornado "aligned_translations" DEVE ter exatamente o mesmo número de elementos do array de entrada "texts" (exatamente ${lines.length} itens). Cada elemento do resultado deve ser a tradução correta para a frase de entrada no mesmo índice (correspondência estrita de 1 para 1).
-3. Se a tradução contiver menos linhas, ou se um bloco de tradução cobrir duas frases originais, divida e repita a tradução inteligentemente.
-4. Se houver vocalizações originais (como "ooh", "hey") que não tenham correspondente na tradução, você pode deixar uma string vazia ou manter a vocalização, mas o array deve manter todos os índices.
-5. NÃO retorne nada além do JSON válido.
+1. Mapeie cada frase transcrita de entrada ao trecho correspondente na Letra Oficial de Referência (cronologicamente).
+2. O array retornado "aligned_original_lyrics" DEVE ter exatamente o mesmo número de elementos do array de entrada "texts" (exatamente ${lines.length} itens). Cada elemento do resultado deve corresponder rigorosamente ao mesmo índice da entrada, servindo como uma substituição direta (correspondência estrita de 1 para 1).
+3. Se uma linha da transcrição original for apenas ruído, silêncio ou vocalização avulsa (como "ooh", "hey") que não faça parte das estrofes oficiais, você pode mantê-la ou limpá-la, mas DEVE preservar a linha no array (nunca remova o item).
+4. Retorne apenas o JSON válido, sem qualquer tipo de formatação ou texto explicativo extra.
 
 Retorne obrigatoriamente um JSON no seguinte formato:
 {
-  "aligned_translations": [
-    "Tradução correspondente da primeira frase",
-    "Tradução correspondente da segunda frase"
+  "aligned_original_lyrics": [
+    "Texto oficial correto da primeira linha",
+    "Texto oficial correto da segunda linha"
   ]
 }
+
+JSON de entrada:
+${JSON.stringify({ texts: lines.map(l => l.text) })}
 `;
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
@@ -2058,19 +2054,19 @@ Retorne obrigatoriamente um JSON no seguinte formato:
           responseSchema: {
             type: 'OBJECT',
             properties: {
-              aligned_translations: {
+              aligned_original_lyrics: {
                 type: 'ARRAY',
                 items: { type: 'STRING' }
               }
             },
-            required: ['aligned_translations']
+            required: ['aligned_original_lyrics']
           }
         }
       })
-    }, 'Gemini Alinhamento Tradução');
+    }, 'Gemini Alinhamento Letra');
 
     if (!response.ok) {
-      throw new Error(`Falha no alinhamento da tradução via Gemini: status ${response.status}`);
+      throw new Error(`Falha no alinhamento de letra via Gemini: status ${response.status}`);
     }
 
     const data = await response.json();
@@ -2080,12 +2076,60 @@ Retorne obrigatoriamente um JSON no seguinte formato:
     }
 
     const parsed = JSON.parse(textResponse);
-    return parsed.aligned_translations || [];
+    return parsed.aligned_original_lyrics || [];
   };
 
-  const handleAlignTranslationWithAi = async () => {
-    if (!pastedTranslation.trim()) {
-      toast.error('Por favor, cole a tradução antes de sincronizar!');
+  const translateLinesAndSave = async (alignedLines: TranscriptionLine[]) => {
+    const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
+    let translatedLines = [...alignedLines];
+    
+    if (geminiApiKey.trim()) {
+      try {
+        toast.info('Traduzindo frases com Gemini...');
+        const translations = await requestGeminiTranslationOnly(alignedLines, geminiApiKey);
+        translatedLines = alignedLines.map((line, idx) => ({
+          ...line,
+          translation: translations[idx] || ''
+        }));
+        toast.success('Letra alinhada e tradução com IA concluída!');
+      } catch (e) {
+        console.warn('Falha na tradução automática Gemini, tentando MyMemory...', e);
+        translatedLines = await translateLinesWithMyMemoryFallback(alignedLines);
+      }
+    } else {
+      translatedLines = await translateLinesWithMyMemoryFallback(alignedLines);
+    }
+    
+    setTempLines(translatedLines);
+    setTranscribedLinesTemp(translatedLines);
+    setTranscriptionText(translatedLines.map(l => l.text).join('\n'));
+    setIsAdjustmentModalOpen(false);
+  };
+
+  const translateLinesWithMyMemoryFallback = async (alignedLines: TranscriptionLine[]): Promise<TranscriptionLine[]> => {
+    toast.info('Traduzindo frases com MyMemory (Grátis)...');
+    const updated = [...alignedLines];
+    const total = updated.length;
+    for (let i = 0; i < total; i++) {
+      if (!updated[i].text.trim()) continue;
+      try {
+        const trans = await translateWithMyMemory(updated[i].text);
+        updated[i] = {
+          ...updated[i],
+          translation: trans
+        };
+        await new Promise(r => setTimeout(r, 200));
+      } catch (e) {
+        console.error(`Falha ao traduzir linha ${i} com MyMemory:`, e);
+      }
+    }
+    toast.success('Letra alinhada e tradução gratuita concluída!');
+    return updated;
+  };
+
+  const handleAlignOriginalLyricsWithAi = async () => {
+    if (!pastedOriginalLyrics.trim()) {
+      toast.error('Por favor, cole a letra original antes de alinhar!');
       return;
     }
     const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
@@ -2096,103 +2140,41 @@ Retorne obrigatoriamente um JSON no seguinte formato:
 
     try {
       setIsAligningInProgress(true);
-      const aligned = await requestGeminiTranslationAlignment(transcribedLinesTemp, pastedTranslation, geminiApiKey);
-      if (aligned.length === 0) {
-        throw new Error('Nenhuma tradução retornada pela IA.');
+      toast.info('Alinhando letra original com Gemini...');
+      const alignedTexts = await requestGeminiOriginalLyricsAlignment(transcribedLinesTemp, pastedOriginalLyrics, geminiApiKey);
+      if (alignedTexts.length === 0) {
+        throw new Error('Nenhum texto retornado pelo alinhamento da IA.');
       }
-      const updated = transcribedLinesTemp.map((line, idx) => ({
+      const alignedLines = transcribedLinesTemp.map((line, idx) => ({
         ...line,
-        translation: aligned[idx] || ''
+        text: alignedTexts[idx]?.trim() || line.text
       }));
-      setTempLines(updated);
-      setTranscribedLinesTemp(updated);
-      setTranscriptionText(updated.map(l => l.text).join('\n'));
-      toast.success('Tradução alinhada com sucesso!');
-      setIsAdjustmentModalOpen(false);
+      
+      await translateLinesAndSave(alignedLines);
     } catch (err: any) {
       console.error(err);
-      toast.error(err.message || 'Erro ao sincronizar tradução.');
+      toast.error(err.message || 'Erro ao sincronizar letra com Gemini.');
     } finally {
       setIsAligningInProgress(false);
     }
   };
 
-  const handleAlignOriginalLyricsOffline = () => {
+  const handleAlignOriginalLyricsOffline = async () => {
     if (!pastedOriginalLyrics.trim()) {
-      toast.error('Por favor, cole a letra original oficial antes de alinhar!');
+      toast.error('Por favor, cole a letra original antes de alinhar!');
       return;
     }
 
     try {
       setIsAligningInProgress(true);
+      toast.info('Alinhando letra original offline...');
       const correctedLines = pastedOriginalLyrics.split('\n').map(l => l.trim()).filter(Boolean);
-      const aligned = alignAndCorrectLines(transcribedLinesTemp, correctedLines);
-      setTempLines(aligned);
-      setTranscribedLinesTemp(aligned);
-      setTranscriptionText(aligned.map(l => l.text).join('\n'));
-      toast.success('Letra alinhada offline com sucesso!');
-      setIsAdjustmentModalOpen(false);
+      const alignedLines = alignAndCorrectLines(transcribedLinesTemp, correctedLines);
+      
+      await translateLinesAndSave(alignedLines);
     } catch (err: any) {
       console.error(err);
       toast.error(err.message || 'Erro ao alinhar letra original.');
-    } finally {
-      setIsAligningInProgress(false);
-    }
-  };
-
-  const handleGenerateTranslationAi = async () => {
-    const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
-    if (!geminiApiKey.trim()) {
-      toast.error('Configuração Requerida: Adicione sua Chave de API do Gemini nas Configurações.');
-      return;
-    }
-
-    try {
-      setIsAligningInProgress(true);
-      const translations = await requestGeminiTranslationOnly(transcribedLinesTemp, geminiApiKey);
-      const updated = transcribedLinesTemp.map((line, idx) => ({
-        ...line,
-        translation: translations[idx] || ''
-      }));
-      setTempLines(updated);
-      setTranscribedLinesTemp(updated);
-      setTranscriptionText(updated.map(l => l.text).join('\n'));
-      toast.success('Tradução automática por IA concluída!');
-      setIsAdjustmentModalOpen(false);
-    } catch (err: any) {
-      console.error(err);
-      toast.error(err.message || 'Erro ao traduzir com IA.');
-    } finally {
-      setIsAligningInProgress(false);
-    }
-  };
-
-  const handleGenerateTranslationMyMemory = async () => {
-    try {
-      setIsAligningInProgress(true);
-      const updated = [...transcribedLinesTemp];
-      const total = updated.length;
-      for (let i = 0; i < total; i++) {
-        if (!updated[i].text.trim()) continue;
-        try {
-          const trans = await translateWithMyMemory(updated[i].text);
-          updated[i] = {
-            ...updated[i],
-            translation: trans
-          };
-          await new Promise(r => setTimeout(r, 200));
-        } catch (e) {
-          console.error(`Falha ao traduzir linha ${i}:`, e);
-        }
-      }
-      setTempLines(updated);
-      setTranscribedLinesTemp(updated);
-      setTranscriptionText(updated.map(l => l.text).join('\n'));
-      toast.success('Tradução automática MyMemory concluída!');
-      setIsAdjustmentModalOpen(false);
-    } catch (err: any) {
-      console.error(err);
-      toast.error(err.message || 'Erro ao traduzir com MyMemory.');
     } finally {
       setIsAligningInProgress(false);
     }
@@ -2720,23 +2702,22 @@ Retorne obrigatoriamente um JSON no seguinte formato:
                 <div className="space-y-1">
                   <h4 className="text-[10px] font-black text-primary uppercase tracking-widest flex items-center gap-1.5">
                     <Languages size={11} className="text-primary" />
-                    Ajustar Letra / Tradução
+                    Ajustar Letra / Sincronia
                   </h4>
                   <p className="text-[9px] text-muted-foreground leading-normal font-semibold">
-                    Alinhe uma tradução correta para as frases ou corrija/alinhe a letra original offline.
+                    Cole a letra original oficial para sincronizar e gerar a tradução automática atualizada.
                   </p>
                 </div>
                 <Button
                   onClick={() => {
                     setTranscribedLinesTemp([...tempLines]);
-                    setPastedTranslation(tempLines.map(l => l.translation || '').join('\n').trim());
                     setPastedOriginalLyrics(tempLines.map(l => l.text || '').join('\n').trim());
                     setIsAdjustmentModalOpen(true);
                   }}
                   variant="outline"
                   className="w-full border-primary/20 bg-primary/5 hover:bg-primary/10 text-primary font-extrabold text-xs h-10 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.98]"
                 >
-                  🛠️ Ajustar Letra / Tradução
+                  🛠️ Ajustar Letra / Sincronia
                 </Button>
               </div>
             )}
@@ -4241,112 +4222,44 @@ Retorne obrigatoriamente um JSON no seguinte formato:
               <span>Letra / Tradução - Ajuste Fino</span>
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground leading-normal font-semibold text-left">
-              Associe uma tradução oficial às marcações de tempo ou ajuste a letra original de forma offline.
+              Cole a letra original oficial da música. O sistema sincronizará os versos com as marcações de tempo do Whisper e gerará a tradução em português correspondente automaticamente.
             </DialogDescription>
           </DialogHeader>
 
-          {/* Abas */}
-          <div className="flex border-b border-border/40 shrink-0">
-            <button
-              onClick={() => setAdjustmentActiveTab('translation')}
-              className={`flex-1 pb-2.5 text-xs font-black uppercase tracking-wider transition-colors border-b-2 text-center ${
-                adjustmentActiveTab === 'translation'
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              Tradução Correta (IA)
-            </button>
-            <button
-              onClick={() => setAdjustmentActiveTab('original')}
-              className={`flex-1 pb-2.5 text-xs font-black uppercase tracking-wider transition-colors border-b-2 text-center ${
-                adjustmentActiveTab === 'original'
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              Letra Original (Offline)
-            </button>
-            <button
-              onClick={() => setAdjustmentActiveTab('auto')}
-              className={`flex-1 pb-2.5 text-xs font-black uppercase tracking-wider transition-colors border-b-2 text-center ${
-                adjustmentActiveTab === 'auto'
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              Automático (Traduzir)
-            </button>
-          </div>
+          <div className="flex-1 flex flex-col space-y-3">
+            <div className="flex-1 flex flex-col space-y-2">
+              <label className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">
+                Cole a Letra Original Oficial (linha por linha):
+              </label>
+              <textarea
+                value={pastedOriginalLyrics}
+                onChange={(e) => setPastedOriginalLyrics(e.target.value)}
+                placeholder="Exemplo:&#10;First original line&#10;Second original line"
+                className="flex-1 min-h-[220px] w-full bg-muted/20 border border-border/40 rounded-xl p-3 text-xs font-medium resize-none focus:outline-none focus:border-primary/50 text-foreground placeholder:text-muted-foreground/45 transition-all select-text"
+              />
+            </div>
 
-          {/* Conteúdo das Abas */}
-          <div className="flex-1 min-h-[220px] flex flex-col space-y-3">
-            {adjustmentActiveTab === 'translation' && (
-              <div className="flex-1 flex flex-col space-y-2">
-                <label className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">
-                  Cole a Tradução Oficial / Correta (linha por linha):
-                </label>
-                <textarea
-                  value={pastedTranslation}
-                  onChange={(e) => setPastedTranslation(e.target.value)}
-                  placeholder="Exemplo:&#10;Primeira frase traduzida&#10;Segunda frase traduzida"
-                  className="flex-1 min-h-[160px] w-full bg-muted/20 border border-border/40 rounded-xl p-3 text-xs font-medium resize-none focus:outline-none focus:border-primary/50 text-foreground placeholder:text-muted-foreground/45"
-                />
-                <Button
-                  onClick={handleAlignTranslationWithAi}
-                  disabled={isAligningInProgress || !pastedTranslation.trim()}
-                  className="w-full bg-primary hover:bg-primary/95 text-primary-foreground font-extrabold text-xs h-10 rounded-xl shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                >
-                  {isAligningInProgress ? 'Sincronizando com IA...' : 'Sincronizar Tradução com IA'}
-                </Button>
-              </div>
-            )}
-
-            {adjustmentActiveTab === 'original' && (
-              <div className="flex-1 flex flex-col space-y-2">
-                <label className="text-[10px] font-black text-muted-foreground uppercase tracking-wider">
-                  Cole a Letra Original Oficial (linha por linha):
-                </label>
-                <textarea
-                  value={pastedOriginalLyrics}
-                  onChange={(e) => setPastedOriginalLyrics(e.target.value)}
-                  placeholder="Exemplo:&#10;First original line&#10;Second original line"
-                  className="flex-1 min-h-[160px] w-full bg-muted/20 border border-border/40 rounded-xl p-3 text-xs font-medium resize-none focus:outline-none focus:border-primary/50 text-foreground placeholder:text-muted-foreground/45"
-                />
-                <Button
-                  onClick={handleAlignOriginalLyricsOffline}
-                  disabled={isAligningInProgress || !pastedOriginalLyrics.trim()}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs h-10 rounded-xl shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                >
-                  {isAligningInProgress ? 'Alinhando...' : 'Alinhar Letra Original (Offline)'}
-                </Button>
-              </div>
-            )}
-
-            {adjustmentActiveTab === 'auto' && (
-              <div className="flex-1 flex flex-col justify-center items-center space-y-4 py-4">
-                <p className="text-xs text-muted-foreground text-center max-w-sm font-semibold">
-                  Se você não possui uma tradução pronta, pode gerar uma tradução automática para as frases identificadas.
-                </p>
-                <div className="flex flex-col sm:flex-row gap-3 w-full max-w-md">
-                  <Button
-                    onClick={handleGenerateTranslationAi}
-                    disabled={isAligningInProgress}
-                    className="flex-1 bg-primary hover:bg-primary/95 text-primary-foreground font-extrabold text-xs h-10 rounded-xl shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                  >
-                    Gerar por IA (Gemini)
-                  </Button>
-                  <Button
-                    onClick={handleGenerateTranslationMyMemory}
-                    disabled={isAligningInProgress}
-                    variant="outline"
-                    className="flex-1 border-border/60 hover:bg-muted text-foreground font-extrabold text-xs h-10 rounded-xl flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                  >
-                    Gerar Grátis (MyMemory)
-                  </Button>
-                </div>
-              </div>
-            )}
+            <div className="flex flex-col sm:flex-row gap-3 pt-2 shrink-0">
+              <Button
+                onClick={handleAlignOriginalLyricsWithAi}
+                disabled={isAligningInProgress || !pastedOriginalLyrics.trim()}
+                className="flex-1 bg-primary hover:bg-primary/95 text-primary-foreground font-extrabold text-xs h-11 rounded-xl shadow-lg flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 transition-all"
+              >
+                {isAligningInProgress ? 'Sincronizando com IA...' : 'Sincronizar com IA (Gemini)'}
+              </Button>
+              <Button
+                onClick={handleAlignOriginalLyricsOffline}
+                disabled={isAligningInProgress || !pastedOriginalLyrics.trim()}
+                variant="outline"
+                className="flex-1 border-emerald-600/30 bg-emerald-600/5 hover:bg-emerald-600/10 text-emerald-600 dark:text-emerald-400 font-extrabold text-xs h-11 rounded-xl flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 transition-all"
+              >
+                {isAligningInProgress ? 'Alinhando offline...' : 'Alinhar Offline (Grátis)'}
+              </Button>
+            </div>
+            
+            <p className="text-[9px] text-muted-foreground text-center font-semibold pt-1">
+              Nota: A tradução em português será gerada e associada automaticamente após o alinhamento da letra.
+            </p>
           </div>
 
           <DialogFooter className="flex items-center gap-2 pt-2 border-t border-border/20 shrink-0">

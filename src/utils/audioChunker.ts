@@ -160,6 +160,24 @@ export const adjustTimestampsSafeguard = (
   
   // Ordena pelo tempo de início inicial
   const sorted = [...lines].sort((a, b) => a.startTime - b.startTime);
+
+  // Heurística de Introdução Instrumental: se a primeira linha começar antes de 1.0s,
+  // mas tiver uma duração muito longa para o número de palavras, empurra o início
+  // para evitar soletrar antes de o cantor começar a cantar.
+  if (sorted.length > 0 && sorted[0].startTime < 1.0) {
+    const firstLine = sorted[0];
+    const words = firstLine.text.split(/\s+/).filter(Boolean).length;
+    const end = firstLine.endTime ?? (firstLine.startTime + 3.0);
+    const duration = end - firstLine.startTime;
+    const estimatedDuration = Math.max(2.5, words * 0.55); // ~110 WPM média para cantar
+    if (duration > estimatedDuration + 1.5) {
+      const newStart = parseFloat((end - estimatedDuration).toFixed(2));
+      sorted[0] = {
+        ...firstLine,
+        startTime: Math.max(0, newStart)
+      };
+    }
+  }
   
   // 1. Ajusta os tempos de início garantindo o distanciamento mínimo
   for (let i = 1; i < sorted.length; i++) {
