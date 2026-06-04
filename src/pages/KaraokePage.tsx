@@ -12,7 +12,7 @@ import type { Playlist, AudioTrack, TranscriptionLine, ReadingCollection } from 
 import { Card as ShadcnCard } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
-import { getWordLevenshteinDistance, diffWords, type DiffWord } from '../utils/srs';
+import { getWordLevenshteinDistance, diffWords, type DiffWord, getLevenshteinDistance } from '../utils/srs';
 import { separateVocalsCloud } from '../utils/vocalSeparationCloud';
 import { decodeAudioFile, adjustTimestampsSafeguard, bufferToMono16kWav } from '../utils/audioChunker';
 import { translateWithMyMemory } from '../utils/readingProcessor';
@@ -1614,15 +1614,74 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
           setTranscribingProgress('Corrigindo texto transcrito com Gemini...');
           try {
             const correctedTexts = await requestGeminiTextCorrection(finalLines, activeTrack.title, geminiApiKey);
-            if (correctedTexts.length === finalLines.length) {
-              finalLines = finalLines.map((l, idx) => ({
+            
+            // Função auxiliar de alinhamento inteligente para lidar com diferenças de quantidade de linhas
+            const alignAndCorrectLines = (
+              original: TranscriptionLine[],
+              corrected: string[]
+            ): TranscriptionLine[] => {
+              if (corrected.length === original.length) {
+                return original.map((l, idx) => ({
+                  ...l,
+                  text: corrected[idx].trim()
+                }));
+              }
+
+              console.warn(`[GeminiAlign] Tamanho diferente: originais=${original.length}, corrigidos=${corrected.length}. Executando alinhamento inteligente...`);
+
+              return original.map((line, idx) => {
+                const origText = line.text.trim();
+                if (!origText) return line;
+
+                const windowSize = 8;
+                const startIdx = Math.max(0, idx - windowSize);
+                const endIdx = Math.min(corrected.length - 1, idx + windowSize);
+
+                let bestMatchText = origText;
+                let bestDist = Infinity;
+
+                for (let cIdx = startIdx; cIdx <= endIdx; cIdx++) {
+                  const candidate = corrected[cIdx].trim();
+                  if (!candidate) continue;
+
+                  const dist = getLevenshteinDistance(origText.toLowerCase(), candidate.toLowerCase());
+                  if (dist < bestDist) {
+                    bestDist = dist;
+                    bestMatchText = candidate;
+                  }
+                }
+
+                const maxLen = Math.max(origText.length, bestMatchText.length);
+                const normalizedDist = bestDist / (maxLen || 1);
+
+                // Permite até 60% de diferença de caracteres para alinhar com a letra buscada
+                if (normalizedDist < 0.6) {
+                  return {
+                    ...line,
+                    text: bestMatchText
+                  };
+                }
+                return line;
+              });
+            };
+
+            const alignedLines = alignAndCorrectLines(finalLines, correctedTexts);
+            let changeCount = 0;
+            finalLines = finalLines.map((l, idx) => {
+              const alignedText = alignedLines[idx].text;
+              if (l.text !== alignedText) {
+                changeCount++;
+              }
+              return {
                 ...l,
-                text: correctedTexts[idx].trim()
-              }));
-              toast.success('Texto corrigido com sucesso via Gemini!');
+                text: alignedText
+              };
+            });
+
+            if (changeCount > 0) {
+              toast.success(`Texto corrigido com sucesso via Gemini! (${changeCount} alterações aplicadas)`);
             } else {
-              console.warn(`Tamanho do texto corrigido (${correctedTexts.length}) não bate com original (${finalLines.length})`);
-              toast.warning('A quantidade de linhas corrigidas retornada pela IA diferiu da original. A correção automática foi ignorada para preservar a sincronia.');
+              toast.info('Texto analisado pelo Gemini, mas nenhuma alteração foi necessária.');
             }
           } catch (corrErr: any) {
             console.warn("Falha ao corrigir textos com Gemini:", corrErr);
