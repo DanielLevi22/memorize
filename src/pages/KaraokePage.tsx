@@ -1611,9 +1611,14 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
       if (transcriptionProvider !== 'gemini' && finalLines.length > 0) {
         const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
         if (geminiApiKey.trim()) {
-          setTranscribingProgress('Corrigindo texto transcrito com Gemini...');
           try {
-            const correctedTexts = await requestGeminiTextCorrection(finalLines, activeTrack.title, geminiApiKey);
+            setTranscribingProgress('Buscando letra oficial na internet com Gemini...');
+            const sampleTexts = finalLines.map(l => l.text);
+            const officialLyrics = await requestOfficialLyricsViaSearch(activeTrack.title, sampleTexts, geminiApiKey);
+            console.log("[GeminiCorretor] Letra oficial buscada com sucesso.");
+
+            setTranscribingProgress('Corrigindo texto transcrito com Gemini...');
+            const correctedTexts = await requestGeminiTextCorrection(finalLines, officialLyrics, geminiApiKey);
             
             // Função auxiliar de alinhamento inteligente para lidar com diferenças de quantidade de linhas
             const alignAndCorrectLines = (
@@ -2101,9 +2106,50 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
     return parsed.translations || [];
   };
 
+  const requestOfficialLyricsViaSearch = async (
+    trackTitle: string,
+    sampleTexts: string[],
+    apiKey: string
+  ): Promise<string> => {
+    const promptText = `
+Busque na internet utilizando a ferramenta Google Search pela letra oficial original completa da música.
+Título provisório da faixa: "${trackTitle}"
+Amostra das frases iniciais da música:
+${JSON.stringify(sampleTexts.slice(0, 10))}
+
+Identifique o nome correto da música e do artista. Em seguida, faça uma busca no Google e retorne a letra oficial completa no idioma original (geralmente inglês), linha por linha.
+Retorne apenas o texto da letra oficial encontrada. Não adicione comentários, explicações ou markdown.
+`;
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const response = await fetchWithRetry(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{ text: promptText }]
+        }],
+        tools: [{
+          google_search: {}
+        }]
+      })
+    }, 'Gemini Busca Letra');
+
+    if (!response.ok) {
+      throw new Error(`Falha na busca da letra: status ${response.status}`);
+    }
+
+    const data = await response.json();
+    const lyricsText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!lyricsText) {
+      throw new Error('Nenhuma letra retornada na busca do Gemini.');
+    }
+    return lyricsText.trim();
+  };
+
   const requestGeminiTextCorrection = async (
     lines: TranscriptionLine[],
-    trackTitle: string,
+    officialLyrics: string,
     apiKey: string
   ): Promise<string[]> => {
     if (lines.length === 0) return [];
@@ -2111,21 +2157,21 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
     const promptText = `
 Você é um especialista em transcrição e inteligência artificial de altíssima precisão para músicas.
 
-Sua tarefa consiste em duas etapas obrigatórias:
-1. IDENTIFICAR a música original com base nas linhas transcritas fornecidas (que contêm erros fonéticos e distorções causadas pelo acompanhamento instrumental, mas mantêm o sentido geral e palavras-chave da composição oficial do artista). A faixa possui o título provisório de "${trackTitle}".
-2. UTILIZAR a ferramenta Google Search integrada para pesquisar na internet pela letra oficial original completa da música identificada (por exemplo: buscar por "lyrics [nome da música] [artista]"). Use o conteúdo real e oficial retornado da busca para obter a composição original exata e CORRIGIR cada linha transcrita para corresponder EXATAMENTE à letra oficial.
+Sua tarefa consiste em corrigir as linhas transcritas (que contêm erros fonéticos, homófonos e distorções causadas pelo acompanhamento instrumental) para que correspondam EXATAMENTE à Letra Oficial de Referência fornecida abaixo.
 
-Tipos de Erros da Transcrição que você deve corrigir:
-1. Erros Fonéticos / Homófonos: Palavras parecidas em som, mas incorretas no contexto (ex: "CEO" no lugar de "sea, oh", "sale" no lugar de "sail", "soak" no lugar de "sulking", "wrought" no lugar de "writing", "Thirties turn" no lugar de "Third things third").
-2. Distorções Graves / Hallucinações: Devido à velocidade do canto e ao ruído dos instrumentos, a IA pode transcrever frases totalmente diferentes ou sem nexo (ex: transcrever "Why? You burned me down, you kill me" no lugar de "Pain! You break me down and build me up", ou "they been flowing and hippin', they livinippin'" no lugar de "ever lived, ebbing and flowing", ou "My life, my hurt, my doubt, we can't run" no lugar de "My life, my love, my drive, it came from pain"). Você DEVE substituir a frase inteira de entrada pela frase oficial correspondente que pertence àquela posição cronológica na música.
+Letra Oficial de Referência:
+"""
+${officialLyrics}
+"""
 
-Diretrizes obrigatórias:
-1. Descubra qual é a música oficial.
-2. Cada linha de entrada representa um segmento de áudio cantado em uma marca de tempo exata. O seu papel é substituir o texto incorreto/distorcido de cada linha pelo respectivo texto oficial daquela posição cronológica na música, sem alterar a segmentação (o número de linhas).
-3. O array retornado "corrected_texts" DEVE ter exatamente o mesmo número de elementos do array de entrada "texts" (exatamente ${lines.length} itens). Cada elemento do resultado deve corresponder rigorosamente ao mesmo índice da entrada, servindo como uma substituição direta (correspondência estrita de 1 para 1). Não mude o tamanho do array de forma alguma!
-4. Não junte linhas e não divida linhas em múltiplas frases. Mantenha os breaks de linhas exatamente como estão.
-5. Se uma linha da transcrição original for apenas ruído, silêncio ou vocalização avulsa (como "ooh", "hey") que não faça parte das estrofes oficiais, você pode mantê-la ou limpá-la, mas DEVE preservar a linha no array (nunca remova o item ou altere a quantidade de elementos).
-6. NÃO invente palavras ou expressões extras que não façam parte da letra real oficial da música identificada.
+Instruções obrigatórias:
+1. Mapeie cada frase transcrita de entrada ao trecho correspondente na Letra Oficial de Referência (cronologicamente).
+2. Substitua os erros de transcrição fonética (como "CEO" -> "sea, oh", "sale" -> "sail", "soak" -> "sulking", "wrought" -> "writing", "Thirties turn" -> "Third things third") pela grafia correta oficial.
+3. Substitua distorções graves ou trechos alucinados (como "Why? You burned me down, you kill me" -> "Pain! You break me down and build me up", ou "they been flowing and hippin'..." -> "ever lived, ebbing and flowing", ou "My life, my hurt, my doubt, we can't run" -> "My life, my love, my drive, it came from pain") pelo respectivo verso oficial correto correspondente àquela posição cronológica na música.
+4. O array retornado "corrected_texts" DEVE ter exatamente o mesmo número de elementos do array de entrada "texts" (exatamente ${lines.length} itens). Cada elemento do resultado deve corresponder rigorosamente ao mesmo índice da entrada, servindo como uma substituição direta (correspondência estrita de 1 para 1).
+5. Não junte e não divida linhas. Mantenha os breaks de linhas exatamente como estão na entrada.
+6. Se uma linha da transcrição original for apenas ruído, silêncio ou vocalização avulsa (como "ooh", "hey") que não faça parte das estrofes oficiais, você pode mantê-la ou limpá-la, mas DEVE preservar a linha no array (nunca remova o item).
+7. NÃO invente palavras ou expressões extras que não façam parte da letra real oficial da música.
 
 Retorne obrigatoriamente um JSON no seguinte formato:
 {
@@ -2149,9 +2195,6 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
       body: JSON.stringify({
         contents: [{
           parts: [{ text: promptText }]
-        }],
-        tools: [{
-          google_search: {}
         }],
         generationConfig: {
           responseMimeType: 'application/json',
