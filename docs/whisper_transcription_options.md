@@ -67,7 +67,7 @@ De acordo com o seletor do usuário (tendo **Groq Whisper** como padrão), a tra
     * `onnx-community/whisper-tiny` (~75MB): Mais rápido e leve.
     * `onnx-community/whisper-base` (~140MB): Excelente equilíbrio e precisão de palavras.
     * `onnx-community/whisper-small` (~460MB): Altíssima precisão e qualidade de transcrição (requer WebGPU ou CPU forte).
-    * `onnx-community/whisper-medium` (~1.5GB): Altíssima precisão multilíngue (exige máquina forte, risco de Out of Memory).
+    * `onnx-community/whisper-medium-ONNX` (~1.5GB): Altíssima precisão multilíngue (exige máquina forte, risco de Out of Memory).
     * `onnx-community/whisper-large-v3-turbo` (~1.6GB): Máxima precisão e velocidade otimizada de geração (exige máquina forte, risco de Out of Memory).
 * **Como Funciona & Parâmetros de Robustez**:
   1. **Thread Separada**: O runtime do ONNX e a biblioteca `@huggingface/transformers` rodam em uma thread paralela no worker para evitar travar a interface visual (UI) do usuário.

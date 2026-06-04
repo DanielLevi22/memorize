@@ -101,7 +101,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     return (localStorage.getItem('memorize_transcription_provider') as any) || 'local';
   });
 
-  const [localModelSize, setLocalModelSize] = useState<'onnx-community/whisper-tiny' | 'onnx-community/whisper-base' | 'onnx-community/whisper-small' | 'onnx-community/whisper-medium' | 'onnx-community/whisper-large-v3-turbo'>(() => {
+  const [localModelSize, setLocalModelSize] = useState<'onnx-community/whisper-tiny' | 'onnx-community/whisper-base' | 'onnx-community/whisper-small' | 'onnx-community/whisper-medium-ONNX' | 'onnx-community/whisper-large-v3-turbo'>(() => {
     return (localStorage.getItem('memorize_local_whisper_model_size') as any) || 'onnx-community/whisper-tiny';
   });
 
@@ -1984,9 +1984,23 @@ Não adicione markdown fora do bloco JSON.
         if (type === 'status') {
           setTranscribingProgress(message);
         } else if (type === 'loading') {
-          const pct = Math.min(100, Math.round(progress));
+          const pct = Math.min(100, Math.round(progress || 0));
           setTranscribingPercent(pct);
-          setTranscribingProgress(`Baixando inteligência local... ${pct}%`);
+          
+          let fileInfo = '';
+          if (e.data.file) {
+            const fileName = e.data.file.split('/').pop() || e.data.file;
+            fileInfo = ` [${fileName}]`;
+          }
+          
+          let sizeInfo = '';
+          if (e.data.loadedBytes !== undefined && e.data.totalBytes !== undefined) {
+            const loadedMb = (e.data.loadedBytes / (1024 * 1024)).toFixed(1);
+            const totalMb = (e.data.totalBytes / (1024 * 1024)).toFixed(1);
+            sizeInfo = ` (${loadedMb}MB de ${totalMb}MB)`;
+          }
+          
+          setTranscribingProgress(`Baixando inteligência local${fileInfo}... ${pct}%${sizeInfo}`);
         } else if (type === 'success') {
           clearInterval(checkCancellation);
           worker.terminate();
@@ -2661,7 +2675,7 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
                       <option value="onnx-community/whisper-tiny">Tiny (~75MB - Mais Rápido)</option>
                       <option value="onnx-community/whisper-base">Base (~140MB - Melhor Precisão)</option>
                       <option value="onnx-community/whisper-small">Small (~460MB - Alta Precisão)</option>
-                      <option value="onnx-community/whisper-medium">Medium (~1.5GB - Altíssima Precisão)</option>
+                      <option value="onnx-community/whisper-medium-ONNX">Medium (~1.5GB - Altíssima Precisão)</option>
                       <option value="onnx-community/whisper-large-v3-turbo">Large v3 Turbo (~1.6GB - Extrema Precisão)</option>
                     </select>
                     <p className="text-[9px] text-muted-foreground leading-normal font-semibold mt-1">

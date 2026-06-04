@@ -29,21 +29,62 @@ self.addEventListener('message', async (event: MessageEvent) => {
     try {
       if (!transcriber) {
         self.postMessage({ type: 'status', message: 'Carregando modelo Whisper local...' });
-        transcriber = await pipeline('automatic-speech-recognition', modelName, {
-          device: 'webgpu', // Utiliza WebGPU para aceleração se suportado
-          dtype: 'fp32',
-          progress_callback: (data: any) => {
-            if (data.status === 'progress') {
-              self.postMessage({
-                type: 'loading',
-                file: data.file,
-                progress: data.progress,
-                loadedBytes: data.loaded,
-                totalBytes: data.total
+
+        const progress_callback = (data: any) => {
+          if (data.status === 'progress') {
+            self.postMessage({
+              type: 'loading',
+              file: data.file,
+              progress: data.progress,
+              loadedBytes: data.loaded,
+              totalBytes: data.total
+            });
+          }
+        };
+
+        // Usa fp16 por padrão em modelos maiores para economizar VRAM/RAM e acelerar o processamento
+        let dtype: any = 'fp32';
+        if (modelName.includes('small') || modelName.includes('medium') || modelName.includes('large')) {
+          dtype = 'fp16';
+        }
+
+        try {
+          console.log(`[WhisperWorker] Tentando inicializar ${modelName} com WebGPU e dtype ${dtype}...`);
+          transcriber = await pipeline('automatic-speech-recognition', modelName, {
+            device: 'webgpu',
+            dtype: dtype,
+            progress_callback
+          });
+        } catch (webgpuErr: any) {
+          console.warn(`[WhisperWorker] Falha ao carregar com WebGPU e dtype ${dtype}. Tentando fallback...`, webgpuErr);
+          
+          if (dtype === 'fp16') {
+            try {
+              console.log(`[WhisperWorker] Tentando fallback para WebGPU com dtype fp32...`);
+              transcriber = await pipeline('automatic-speech-recognition', modelName, {
+                device: 'webgpu',
+                dtype: 'fp32',
+                progress_callback
+              });
+            } catch (fp32Err: any) {
+              console.warn(`[WhisperWorker] Falha ao carregar com WebGPU e dtype fp32. Tentando CPU...`, fp32Err);
+              // Fallback definitivo para CPU (WASM) com fp32
+              transcriber = await pipeline('automatic-speech-recognition', modelName, {
+                device: 'cpu',
+                dtype: 'fp32',
+                progress_callback
               });
             }
+          } else {
+            console.warn(`[WhisperWorker] Falha ao carregar com WebGPU. Tentando CPU...`, webgpuErr);
+            // Fallback definitivo para CPU (WASM) com fp32
+            transcriber = await pipeline('automatic-speech-recognition', modelName, {
+              device: 'cpu',
+              dtype: 'fp32',
+              progress_callback
+            });
           }
-        });
+        }
       }
 
       self.postMessage({ type: 'status', message: 'Processando áudio...' });
