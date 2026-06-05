@@ -4,7 +4,7 @@ import {
   ArrowLeft, BookOpen, Plus, Trash2, Play, Pause, Square,
   Copy, Check, ChevronRight, FileText, Volume2, HelpCircle,
   Maximize2, Eye, EyeOff, Folder, FolderOpen, FolderPlus, Edit, Upload, Sparkles, Loader2, ExternalLink,
-  Mic, Keyboard, Pencil
+  Mic, Keyboard, Pencil, Film, Tv
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -95,6 +95,14 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [copiedLineIdx, setCopiedLineIdx] = useState<number | null>(null);
   const [selectedLevelFilter, setSelectedLevelFilter] = useState<'all' | 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2'>('all');
+  const [selectedThemeFilter, setSelectedThemeFilter] = useState<string>('all');
+
+  // Compute unique themes from all reading texts
+  const availableThemes = React.useMemo(() => {
+    const themes = new Set<string>();
+    readings?.forEach(r => r.theme && themes.add(r.theme));
+    return Array.from(themes).sort();
+  }, [readings]);
 
   // Collection creation states
   const [isCreatingCollection, setIsCreatingCollection] = useState(false);
@@ -1531,7 +1539,9 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
           deckId: addToDeckId,
           type: addToDeckNoteType,
           fields: [draft.field0, draft.field1, draft.field2],
-          tags: ['reading'],
+          tags: selectedText.theme 
+            ? ['reading', `tema-${selectedText.theme.toLowerCase().trim().replace(/\s+/g, '-').normalize('NFD').replace(/[\u0300-\u036f]/g, '')}`] 
+            : ['reading'],
           context: selectedText.title,
           createdAt: Date.now(),
           updatedAt: Date.now()
@@ -3576,7 +3586,8 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   // ═══════════════════════════════════════════
   if (selectedCollectionId !== null) {
     const activeCollection = collections.find(c => c.id === selectedCollectionId);
-    const collectionReadings = readings?.filter(r => r.collectionId === selectedCollectionId) || [];
+    const collectionReadings = (readings?.filter(r => r.collectionId === selectedCollectionId) || [])
+      .filter(r => selectedThemeFilter === 'all' || r.theme === selectedThemeFilter);
     const totalTexts = collectionReadings.length;
     const totalLines = collectionReadings.reduce((sum, r) => sum + r.lines.length, 0);
     const masteredLines = collectionReadings.reduce((sum, r) => sum + r.lines.filter(l => l.mastered).length, 0);
@@ -3689,10 +3700,21 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0 space-y-2">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <FileText size={14} className="text-primary flex-shrink-0" />
+                        {reading.category === 'movie' ? (
+                          <span title="Filme" className="inline-flex"><Film size={14} className="text-cyan-400 flex-shrink-0 animate-fadeIn" /></span>
+                        ) : reading.category === 'series' ? (
+                          <span title="Seriado" className="inline-flex"><Tv size={14} className="text-violet-400 flex-shrink-0 animate-fadeIn" /></span>
+                        ) : (
+                          <FileText size={14} className="text-primary flex-shrink-0" />
+                        )}
                         <h3 className="text-sm font-bold text-foreground truncate group-hover:text-primary transition-colors">
                           {reading.title}
                         </h3>
+                        {reading.theme && (
+                          <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 text-[9px] font-bold">
+                            #{reading.theme}
+                          </span>
+                        )}
                         {reading.cefrLevel && (
                           <span className={`text-[8.5px] font-extrabold uppercase px-1.5 py-0.5 rounded border leading-none shrink-0 ${
                             reading.cefrLevel === 'A1' || reading.cefrLevel === 'A2'
@@ -4127,6 +4149,39 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
         })}
       </div>
 
+      {/* Theme Filter */}
+      {availableThemes.length > 0 && (
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 shrink-0 scrollbar-none animate-fadeIn mt-1">
+          <span className="text-[10px] font-black uppercase text-muted-foreground mr-1.5 shrink-0">Filtrar Tema:</span>
+          <button
+            onClick={() => setSelectedThemeFilter('all')}
+            className={`px-3 py-1.5 rounded-xl text-[10px] font-black border transition-all cursor-pointer ${
+              selectedThemeFilter === 'all'
+                ? 'bg-primary border-primary text-primary-foreground font-black'
+                : 'bg-muted/40 hover:bg-muted border-border/80 text-muted-foreground hover:text-foreground font-semibold'
+            }`}
+          >
+            TODOS
+          </button>
+          {availableThemes.map((theme) => {
+            const isSelected = selectedThemeFilter === theme;
+            return (
+              <button
+                key={theme}
+                onClick={() => setSelectedThemeFilter(theme)}
+                className={`px-3 py-1.5 rounded-xl text-[10px] font-black border transition-all cursor-pointer ${
+                  isSelected
+                    ? 'bg-primary border-primary text-primary-foreground font-black'
+                    : 'bg-muted/40 hover:bg-muted border-border/80 text-muted-foreground hover:text-foreground font-semibold'
+                }`}
+              >
+                #{theme}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Search results */}
       {searchQuery.trim().length >= 2 && (
         <div className="space-y-2 animate-fadeIn">
@@ -4193,7 +4248,11 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 animate-fadeIn">
                 {collections.map((col) => {
-                  const colReadings = readings?.filter(r => r.collectionId === col.id) || [];
+                  const colReadings = (readings?.filter(r => r.collectionId === col.id) || [])
+                    .filter(r => selectedThemeFilter === 'all' || r.theme === selectedThemeFilter);
+                  
+                  if (selectedThemeFilter !== 'all' && colReadings.length === 0) return null;
+                  
                   const totalTexts = colReadings.length;
                   const totalLines = colReadings.reduce((sum, r) => sum + r.lines.length, 0);
                   const masteredLines = colReadings.reduce((sum, r) => sum + r.lines.filter(l => l.mastered).length, 0);
@@ -4286,7 +4345,8 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
             Textos de Nível {selectedLevelFilter}
           </h3>
           {(() => {
-            const filteredReadings = readings?.filter(r => r.cefrLevel === selectedLevelFilter) || [];
+            const filteredReadings = (readings?.filter(r => r.cefrLevel === selectedLevelFilter) || [])
+              .filter(r => selectedThemeFilter === 'all' || r.theme === selectedThemeFilter);
             if (filteredReadings.length === 0) {
               return (
                 <div className="bg-card border border-border rounded-2xl p-12 text-center space-y-3 shadow-sm">
@@ -4313,10 +4373,21 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex-1 min-w-0 space-y-2">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <FileText size={14} className="text-primary flex-shrink-0" />
+                            {reading.category === 'movie' ? (
+                              <span title="Filme" className="inline-flex"><Film size={14} className="text-cyan-400 flex-shrink-0 animate-fadeIn" /></span>
+                            ) : reading.category === 'series' ? (
+                              <span title="Seriado" className="inline-flex"><Tv size={14} className="text-violet-400 flex-shrink-0 animate-fadeIn" /></span>
+                            ) : (
+                              <FileText size={14} className="text-primary flex-shrink-0" />
+                            )}
                             <h4 className="text-sm font-bold text-foreground truncate group-hover:text-primary transition-colors">
                               {reading.title}
                             </h4>
+                            {reading.theme && (
+                              <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 text-[9px] font-bold">
+                                #{reading.theme}
+                              </span>
+                            )}
                             <span className="text-[8.5px] font-extrabold uppercase px-1.5 py-0.5 rounded border leading-none shrink-0 bg-emerald-500/10 border-emerald-500/25 text-emerald-600 dark:text-emerald-400">
                               {reading.cefrLevel}
                             </span>

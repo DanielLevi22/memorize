@@ -171,6 +171,8 @@ export interface TextResource {
   lastLineIndex?: number;       // Última linha lida/ativa (para auto-bookmark)
   collectionId?: string;        // ID da coleção/pasta à qual o texto pertence
   cefrLevel?: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2'; // Nível CEFR associado ao texto
+  category?: 'movie' | 'series' | 'random';
+  theme?: string;
   createdAt: number;            // timestamp MS
   updatedAt: number;            // timestamp MS
 }
@@ -303,6 +305,21 @@ export interface CefrExamAttempt {
   overallScore: number; // Ponderado
   passed: boolean;
   aiFeedback?: string; // Retorno do Gemini sobre a redação
+}
+
+export interface MiningItem {
+  id: string; // UUID
+  originalText?: string;
+  translation?: string;
+  explanation?: string;
+  imageUrl?: string; // Base64 jpeg (compressed)
+  voiceUrl?: string; // Base64 audio/ogg
+  source: 'photo' | 'voice' | 'text';
+  status: 'pending' | 'approved' | 'ignored';
+  category?: 'movie' | 'series' | 'random';
+  theme?: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 

@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { Deck, Card, Note, Revision, DeckPreset, TextResource, ReadingSession, ReadingCollection, ChatMessage, AudioTrack, Playlist, CefrExam, CefrExamAttempt } from '../types';
+import type { Deck, Card, Note, Revision, DeckPreset, TextResource, ReadingSession, ReadingCollection, ChatMessage, AudioTrack, Playlist, CefrExam, CefrExamAttempt, MiningItem } from '../types';
 
 class MemorizeDatabase extends Dexie {
   decks!: Table<Deck>;
@@ -15,6 +15,7 @@ class MemorizeDatabase extends Dexie {
   playlists!: Table<Playlist>;
   cefrExams!: Table<CefrExam>;
   cefrExamAttempts!: Table<CefrExamAttempt>;
+  miningItems!: Table<MiningItem>;
 
   constructor() {
     super('MemorizeDatabase');
@@ -294,6 +295,23 @@ class MemorizeDatabase extends Dexie {
       for (const track of tracksToUpdate) {
         await tx.table('audioTracks').put(track);
       }
+    });
+
+    this.version(13).stores({
+      decks: 'id, name, createdAt, updatedAt, presetId',
+      cards: 'id, deckId, dueDate, [deckId+dueDate], noteId, createdAt, updatedAt',
+      revisions: 'id, cardId, timestamp',
+      presets: 'id, name',
+      texts: 'id, title, type, showInReadings, cefrLevel, createdAt, collectionId',
+      readingSessions: 'id, readingId, timestamp',
+      readingCollections: 'id, title, createdAt',
+      notes: 'id, deckId, createdAt',
+      chatMessages: 'id, partnerId, timestamp',
+      audioTracks: 'id, playlistId, title, textId, createdAt',
+      playlists: 'id, name, createdAt',
+      cefrExams: 'id, level',
+      cefrExamAttempts: 'id, examId, level, timestamp',
+      miningItems: 'id, status, createdAt'
     });
   }
 }
@@ -661,4 +679,20 @@ export async function createTestDeck(): Promise<string> {
 
   return deckId;
 }
+
+// Banco de Dados Secundário para a Fila de Mineração de Sentenças
+export class MemorizeMiningDatabase extends Dexie {
+  miningItems!: Table<MiningItem>;
+  miningDeletions!: Table<{ id: string; deletedAt: number }>;
+
+  constructor() {
+    super('MemorizeMiningDatabase');
+    this.version(1).stores({
+      miningItems: 'id, status, createdAt',
+      miningDeletions: 'id, deletedAt'
+    });
+  }
+}
+
+export const miningDb = new MemorizeMiningDatabase();
 

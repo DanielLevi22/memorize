@@ -5,7 +5,7 @@ import {
   Search, Settings, Sun, Moon,
   ChevronLeft, LayoutDashboard, TrendingUp, ClipboardList,
   BookOpen, Info, MessageSquare, Timer, RefreshCw, Cloud, Headphones,
-  Lock, Key, Eye, EyeOff, Mic
+  Lock, Key, Eye, EyeOff, Mic, Bot
 } from 'lucide-react';
 
 // Banco de Dados e Types
@@ -34,6 +34,7 @@ import { DecksPage } from './pages/DecksPage';
 import { ExamsPage } from './pages/ExamsPage';
 import { ExamArenaPage } from './pages/ExamArenaPage';
 import { AiDiagnosticArenaPage } from './pages/AiDiagnosticArenaPage';
+import { MiningInboxPage } from './pages/MiningInboxPage';
 import { Toaster, toast } from 'sonner';
 import { calculateDailyRequirements, recalculateSchedule } from './utils/cefrJourney';
 
@@ -100,7 +101,7 @@ function App() {
   // --- ESTADO DA SIDEBAR E NAVEGAÇÃO INTERNA ---
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDesktopSidebarOpen, setIsDesktopSidebarOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke' | 'mining'>('dashboard');
   const [activeKaraokeTrackId, setActiveKaraokeTrackId] = useState<string | null>(null);
   const [isKaraokeFullscreen, setIsKaraokeFullscreen] = useState(false);
   const [guideInitialTab, setGuideInitialTab] = useState<'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math'>('overview');
@@ -1007,6 +1008,7 @@ function App() {
           await createBackupFile(token, envelope);
         }
         
+        sessionStorage.setItem('memorize_sync_password', password);
         const now = Date.now();
         setLastSyncTime(now);
         localStorage.setItem('memorize_last_sync_time', now.toString());
@@ -1033,6 +1035,7 @@ function App() {
         setSyncStatusMessage('Importando e substituindo base de dados local...');
         await performMergeSync(remoteData);
         
+        sessionStorage.setItem('memorize_sync_password', password);
         const now = Date.now();
         setLastSyncTime(now);
         localStorage.setItem('memorize_last_sync_time', now.toString());
@@ -1057,6 +1060,7 @@ function App() {
         setSyncStatusMessage('Criando primeiro backup no Drive...');
         await createBackupFile(token, envelope);
         
+        sessionStorage.setItem('memorize_sync_password', password);
         const now = Date.now();
         setLastSyncTime(now);
         localStorage.setItem('memorize_last_sync_time', now.toString());
@@ -1089,6 +1093,7 @@ function App() {
         setSyncStatusMessage('Subindo base unificada para o Google Drive...');
         await updateBackupFile(token, fileInfo.id, newEnvelope);
 
+        sessionStorage.setItem('memorize_sync_password', password);
         const now = Date.now();
         setLastSyncTime(now);
         localStorage.setItem('memorize_last_sync_time', now.toString());
@@ -1162,7 +1167,7 @@ function App() {
   }, []);
 
   // --- FLUXO NAVEGAÇÃO SIDEBAR ---
-  const handleNavigateFromSidebar = (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke') => {
+  const handleNavigateFromSidebar = (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke' | 'mining') => {
     setActiveTab(tab);
     setGuideInitialTab('overview');
     setCurrentView('dashboard');
@@ -1509,6 +1514,24 @@ function App() {
 
             <Button 
               variant="ghost"
+              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
+                activeTab === 'mining' 
+                  ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+              }`}
+              onClick={() => {
+                setActiveTab('mining');
+                setCurrentView('dashboard');
+              }}
+            >
+              <div className="flex items-center gap-3">
+                <Bot size={16} />
+                <span>Mineração (Fila)</span>
+              </div>
+            </Button>
+
+            <Button 
+              variant="ghost"
               className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                 activeTab === 'profile' 
                   ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
@@ -1772,6 +1795,21 @@ function App() {
                         {cards.length}
                       </span>
                     )}
+                  </Button>
+
+                  <Button 
+                    variant="ghost"
+                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
+                      activeTab === 'mining' 
+                        ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+                    }`}
+                    onClick={() => handleNavigateFromSidebar('mining')}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Bot size={16} />
+                      <span>Mineração (Fila)</span>
+                    </div>
                   </Button>
 
                   <Button 
@@ -2156,6 +2194,15 @@ function App() {
             {/* TAB 7: GUIA E AJUDA */}
             {activeTab === 'guide' && (
               <AppGuideDocs initialTab={guideInitialTab} />
+            )}
+
+            {activeTab === 'mining' && (
+              <MiningInboxPage 
+                geminiApiKey={geminiApiKey} 
+                driveAccessToken={driveAccessToken}
+                setDriveAccessToken={setDriveAccessToken}
+                driveClientId={DRIVE_CLIENT_ID}
+              />
             )}
 
           </main>

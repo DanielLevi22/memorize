@@ -75,8 +75,8 @@ export interface DriveFileInfo {
 /**
  * Procura pelo arquivo 'memorize_backup.enc' no Google Drive do usuário.
  */
-export async function findBackupFile(accessToken: string): Promise<DriveFileInfo | null> {
-  const query = encodeURIComponent("name = 'memorize_backup.enc' and trashed = false");
+export async function findBackupFile(accessToken: string, filename = 'memorize_backup.enc'): Promise<DriveFileInfo | null> {
+  const query = encodeURIComponent(`name = '${filename}' and trashed = false`);
   const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,modifiedTime)&spaces=drive`;
 
   const response = await fetch(url, {
@@ -124,13 +124,15 @@ export async function downloadBackupFile(accessToken: string, fileId: string): P
 /**
  * Cria um novo arquivo de backup encriptado no Google Drive usando multipart upload.
  */
-export async function createBackupFile(accessToken: string, envelope: EncryptedEnvelope): Promise<DriveFileInfo> {
+export async function createBackupFile(accessToken: string, envelope: EncryptedEnvelope, filename = 'memorize_backup.enc'): Promise<DriveFileInfo> {
   const url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
 
   const metadata = {
-    name: 'memorize_backup.enc',
+    name: filename,
     mimeType: 'application/json',
-    description: 'Backup criptografado de ponta a ponta do Memorize',
+    description: filename === 'memorize_backup.enc'
+      ? 'Backup criptografado de ponta a ponta do Memorize'
+      : 'Backup criptografado da Fila de Mineração do Memorize',
   };
 
   const boundary = 'memorize_multipart_boundary';

@@ -1,5 +1,5 @@
-import { db } from '../db/db';
-import type { Deck, Card, Note, Revision, DeckPreset, TextResource, ReadingSession, ReadingCollection, ChatMessage } from '../types';
+import { db, miningDb } from '../db/db';
+import type { Deck, Card, Note, Revision, DeckPreset, TextResource, ReadingSession, ReadingCollection, ChatMessage, MiningItem } from '../types';
 
 // Helper to convert Blob to base64 data URL
 function blobToBase64(blob: Blob): Promise<string> {
@@ -207,4 +207,84 @@ export async function performMergeSync(remotePayload: ExportPayload): Promise<vo
   await mergeLogTable<Revision>(db.revisions, remotePayload.revisions);
   await mergeLogTable<ReadingSession>(db.readingSessions, remotePayload.readingSessions);
   await mergeLogTable<ChatMessage>(db.chatMessages, remotePayload.chatMessages);
+}
+
+export interface MiningSyncPayload {
+  version: string;
+  exportType: 'mining-sync';
+  miningItems: MiningItem[];
+  miningDeletions: { id: string; deletedAt: number }[];
+  exportedAt: number;
+}
+
+export async function exportMiningDatabase(): Promise<MiningSyncPayload> {
+  const miningItems = await miningDb.miningItems.toArray();
+  const miningDeletions = await miningDb.miningDeletions.toArray();
+  return {
+    version: '1.0',
+    exportType: 'mining-sync',
+    miningItems,
+    miningDeletions,
+    exportedAt: Date.now()
+  };
+}
+
+export async function mergeMiningSync(remotePayload: MiningSyncPayload): Promise<void> {
+  // 1. Process deletions
+  const localDeletions = await miningDb.miningDeletions.toArray();
+  const remoteDeletions = remotePayload.miningDeletions || [];
+
+  // Merge deletions (keep union of deletions, filtered to last 14 days)
+  const fourteenDaysAgo = Date.now() - 14 * 24 * 60 * 60 * 1000;
+  const mergedDeletionsMap = new Map<string, number>();
+
+  localDeletions.forEach(d => {
+    if (d.deletedAt > fourteenDaysAgo) {
+      mergedDeletionsMap.set(d.id, d.deletedAt);
+    }
+  });
+
+  remoteDeletions.forEach(d => {
+    if (d.deletedAt > fourteenDaysAgo) {
+      const existing = mergedDeletionsMap.get(d.id) || 0;
+      if (d.deletedAt > existing) {
+        mergedDeletionsMap.set(d.id, d.deletedAt);
+      }
+    }
+  });
+
+  const allDeletionIds = new Set(mergedDeletionsMap.keys());
+
+  // Filter remote items (exclude deleted ones)
+  const filteredRemoteItems = (remotePayload.miningItems || []).filter(item => !allDeletionIds.has(item.id));
+
+  // Delete matching items from local database
+  const localItems = await miningDb.miningItems.toArray();
+  for (const localItem of localItems) {
+    if (allDeletionIds.has(localItem.id)) {
+      await miningDb.miningItems.delete(localItem.id);
+    }
+  }
+
+  // 2. Traditional two-way merge on remaining items
+  const currentLocalItems = await miningDb.miningItems.toArray();
+  const localMap = new Map<string, MiningItem>(currentLocalItems.map(item => [item.id, item]));
+
+  for (const remoteItem of filteredRemoteItems) {
+    const localItem = localMap.get(remoteItem.id);
+    if (!localItem) {
+      await miningDb.miningItems.add(remoteItem);
+    } else {
+      const remoteUpdate = remoteItem.updatedAt || 0;
+      const localUpdate = localItem.updatedAt || 0;
+      if (remoteUpdate > localUpdate) {
+        await miningDb.miningItems.put(remoteItem);
+      }
+    }
+  }
+
+  // Save the merged deletions list
+  await miningDb.miningDeletions.clear();
+  const newDeletions = Array.from(mergedDeletionsMap.entries()).map(([id, deletedAt]) => ({ id, deletedAt }));
+  await miningDb.miningDeletions.bulkPut(newDeletions);
 }
