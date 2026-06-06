@@ -655,13 +655,13 @@ export const AppGuideDocs: React.FC<AppGuideDocsProps> = ({ initialTab = 'overvi
                     <div>
                       <span className="text-[10px] font-sans font-bold text-muted-foreground">PowerShell (Windows):</span>
                       <pre className="bg-muted px-2.5 py-1.5 rounded-lg border border-border overflow-x-auto mt-1 select-all text-foreground">
-                        $env:OLLAMA_ORIGINS="*" ; ollama serve
+                        $env:OLLAMA_ORIGINS="https://memorize-three.vercel.app,*" ; ollama serve
                       </pre>
                     </div>
                     <div>
                       <span className="text-[10px] font-sans font-bold text-muted-foreground">Terminal (macOS):</span>
                       <pre className="bg-muted px-2.5 py-1.5 rounded-lg border border-border overflow-x-auto mt-1 select-all text-foreground">
-                        OLLAMA_ORIGINS="*" open -a Ollama
+                        OLLAMA_ORIGINS="https://memorize-three.vercel.app,*" open -a Ollama
                       </pre>
                     </div>
                     <div>
@@ -671,7 +671,7 @@ export const AppGuideDocs: React.FC<AppGuideDocsProps> = ({ initialTab = 'overvi
                       </p>
                       <pre className="bg-muted px-2.5 py-1.5 rounded-lg border border-border overflow-x-auto mt-1 text-foreground">
                         [Service]
-                        Environment="OLLAMA_ORIGINS=*"
+                        Environment="OLLAMA_ORIGINS=https://memorize-three.vercel.app,*"
                       </pre>
                       <p className="font-sans text-[11px] text-muted-foreground leading-relaxed mt-1">
                         Salve o arquivo e depois execute: <code className="bg-muted px-1 rounded font-mono">sudo systemctl daemon-reload && sudo systemctl restart ollama</code>.

@@ -1442,13 +1442,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                   <div>
                     <span className="text-[10px] font-sans font-bold text-muted-foreground">PowerShell (Windows):</span>
                     <pre className="bg-muted px-2.5 py-1.5 rounded-lg border border-border overflow-x-auto mt-1 select-all">
-                      $env:OLLAMA_ORIGINS="*" ; ollama serve
+                      $env:OLLAMA_ORIGINS="https://memorize-three.vercel.app,*" ; ollama serve
                     </pre>
                   </div>
                   <div className="pt-1">
                     <span className="text-[10px] font-sans font-bold text-muted-foreground">Terminal (macOS/Linux):</span>
                     <pre className="bg-muted px-2.5 py-1.5 rounded-lg border border-border overflow-x-auto mt-1 select-all">
-                      OLLAMA_ORIGINS="*" ollama serve
+                      OLLAMA_ORIGINS="https://memorize-three.vercel.app,*" ollama serve
                     </pre>
                   </div>
                 </div>
