@@ -51,7 +51,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   isFullscreenMode = false,
   setIsFullscreenMode = () => {}
 }) => {
-  const { aiService, aiProvider } = useAI();
+  const { aiService, aiProvider, setAiProvider } = useAI();
 
   // DB States
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -2620,6 +2620,20 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
                     <option value="openai">OpenAI Whisper (API)</option>
                     <option value="groq">Groq Whisper (API - Veloz)</option>
                     <option value="local">Whisper Local (No Navegador - 100% Grátis)</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1.5 w-full">
+                  <label className="text-[8px] font-black text-muted-foreground uppercase tracking-wider block">
+                    IA para Tradução & Alinhamento
+                  </label>
+                  <select
+                    value={aiProvider}
+                    onChange={(e) => setAiProvider(e.target.value as 'gemini' | 'ollama')}
+                    className="w-full bg-background border border-border text-foreground px-3 py-1.5 rounded-xl text-xs font-bold outline-none focus:border-violet-500/50 cursor-pointer"
+                  >
+                    <option value="gemini">Gemini Flash (Nuvem)</option>
+                    <option value="ollama">Ollama (Local / Auto)</option>
                   </select>
                 </div>
 
