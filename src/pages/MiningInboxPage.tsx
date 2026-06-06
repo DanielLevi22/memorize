@@ -551,20 +551,37 @@ export function MiningInboxPage({
     setSelectedItemIds(nextSelection);
   };
 
-  const handleSelectUnprocessed = (items: MiningItem[]) => {
-    const unprocessedItems = items.filter(item => !item.translation && !processingItemIds[item.id]);
-    if (unprocessedItems.length === 0) {
-      toast.info('Não há itens não processados pendentes na fila.');
+  const handleProcessAllUnprocessed = async () => {
+    const itemsToProcess = pendingItems?.filter(item => 
+      !item.translation && !processingItemIds[item.id]
+    ) || [];
+
+    if (itemsToProcess.length === 0) {
+      toast.info('Não há frases pendentes de análise por IA na fila.');
       return;
     }
 
-    const allSelected = unprocessedItems.every(item => selectedItemIds[item.id]);
+    setIsBulkProcessing(true);
+    let successCount = 0;
+    let failCount = 0;
 
-    const nextSelection: Record<string, boolean> = { ...selectedItemIds };
-    unprocessedItems.forEach(item => {
-      nextSelection[item.id] = !allSelected;
-    });
-    setSelectedItemIds(nextSelection);
+    for (let i = 0; i < itemsToProcess.length; i++) {
+      const item = itemsToProcess[i];
+      try {
+        const success = await handleAnalyzeWithAI(item, false);
+        if (success) {
+          successCount++;
+        } else {
+          failCount++;
+        }
+      } catch (err) {
+        console.error(`Falha ao processar item ${item.id}:`, err);
+        failCount++;
+      }
+    }
+
+    setIsBulkProcessing(false);
+    toast.success(`Processamento completo! ${successCount} item(ns) analisado(s) com sucesso. Falhas: ${failCount}.`);
   };
 
   // Get selected count
@@ -1166,16 +1183,29 @@ export function MiningInboxPage({
           {/* Select all toggle */}
           {pendingItems && pendingItems.length > 0 && (
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => handleSelectUnprocessed(pendingItems)}
-                className="text-xs text-amber-400 hover:text-amber-300 font-extrabold transition-all cursor-pointer flex items-center gap-1 bg-amber-500/5 px-2.5 py-1 rounded-lg border border-amber-500/10 hover:border-amber-500/25"
-              >
-                Selecionar Não Processados
-              </button>
+              {pendingItems.some(i => !i.translation && !processingItemIds[i.id]) && (
+                <button
+                  onClick={handleProcessAllUnprocessed}
+                  disabled={isBulkProcessing}
+                  className="text-xs text-amber-400 hover:text-amber-300 font-extrabold transition-all cursor-pointer flex items-center gap-1.5 bg-amber-500/5 px-2.5 py-1.5 rounded-lg border border-amber-500/10 hover:border-amber-500/25 disabled:opacity-50"
+                >
+                  {isBulkProcessing ? (
+                    <>
+                      <Loader2 size={12} className="animate-spin text-amber-400 animate-pulse" />
+                      <span>Processando Fila...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles size={12} className="fill-current text-amber-400" />
+                      <span>Processar Pendentes</span>
+                    </>
+                  )}
+                </button>
+              )}
               
               <button
                 onClick={() => handleSelectAll(pendingItems)}
-                className="text-xs text-violet-400 hover:text-violet-300 font-extrabold transition-all cursor-pointer flex items-center gap-1 bg-violet-500/5 px-2.5 py-1 rounded-lg border border-violet-500/10 hover:border-violet-500/25"
+                className="text-xs text-violet-400 hover:text-violet-300 font-extrabold transition-all cursor-pointer flex items-center gap-1 bg-violet-500/5 px-2.5 py-1.5 rounded-lg border border-violet-500/10 hover:border-violet-500/25"
               >
                 {pendingItems.filter(i => !processingItemIds[i.id]).every(i => selectedItemIds[i.id]) 
                   ? 'Desmarcar Todos' 
