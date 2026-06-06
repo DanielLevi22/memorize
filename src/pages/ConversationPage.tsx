@@ -288,8 +288,18 @@ export function ConversationPage({ geminiApiKey, ttsRate, ttsVoice }: Conversati
       content: userMsg
     });
 
+    let systemPrompt = partner.systemPrompt;
+    if (aiProvider === 'ollama') {
+      systemPrompt += `\n\nCRITICAL JSON INSTRUCTION: You must respond ONLY with a valid JSON object matching this schema:
+{
+  "reply": "your conversation response in English (1-2 sentences)",
+  "grammarCorrection": "short explanation in Portuguese if the student made a grammar/vocabulary mistake in their latest message, or null if there are no errors"
+}
+Ensure the JSON is strictly formatted and contains only these keys. Do not output any thinking or conversational text outside the JSON.`;
+    }
+
     const responseText = await aiService.generateContent({
-      systemPrompt: partner.systemPrompt,
+      systemPrompt,
       messages: messagesParam,
       responseMimeType: 'application/json',
       responseSchema: {
@@ -305,14 +315,55 @@ export function ConversationPage({ geminiApiKey, ttsRate, ttsVoice }: Conversati
       }
     });
 
-    const parsed = JSON.parse(responseText);
-    let gc = parsed.grammarCorrection;
-    if (gc === "null" || gc === "None" || gc === "") {
+    let parsed: any = {};
+    try {
+      let cleanResponse = responseText.trim();
+      
+      // Clean markdown code blocks if returned
+      if (cleanResponse.startsWith('```')) {
+        const lines = cleanResponse.split('\n');
+        if (lines[0].startsWith('```')) lines.shift();
+        if (lines[lines.length - 1].startsWith('```')) lines.pop();
+        cleanResponse = lines.join('\n').trim();
+      }
+
+      // Find JSON block boundary if conversational text is present
+      const startIdx = cleanResponse.indexOf('{');
+      const endIdx = cleanResponse.lastIndexOf('}');
+      if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+        cleanResponse = cleanResponse.substring(startIdx, endIdx + 1);
+      }
+
+      parsed = JSON.parse(cleanResponse);
+    } catch (err) {
+      console.error("Failed to parse conversation AI response JSON:", responseText, err);
+      // Fallback: treat raw response as reply
+      parsed = { reply: responseText };
+    }
+
+    // Defensive key mapping for reply
+    let reply = parsed.reply || parsed.response || parsed.message || parsed.text || parsed.content;
+    if (!reply && typeof parsed === 'object' && parsed !== null) {
+      const textKeys = Object.keys(parsed).filter(k => typeof parsed[k] === 'string' && k !== 'grammarCorrection');
+      if (textKeys.length > 0) {
+        reply = parsed[textKeys[0]];
+      }
+    }
+
+    if (typeof reply === 'string') {
+      reply = reply.trim();
+    } else {
+      reply = "";
+    }
+
+    // Defensive key mapping for grammarCorrection
+    let gc = parsed.grammarCorrection || parsed.correction || parsed.grammar;
+    if (gc === "null" || gc === "None" || gc === "" || gc === undefined) {
       gc = null;
     }
     
     return {
-      reply: parsed.reply || "Sorry, I didn't catch that. Could you repeat?",
+      reply: reply || "Sorry, I didn't catch that. Could you repeat?",
       grammarCorrection: gc || null
     };
   };
