@@ -1,5 +1,5 @@
 import { db, miningDb } from '../db/db';
-import type { Deck, Card, Note, Revision, DeckPreset, TextResource, ReadingSession, ReadingCollection, ChatMessage, MiningItem } from '../types';
+import type { Deck, Card, Note, Revision, DeckPreset, TextResource, ReadingSession, ReadingCollection, ChatMessage, MiningItem, MinedSentence } from '../types';
 
 // Helper to convert Blob to base64 data URL
 function blobToBase64(blob: Blob): Promise<string> {
@@ -30,6 +30,7 @@ export interface ExportPayload {
   readingSessions: ReadingSession[];
   readingCollections: ReadingCollection[];
   chatMessages: ChatMessage[];
+  minedSentences?: MinedSentence[];
   exportedAt: number;
 }
 
@@ -80,6 +81,8 @@ export async function exportDatabase(): Promise<ExportPayload> {
     texts.push({ ...rest, pdfFileBase64 });
   }
 
+  const minedSentences = await db.minedSentences?.toArray().catch(() => []) || [];
+
   return {
     version: '1.1',
     exportType: 'full-sync',
@@ -92,6 +95,7 @@ export async function exportDatabase(): Promise<ExportPayload> {
     readingSessions,
     readingCollections,
     chatMessages,
+    minedSentences,
     exportedAt: Date.now(),
   };
 }
@@ -203,10 +207,13 @@ export async function performMergeSync(remotePayload: ExportPayload): Promise<vo
     return { ...rest, pdfFile } as TextResource;
   });
 
-  // 7. Sincronizar Histórico/Log (Revisões, Sessões de Leitura, Mensagens de Chat)
+  // 7. Sincronizar Histórico/Log (Revisões, Sessões de Leitura, Mensagens de Chat, Histórico de Mineração)
   await mergeLogTable<Revision>(db.revisions, remotePayload.revisions);
   await mergeLogTable<ReadingSession>(db.readingSessions, remotePayload.readingSessions);
   await mergeLogTable<ChatMessage>(db.chatMessages, remotePayload.chatMessages);
+  if (db.minedSentences) {
+    await mergeLogTable<MinedSentence>(db.minedSentences, remotePayload.minedSentences);
+  }
 }
 
 export interface MiningSyncPayload {

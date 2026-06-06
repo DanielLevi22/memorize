@@ -107,3 +107,33 @@ Para adicionar um novo provedor (ex: `OpenAIProvider`):
 
 *   **Vitest**: Utilizamos a suíte Vitest do projeto para testes de unidade.
 *   **Mocking**: Mocado o objeto global `fetch` para interceptar as chamadas feitas por cada provedor, verificando se o payload gerado está correto para as especificações do Gemini e do Ollama, e testando também o tratamento de falhas de rede ou quotas estouradas.
+
+---
+
+## 7. Processamento e Segmentação de Texto para Leitura (`src/utils/readingProcessor.ts`)
+
+O processamento de leitura utiliza IA para extrair sentenças, traduzi-las e identificar palavras-chave. Para contornar limitações de capacidade, limites de tokens de saída de LLMs locais (Ollama/Llama 3.2) e comportamento preguiçoso de agrupamento de frases, implementamos as seguintes melhorias na camada de processamento:
+
+### A. Pré-Segmentação de Sentenças por Expressão Regular
+Antes de enviar o texto para o modelo de IA, realizamos a segmentação do texto original baseada em sentenças no frontend. Isso ajuda a IA (especialmente modelos locais) a estruturar a resposta sem misturar ou agrupar frases vizinhas.
+*   **Expressão Regular**:
+    ```javascript
+    /(?<!\b(?:Dr|Mr|Ms|Mrs|Jr|Sr|vs|Prof|St|i\.e|e\.g))([.!?])(["'”’]?)\s+(?=["'“‘]?[A-Z0-9\u00C0-\u00FF])/gi
+    ```
+*   **Recursos**:
+    *   **Negative Lookbehind (`(?<!...)`)**: Impede a quebra em abreviações comuns da língua inglesa (como `Dr.`, `Mr.`, `e.g.`, `vs.`).
+    *   **Captura de Fechamento de Aspas (`(["'”’]?)`)**: Garante que aspas finais de citações ou falas de personagens continuem associadas à sentença correspondente.
+    *   **Lookahead para Abertura de Aspas e Letra Maiúscula (`(?=["'“‘]?[A-Z0-9...])`)**: Assegura que a divisão só aconteça se a próxima sentença começar com letra maiúscula, número ou uma aspa de abertura seguida de letra maiúscula.
+
+### B. Segmentação Estrita no Prompt
+Forçamos a IA a não aglutinar sentenças por meio de instruções explícitas:
+*   **Regra**: *"Cada frase/sentença individual do texto fornecido deve ser mapeada para um objeto separado no array 'lines'. Nunca junte ou mescle múltiplas frases/sentenças em uma única entrada no campo 'original'."*
+
+### C. Parser Defensivo para JSON de Modelos Variados (`parseAIResponse`)
+Modelos locais de menor parâmetro podem retornar formatos de JSON aninhados ou encapsular a resposta em blocos explicativos de texto ou markdown. O parser é tolerante e lida com:
+1.  **Remoção de Markdown**: Remove wrappers de código markdown (como ` ```json ` e ` ``` `).
+2.  **Extração de Bloco**: Localiza a estrutura JSON usando os índices dos caracteres `{` e `}` caso a resposta contenha diálogos ou notas adicionais da IA ao redor do JSON.
+3.  **Busca Tolerante de Chaves**: Caso o array de frases não esteja na raiz (`lines`), o parser busca recursivamente por chaves como `response.lines`, `data.lines`, qualquer chave que armazene um array, ou assume que a raiz do JSON já é o próprio array de sentenças.
+4.  **Mapeamento de Propriedades fallback**: Mapeia chaves variantes das propriedades do objeto (ex: `text` / `originalText` mapeiam para `original`; `translation` / `translatedText` mapeiam para `translated`).
+5.  **Robustez de Tipos**: Filtra elementos não-texto em arrays (como `highlights` contendo inteiros ou nulos) e lança erros padronizados (como `"não contém o campo "lines""` ou `"formato inesperado"`) em total conformidade com a suíte de testes.
+

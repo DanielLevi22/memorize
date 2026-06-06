@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
+import { useAI } from '../services/ai/AIContext';
 import type { ChatMessage, ChatPartner } from '../types';
 import { 
   Send, Mic, MicOff, Volume2, ArrowLeft, Trash2, 
@@ -48,6 +49,7 @@ const CHAT_PARTNERS: ChatPartner[] = [
 ];
 
 export function ConversationPage({ geminiApiKey, ttsRate, ttsVoice }: ConversationPageProps) {
+  const { aiService, aiProvider, setAiProvider } = useAI();
   const [selectedPartner, setSelectedPartner] = useState<ChatPartner | null>(null);
   const [inputText, setInputText] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -263,70 +265,47 @@ export function ConversationPage({ geminiApiKey, ttsRate, ttsVoice }: Conversati
     }
   };
 
-  // Call Gemini API to process conversation
+  // Call AI API to process conversation
   const getAIResponse = async (
     userMsg: string,
     history: ChatMessage[],
     partner: ChatPartner
   ): Promise<{ reply: string; grammarCorrection: string | null }> => {
-    if (!geminiApiKey.trim()) {
+    if (aiProvider === 'gemini' && !geminiApiKey.trim()) {
       throw new Error("Configure sua API Key do Gemini nas configurações antes de iniciar.");
     }
 
-    // Format chat messages history to Gemini schema (user/model)
-    // Only send the last 8 messages to prevent context tokens overload
+    // Format chat messages history to schema
     const recentHistory = history.slice(-8);
-    const apiContents = recentHistory.map((m) => ({
-      role: m.sender === 'user' ? 'user' : 'model',
-      parts: [{ text: m.text }]
+    const messagesParam = recentHistory.map((m) => ({
+      role: (m.sender === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+      content: m.text
     }));
 
     // Add current user message
-    apiContents.push({
+    messagesParam.push({
       role: 'user',
-      parts: [{ text: userMsg }]
+      content: userMsg
     });
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: apiContents,
-          systemInstruction: {
-            parts: [{ text: partner.systemPrompt }]
-          },
-          generationConfig: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: 'OBJECT',
-              properties: {
-                reply: { type: 'STRING', description: 'The conversation response in English.' },
-                grammarCorrection: { 
-                  type: 'STRING', 
-                  description: 'If the user made a grammar or vocabulary error in their latest message, explain it in Portuguese. Otherwise return null.' 
-                }
-              },
-              required: ['reply']
-            }
+    const responseText = await aiService.generateContent({
+      systemPrompt: partner.systemPrompt,
+      messages: messagesParam,
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'OBJECT',
+        properties: {
+          reply: { type: 'STRING', description: 'The conversation response in English.' },
+          grammarCorrection: { 
+            type: 'STRING', 
+            description: 'If the user made a grammar or vocabulary error in their latest message, explain it in Portuguese. Otherwise return null.' 
           }
-        })
+        },
+        required: ['reply']
       }
-    );
+    });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error?.message || `Erro do Gemini (código ${response.status})`);
-    }
-
-    const data = await response.json();
-    const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!resultText) {
-      throw new Error("A IA não retornou um formato JSON válido.");
-    }
-
-    const parsed = JSON.parse(resultText);
+    const parsed = JSON.parse(responseText);
     let gc = parsed.grammarCorrection;
     if (gc === "null" || gc === "None" || gc === "") {
       gc = null;
@@ -422,7 +401,7 @@ export function ConversationPage({ geminiApiKey, ttsRate, ttsVoice }: Conversati
   return (
     <div className="flex flex-col h-[calc(100vh-130px)] md:h-[calc(100vh-100px)] w-full max-w-4xl mx-auto p-2 md:p-4 transition-all duration-300">
       
-      {!geminiApiKey.trim() ? (
+      {aiProvider === 'gemini' && !geminiApiKey.trim() ? (
         /* API KEY WARNING */
         <div className="flex flex-col items-center justify-center flex-1 space-y-4 text-center p-6 bg-card border border-border rounded-2xl shadow-sm">
           <AlertCircle size={48} className="text-amber-500 animate-pulse" />
@@ -442,6 +421,21 @@ export function ConversationPage({ geminiApiKey, ttsRate, ttsVoice }: Conversati
             <p className="text-xs md:text-sm text-muted-foreground">
               Escolha um parceiro virtual e treine conversas em inglês de forma livre por áudio ou texto.
             </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-muted/20 border border-border/80 rounded-2xl">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-xs font-bold text-foreground">Motor de Inteligência Artificial</span>
+              <span className="text-[10px] text-muted-foreground">Escolha qual IA processará suas mensagens e dicas de gramática.</span>
+            </div>
+            <select
+              value={aiProvider}
+              onChange={(e) => setAiProvider(e.target.value as 'gemini' | 'ollama')}
+              className="bg-background border border-border text-foreground px-3 py-1.5 rounded-xl text-xs font-bold outline-none focus:border-violet-500/50 cursor-pointer w-full sm:w-48"
+            >
+              <option value="gemini">Gemini Flash (Nuvem)</option>
+              <option value="ollama">Ollama (Local / Llama)</option>
+            </select>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -510,6 +504,15 @@ export function ConversationPage({ geminiApiKey, ttsRate, ttsVoice }: Conversati
             </div>
 
             <div className="flex items-center gap-2">
+              <select
+                value={aiProvider}
+                onChange={(e) => setAiProvider(e.target.value as 'gemini' | 'ollama')}
+                className="bg-background border border-border text-foreground px-2 py-1.5 rounded-xl text-[10px] font-bold outline-none focus:border-violet-500/50 cursor-pointer w-24 h-8"
+              >
+                <option value="gemini">Gemini</option>
+                <option value="ollama">Ollama</option>
+              </select>
+
               {/* Hands-Free continuous loop Toggle */}
               <button
                 onClick={() => setHandsFree(!handsFree)}

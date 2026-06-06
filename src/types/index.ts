@@ -322,4 +322,14 @@ export interface MiningItem {
   updatedAt: number;
 }
 
+export interface MinedSentence {
+  id: string; // UUID
+  originalText?: string;
+  translation?: string;
+  category?: 'movie' | 'series' | 'random';
+  theme?: string;
+  source: 'photo' | 'voice' | 'text';
+  timestamp: number; // Date.now() when exported
+}
+
 

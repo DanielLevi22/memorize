@@ -8,13 +8,14 @@ import { Card as ShadcnCard } from './ui/card';
 import { Button } from './ui/button';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from './ui/chart';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import type { Deck, Card, Revision } from '../types';
-import { Sparkles } from 'lucide-react';
+import type { Deck, Card, Revision, MinedSentence } from '../types';
+import { Sparkles, Bot } from 'lucide-react';
 
 interface StatsDashboardProps {
   decks: Deck[] | undefined;
   cards: Card[] | undefined;
   revisions: Revision[] | undefined;
+  minedSentences?: MinedSentence[];
   selectedAlgo?: 'SM-2' | 'FSRS';
 }
 
@@ -26,7 +27,7 @@ const getLocalDateStr = (timestamp: number) => {
   return `${year}-${month}-${day}`;
 };
 
-export function StatsDashboard({ decks = [], cards = [], revisions = [], selectedAlgo = 'SM-2' }: StatsDashboardProps) {
+export function StatsDashboard({ decks = [], cards = [], revisions = [], minedSentences = [], selectedAlgo = 'SM-2' }: StatsDashboardProps) {
   // --- FILTROS DE ESTADO ---
   const [selectedScope, setSelectedScope] = useState<'collection' | string>('collection');
   const [period, setPeriod] = useState<'12months' | 'all'>('12months');
@@ -53,6 +54,7 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
   const [hourlyPeriod, setHourlyPeriod] = useState<'1m' | '3m' | '1y'>('1m');
   const [buttonsPeriod, setButtonsPeriod] = useState<'1m' | '3m' | '1y'>('1m');
   const [addedPeriod, setAddedPeriod] = useState<'1m' | '3m' | '1y' | 'all'>('1m');
+  const [minedPeriod, setMinedPeriod] = useState<'day' | 'week' | 'month' | 'year'>('day');
 
   const todayStr = new Date().toISOString().split('T')[0];
 
@@ -677,6 +679,110 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
       totalAdded
     };
   }, [deckCards, addedPeriod]);
+
+  // --- 12. FRASES MINERADAS (HISTÓRICO) ---
+  const minedStatsData = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const counts: Record<string, number> = {};
+    const labelList: string[] = [];
+
+    // Helper to get formatted week label (e.g., "Sem. 05/06")
+    const getWeekLabel = (d: Date) => {
+      const sunday = new Date(d);
+      sunday.setDate(d.getDate() - d.getDay());
+      const day = String(sunday.getDate()).padStart(2, '0');
+      const month = String(sunday.getMonth() + 1).padStart(2, '0');
+      return `Sem. ${day}/${month}`;
+    };
+
+    if (minedPeriod === 'day') {
+      // Last 30 days
+      for (let i = 29; i >= 0; i--) {
+        const prevDate = new Date(today);
+        prevDate.setDate(today.getDate() - i);
+        const day = String(prevDate.getDate()).padStart(2, '0');
+        const month = String(prevDate.getMonth() + 1).padStart(2, '0');
+        const label = `${day}/${month}`;
+        counts[label] = 0;
+        labelList.push(label);
+      }
+
+      minedSentences.forEach(s => {
+        const sDate = new Date(s.timestamp);
+        const day = String(sDate.getDate()).padStart(2, '0');
+        const month = String(sDate.getMonth() + 1).padStart(2, '0');
+        const label = `${day}/${month}`;
+        if (counts[label] !== undefined) {
+          counts[label]++;
+        }
+      });
+    } else if (minedPeriod === 'week') {
+      // Last 12 weeks
+      for (let i = 11; i >= 0; i--) {
+        const prevDate = new Date(today);
+        prevDate.setDate(today.getDate() - i * 7);
+        const label = getWeekLabel(prevDate);
+        counts[label] = 0;
+        labelList.push(label);
+      }
+
+      minedSentences.forEach(s => {
+        const sDate = new Date(s.timestamp);
+        const label = getWeekLabel(sDate);
+        if (counts[label] !== undefined) {
+          counts[label]++;
+        }
+      });
+    } else if (minedPeriod === 'month') {
+      // Last 12 months
+      const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+      for (let i = 11; i >= 0; i--) {
+        const prevDate = new Date(today);
+        prevDate.setMonth(today.getMonth() - i);
+        const label = `${monthNames[prevDate.getMonth()]}/${String(prevDate.getFullYear()).slice(-2)}`;
+        counts[label] = 0;
+        labelList.push(label);
+      }
+
+      minedSentences.forEach(s => {
+        const sDate = new Date(s.timestamp);
+        const label = `${monthNames[sDate.getMonth()]}/${String(sDate.getFullYear()).slice(-2)}`;
+        if (counts[label] !== undefined) {
+          counts[label]++;
+        }
+      });
+    } else if (minedPeriod === 'year') {
+      // Last 5 years
+      const currentYearVal = today.getFullYear();
+      for (let i = 4; i >= 0; i--) {
+        const label = String(currentYearVal - i);
+        counts[label] = 0;
+        labelList.push(label);
+      }
+
+      minedSentences.forEach(s => {
+        const sDate = new Date(s.timestamp);
+        const label = String(sDate.getFullYear());
+        if (counts[label] !== undefined) {
+          counts[label]++;
+        }
+      });
+    }
+
+    const chartData = labelList.map(label => ({
+      date: label,
+      "Mineradas": counts[label]
+    }));
+
+    const totalMined = chartData.reduce((acc, curr) => acc + curr["Mineradas"], 0);
+
+    return {
+      chartData,
+      totalMined
+    };
+  }, [minedSentences, minedPeriod]);
 
   return (
     <div className="space-y-6 w-full max-w-5xl mx-auto px-2 pb-16">
@@ -1322,6 +1428,47 @@ export function StatsDashboard({ decks = [], cards = [], revisions = [], selecte
 
         <div className="text-center text-xs font-bold text-muted-foreground/80 border-t border-border/40 pt-3">
           Total de cartões adicionados no período: <span className="font-black text-foreground">{addedCardsData.totalAdded}</span>
+        </div>
+      </ShadcnCard>
+
+      {/* --- SEÇÃO 12: FRASES MINERADAS --- */}
+      <ShadcnCard className="bg-card border-border p-6 rounded-2xl shadow-sm space-y-4">
+        <div className="flex items-center justify-between border-b border-border/50 pb-2">
+          <div className="flex flex-col gap-0.5">
+            <h3 className="font-black text-sm text-foreground tracking-tight flex items-center gap-1.5">
+              <Bot size={15} className="text-violet-500" />
+              Frases Mineradas
+            </h3>
+            <span className="text-[10px] text-muted-foreground font-medium">Quantidade de frases exportadas com sucesso da fila de mineração.</span>
+          </div>
+
+          <Select value={minedPeriod} onValueChange={(val: any) => setMinedPeriod(val)}>
+            <SelectTrigger className="bg-muted border-border text-foreground px-2 py-1 rounded text-[11px] font-bold w-[95px] h-7">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="day" className="text-[11px] font-bold cursor-pointer">Por Dia</SelectItem>
+              <SelectItem value="week" className="text-[11px] font-bold cursor-pointer">Por Semana</SelectItem>
+              <SelectItem value="month" className="text-[11px] font-bold cursor-pointer">Por Mês</SelectItem>
+              <SelectItem value="year" className="text-[11px] font-bold cursor-pointer">Por Ano</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="h-64 w-full">
+          <ChartContainer config={{ mineradas: { label: "Mineradas", color: "#8b5cf6" } }}>
+            <BarChart data={minedStatsData.chartData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} />
+              <YAxis tickLine={false} axisLine={false} tickMargin={8} domain={[0, 'auto']} />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              <Bar dataKey="Mineradas" fill="var(--color-mineradas)" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ChartContainer>
+        </div>
+
+        <div className="text-center text-xs font-bold text-muted-foreground/80 border-t border-border/40 pt-3">
+          Total de frases mineradas no período: <span className="font-black text-foreground">{minedStatsData.totalMined}</span>
         </div>
       </ShadcnCard>
 

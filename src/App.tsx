@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 
 // Banco de Dados e Types
-import { db, seedInitialData, ensureDefaultPreset, defaultPreset } from './db/db';
+import { db, seedInitialData, ensureDefaultPreset, defaultPreset, miningDb } from './db/db';
 import type { Deck, Card, Note, DeckPreset, CefrExam } from './types';
 
 // Utilitários
@@ -333,6 +333,13 @@ function MainApp() {
   const revisions = useLiveQuery(() => db.revisions.toArray());
   const presets = useLiveQuery(() => db.presets.toArray());
   const readingSessions = useLiveQuery(() => db.readingSessions?.toArray());
+  const pendingMiningCount = useLiveQuery(() => 
+    miningDb.miningItems
+      .where('status')
+      .equals('pending')
+      .count()
+  ) || 0;
+  const minedSentences = useLiveQuery(() => db.minedSentences?.toArray()) || [];
 
   useEffect(() => {
     seedInitialData().then(() => ensureDefaultPreset());
@@ -1503,7 +1510,7 @@ function MainApp() {
 
             <Button 
               variant="ghost"
-              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
+              className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                 activeTab === 'mining' 
                   ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
@@ -1517,6 +1524,11 @@ function MainApp() {
                 <Bot size={16} />
                 <span>Mineração (Fila)</span>
               </div>
+              {pendingMiningCount > 0 && (
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${activeTab === 'mining' ? 'bg-background/20 text-primary-foreground' : 'bg-muted border border-border text-muted-foreground'}`}>
+                  {pendingMiningCount}
+                </span>
+              )}
             </Button>
 
             <Button 
@@ -1788,7 +1800,7 @@ function MainApp() {
 
                   <Button 
                     variant="ghost"
-                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
+                    className={`w-full justify-between font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
                       activeTab === 'mining' 
                         ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
                         : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
@@ -1799,6 +1811,11 @@ function MainApp() {
                       <Bot size={16} />
                       <span>Mineração (Fila)</span>
                     </div>
+                    {pendingMiningCount > 0 && (
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${activeTab === 'mining' ? 'bg-background/20 text-primary-foreground' : 'bg-muted border border-border text-muted-foreground'}`}>
+                        {pendingMiningCount}
+                      </span>
+                    )}
                   </Button>
 
                   <Button 
@@ -2072,7 +2089,7 @@ function MainApp() {
 
             {/* TAB 3: ESTATÍSTICAS */}
             {activeTab === 'stats' && (
-              <StatsDashboard decks={decks} cards={cards} revisions={revisions} selectedAlgo={selectedAlgo} />
+              <StatsDashboard decks={decks} cards={cards} revisions={revisions} minedSentences={minedSentences} selectedAlgo={selectedAlgo} />
             )}
 
             {/* TAB 5: MEU PERFIL */}

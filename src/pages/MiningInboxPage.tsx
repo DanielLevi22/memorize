@@ -845,8 +845,24 @@ export function MiningInboxPage({
         toast.success(`Frases anexadas ao texto "${targetText.title}"!`);
       }
 
-      // Delete from mining queue and record tombstone
+      // Delete from mining queue, log to history in main db, and record tombstone
       await Promise.all(selectedList.map(async item => {
+        if (db.minedSentences) {
+          const editing = editingFields[item.id] || {};
+          const textVal = editing.originalText !== undefined ? editing.originalText : item.originalText;
+          const transVal = editing.translation !== undefined ? editing.translation : item.translation;
+
+          await db.minedSentences.add({
+            id: crypto.randomUUID(),
+            originalText: textVal,
+            translation: transVal,
+            category: item.category,
+            theme: item.theme,
+            source: item.source,
+            timestamp: Date.now()
+          }).catch(err => console.warn('Failed to log mined sentence:', err));
+        }
+
         await miningDb.miningItems.delete(item.id);
         await miningDb.miningDeletions.put({ id: item.id, deletedAt: Date.now() });
       }));

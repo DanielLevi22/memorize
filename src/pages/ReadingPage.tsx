@@ -74,7 +74,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   isZenMode,
   setIsZenMode,
 }) => {
-  const { aiService, aiProvider } = useAI();
+  const { aiService, aiProvider, setAiProvider } = useAI();
   const readings = useLiveQuery(() => db.texts.orderBy('createdAt').reverse().filter(t => t.showInReadings !== false).toArray());
   const collections = useLiveQuery(() => db.readingCollections?.orderBy('createdAt').reverse().toArray()) || [];
   const decks = useLiveQuery(() => db.decks.orderBy('name').toArray()) || [];
@@ -1361,7 +1361,14 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
           throw new Error('Inteligência Artificial não configurada nas Configurações.');
         }
         setAppendBlockProcessingStep('🤖 A Inteligência Artificial está segmentando e traduzindo o texto...');
-        const aiResult = await processTextWithAI(appendBlockOriginalText, aiService);
+        const aiResult = await processTextWithAI(
+          appendBlockOriginalText, 
+          aiService, 
+          aiProvider,
+          (curr, tot) => {
+            setAppendBlockProcessingStep(`🤖 Processando bloco ${curr} de ${tot} com IA...`);
+          }
+        );
         newLines = aiResult.lines;
       } else if (appendBlockMode === 'mymemory') {
         setAppendBlockProcessingStep('🌐 Traduzindo e segmentando gratuitamente...');
@@ -3378,36 +3385,55 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                     </label>
                     <div className="grid grid-cols-1 gap-2.5">
                       {/* Gemini Option */}
-                      <label className={`flex items-start gap-3 p-3 border rounded-xl cursor-pointer transition-all duration-200 ${
-                        appendBlockMode === 'gemini'
-                          ? 'border-violet-500 bg-violet-500/5 dark:bg-violet-500/10'
-                          : 'border-border/60 hover:bg-muted/30'
-                      }`}>
-                        <input
-                          type="radio"
-                          name="appendBlockMode"
-                          value="gemini"
-                          checked={appendBlockMode === 'gemini'}
-                          onChange={() => setAppendBlockMode('gemini')}
-                          disabled={appendBlockIsProcessing || !(aiProvider === 'ollama' || !!geminiApiKey.trim())}
-                          className="mt-1.5 w-4 h-4 text-violet-600 border-zinc-300 dark:border-zinc-700 bg-background focus:ring-violet-500 cursor-pointer"
-                        />
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                            <Sparkles size={12} className="text-violet-500" />
-                            Segmentação e Tradução por IA
-                          </span>
-                          {!(aiProvider === 'ollama' || !!geminiApiKey.trim()) ? (
-                            <span className="text-[9px] text-destructive font-semibold">
-                              Requer IA configurada nas Configurações (Permite destacar palavras-chave)
+                      <div className="flex flex-col gap-2">
+                        <label className={`flex items-start gap-3 p-3 border rounded-xl cursor-pointer transition-all duration-200 ${
+                          appendBlockMode === 'gemini'
+                            ? 'border-violet-500 bg-violet-500/5 dark:bg-violet-500/10'
+                            : 'border-border/60 hover:bg-muted/30'
+                        }`}>
+                          <input
+                            type="radio"
+                            name="appendBlockMode"
+                            value="gemini"
+                            checked={appendBlockMode === 'gemini'}
+                            onChange={() => setAppendBlockMode('gemini')}
+                            disabled={appendBlockIsProcessing || !(aiProvider === 'ollama' || !!geminiApiKey.trim())}
+                            className="mt-1.5 w-4 h-4 text-violet-600 border-zinc-300 dark:border-zinc-700 bg-background focus:ring-violet-500 cursor-pointer"
+                          />
+                          <div className="flex flex-col gap-0.5 w-full">
+                            <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                              <Sparkles size={12} className="text-violet-500" />
+                              Segmentação e Tradução por IA
                             </span>
-                          ) : (
-                            <span className="text-[9px] text-muted-foreground">
-                              A IA segmenta por frases de forma contextualizada, traduz e destaca palavras difíceis
+                            {!(aiProvider === 'ollama' || !!geminiApiKey.trim()) ? (
+                              <span className="text-[9px] text-destructive font-semibold">
+                                Requer IA configurada nas Configurações (Permite destacar palavras-chave)
+                              </span>
+                            ) : (
+                              <span className="text-[9px] text-muted-foreground">
+                                A IA segmenta por frases de forma contextualizada, traduz e destaca palavras difíceis
+                              </span>
+                            )}
+                          </div>
+                        </label>
+
+                        {appendBlockMode === 'gemini' && (aiProvider === 'ollama' || !!geminiApiKey.trim()) && (
+                          <div className="pl-7 pr-3 py-1 flex items-center justify-between gap-3 animate-fadeIn">
+                            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                              Provedor de IA:
                             </span>
-                          )}
-                        </div>
-                      </label>
+                            <select
+                              value={aiProvider}
+                              onChange={(e) => setAiProvider(e.target.value as 'gemini' | 'ollama')}
+                              disabled={appendBlockIsProcessing}
+                              className="bg-background border border-border text-foreground px-3 py-1.5 rounded-xl text-xs font-bold outline-none focus:border-violet-500/50 cursor-pointer w-auto"
+                            >
+                              <option value="gemini">Gemini Flash (Nuvem)</option>
+                              <option value="ollama">Ollama (Local / Llama)</option>
+                            </select>
+                          </div>
+                        )}
+                      </div>
 
                       {/* MyMemory Option */}
                       <label className={`flex items-start gap-3 p-3 border rounded-xl cursor-pointer transition-all duration-200 ${

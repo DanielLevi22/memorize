@@ -38,60 +38,155 @@ export async function extractTextFromPdf(file: File): Promise<string> {
  */
 export async function processTextWithAI(
   originalText: string,
-  aiService: AIService
+  aiService: AIService,
+  providerType: 'gemini' | 'ollama' = 'gemini',
+  onProgress?: (current: number, total: number) => void
 ): Promise<{ title: string; translatedText: string; lines: ReadingLine[] }> {
-  const promptText = `
-Você é um especialista em ensino de idiomas. Receba o texto fornecido (que pode ser a extração de um PDF contendo texto bilíngue com frases no idioma original e suas respectivas traduções logo abaixo, ou apenas o texto simples no idioma original).
+  const linesOfText: string[] = [];
+  
+  originalText.split('\n').forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
 
-Seu objetivo é analisar o texto, segmentá-lo em frases e retornar a estrutura JSON:
+    // Segment lines by sentence boundaries (. ! ?) followed by whitespace and a capital letter/number/accented character,
+    // ignoring common abbreviations like Dr., Mr., vs., etc. and supporting optional enclosing quotes.
+    const sentences = trimmed
+      .replace(/(?<!\b(?:Dr|Mr|Ms|Mrs|Jr|Sr|vs|Prof|St|i\.e|e\.g))([.!?])(["'”’]?)\s+(?=["'“‘]?[A-Z0-9\u00C0-\u00FF])/gi, '$1$2|')
+      .split('|')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+
+    linesOfText.push(...sentences);
+  });
+
+  if (linesOfText.length === 0) {
+    return { title: 'Texto sem título', translatedText: '', lines: [] };
+  }
+
+  // Tell Ollama to process smaller chunks (8 lines) to avoid context/output token limits.
+  // Gemini receives larger chunks (30 lines).
+  const chunkSize = providerType === 'ollama' ? 8 : 30;
+  const chunks: string[] = [];
+  for (let i = 0; i < linesOfText.length; i += chunkSize) {
+    chunks.push(linesOfText.slice(i, i + chunkSize).join('\n'));
+  }
+
+  let finalTitle = 'Texto sem título';
+  const allLines: ReadingLine[] = [];
+
+  for (let idx = 0; idx < chunks.length; idx++) {
+    const chunkText = chunks[idx];
+    if (onProgress) {
+      onProgress(idx + 1, chunks.length);
+    }
+
+    const promptText = `
+Você é um especialista em ensino de idiomas. Receba o bloco de texto fornecido.
+
+Seu objetivo é analisar o texto, segmentá-lo em frases e retornar a estrutura JSON contendo:
 1. Um título curto e descritivo para o texto (campo "title")
 2. Para cada frase/sentença do texto:
    - "original": a frase exatamente no idioma original de estudo (ex: em inglês)
    - "translated": a tradução correspondente para português do Brasil
    - "highlights": 2 a 4 palavras ou expressões-chave da frase original que são importantes para o aprendizado de vocabulário
 
-Regras de Segmentação e Tradução Inteligente:
-- **Detecção de Conteúdo Bilíngue**: Analise se o texto fornecido já contém pares de frases em inglês seguidas de suas traduções em português (ex: uma linha em inglês e a linha seguinte com a tradução em português, ou a tradução entre parênteses/itálico). Se o texto já contiver as traduções originais das frases, você DEVE extrair e usar exatamente as traduções existentes no texto para o campo "translated", em vez de gerar novas traduções do zero.
-- **Caso não haja Tradução no Texto**: Se o texto contiver apenas sentenças no idioma original (ex: apenas inglês), você deve traduzir cada frase de forma natural e coloquial para o português do Brasil no campo "translated".
-- **Idioma Original**: O campo "original" DEVE conter a frase estritamente no idioma original (ex: inglês), exatamente como escrita no texto original. Nunca coloque a tradução no campo "original".
+Regras importantes:
+- **Segmentação Estrita**: Cada frase/sentença individual do texto fornecido deve ser mapeada para um objeto separado no array "lines". Nunca junte ou mescle múltiplas frases/sentenças em uma única entrada no campo "original". Cada linha de entrada contendo uma frase deve virar uma entrada distinta no JSON.
+- **Detecção de Conteúdo Bilíngue**: Se o texto contiver frases no idioma original intercaladas com suas traduções correspondentes em português (ex: uma linha em inglês seguida da tradução em português), você DEVE extrair e usar exatamente as traduções existentes no texto.
+- **Caso não haja Tradução**: Se o texto contiver apenas sentenças no idioma original, traduza cada frase de forma natural para o português do Brasil.
+- **Idioma Original**: O campo "original" DEVE conter a frase estritamente no idioma original (ex: inglês), exatamente como escrita. Nunca coloque a tradução ou texto em português dentro do campo "original".
 - Mantenha a ordem original das frases.
-- As highlights devem ser palavras que aparecem EXATAMENTE na frase original (no idioma original).
-- Não pule nenhuma frase do texto.
+- Não pule nenhuma frase do bloco de texto.
 
-TEXTO:
-${originalText}
+---
+EXEMPLO 1 (ENTRADA BILÍNGUE INTERCALADA):
+Entrada:
+"He works hard sewing and mending clothes for the saints and angels,”
+“Ele trabalha duro costurando e remendando roupas para as santidades e os anjos,”
+“but even so, he sometimes doesn’t have enough money to eat.”
+mas mesmo assim, ele às vezes não tem dinheiro o suficiente para comer.
+
+Saída JSON esperada:
+{
+  "title": "Trabalho e persistência",
+  "lines": [
+    {
+      "original": "He works hard sewing and mending clothes for the saints and angels,”",
+      "translated": "Ele trabalha duro costurando e remendando roupas para as santidades e os anjos,",
+      "highlights": ["sewing", "mending", "saints"]
+    },
+    {
+      "original": "“but even so, he sometimes doesn’t have enough money to eat.”",
+      "translated": "mas mesmo assim, ele às vezes não tem dinheiro o suficiente para comer.",
+      "highlights": ["money", "eat"]
+    }
+  ]
+}
+
+---
+EXEMPLO 2 (ENTRADA MONOLÍNGUE EM INGLÊS):
+Entrada:
+She went to the market. She wanted to buy some fresh apples.
+
+Saída JSON esperada:
+{
+  "title": "Ida ao mercado",
+  "lines": [
+    {
+      "original": "She went to the market.",
+      "translated": "Ela foi ao mercado.",
+      "highlights": ["market"]
+    },
+    {
+      "original": "She wanted to buy some fresh apples.",
+      "translated": "Ela queria comprar algumas maçãs frescas.",
+      "highlights": ["buy", "fresh", "apples"]
+    }
+  ]
+}
+
+---
+TEXTO DO BLOCO A SER PROCESSADO:
+${chunkText}
 `;
 
-  const textResponse = await aiService.generateContent({
-    messages: [{ role: 'user', content: promptText }],
-    responseMimeType: 'application/json',
-    responseSchema: {
-      type: 'OBJECT',
-      properties: {
-        title: { type: 'STRING', description: 'Título curto e descritivo do texto' },
-        lines: {
-          type: 'ARRAY',
-          items: {
-            type: 'OBJECT',
-            properties: {
-              original: { type: 'STRING', description: 'A frase no idioma original de estudo (ex: em inglês, sem tradução).' },
-              translated: { type: 'STRING', description: 'A tradução da frase original para português do Brasil.' },
-              highlights: {
-                type: 'ARRAY',
-                items: { type: 'STRING' },
-                description: '2-4 palavras-chave do original (no idioma original)',
+    const textResponse = await aiService.generateContent({
+      messages: [{ role: 'user', content: promptText }],
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'OBJECT',
+        properties: {
+          title: { type: 'STRING', description: 'Título curto e descritivo do texto' },
+          lines: {
+            type: 'ARRAY',
+            items: {
+              type: 'OBJECT',
+              properties: {
+                original: { type: 'STRING', description: 'A frase no idioma original de estudo (ex: em inglês, sem tradução).' },
+                translated: { type: 'STRING', description: 'A tradução da frase original para português do Brasil.' },
+                highlights: {
+                  type: 'ARRAY',
+                  items: { type: 'STRING' },
+                  description: '2-4 palavras-chave do original (no idioma original)',
+                },
               },
+              required: ['original', 'translated', 'highlights'],
             },
-            required: ['original', 'translated', 'highlights'],
           },
         },
-      },
-      required: ['title', 'lines'],
-    }
-  });
+        required: ['title', 'lines'],
+      }
+    });
 
-  const parsed = parseAIResponse(textResponse);
-  return parsed;
+    const parsed = parseAIResponse(textResponse);
+    if (idx === 0) {
+      finalTitle = parsed.title;
+    }
+    allLines.push(...parsed.lines);
+  }
+
+  const translatedText = allLines.map((l) => l.translated).join('\n');
+  return { title: finalTitle, translatedText, lines: allLines };
 }
 
 /**
@@ -103,32 +198,120 @@ export function parseAIResponse(jsonString: string): {
   translatedText: string;
   lines: ReadingLine[];
 } {
+  let cleanJson = jsonString.trim();
+  
+  // Remove markdown code block wrappers if present
+  if (cleanJson.startsWith('```')) {
+    const lines = cleanJson.split('\n');
+    if (lines[0].startsWith('```')) {
+      lines.shift();
+    }
+    if (lines[lines.length - 1].startsWith('```')) {
+      lines.pop();
+    }
+    cleanJson = lines.join('\n').trim();
+  }
+
   let parsed: any;
   try {
-    parsed = JSON.parse(jsonString);
+    parsed = JSON.parse(cleanJson);
   } catch {
-    throw new Error('Resposta da IA não é um JSON válido.');
+    // Try to extract JSON from inside the string if it contains markdown/conversational text around it
+    const startIdx = cleanJson.indexOf('{');
+    const endIdx = cleanJson.lastIndexOf('}');
+    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+      try {
+        parsed = JSON.parse(cleanJson.substring(startIdx, endIdx + 1));
+      } catch {
+        throw new Error('Resposta da IA não é um JSON válido.');
+      }
+    } else {
+      throw new Error('Resposta da IA não é um JSON válido.');
+    }
   }
 
   if (!parsed || typeof parsed !== 'object') {
-    throw new Error('Resposta da IA tem formato inesperado.');
+    throw new Error('Resposta da IA com formato inesperado.');
   }
 
-  const title = typeof parsed.title === 'string' ? parsed.title : 'Texto sem título';
+  let title = 'Texto sem título';
+  let rawLines: any = null;
 
-  if (!Array.isArray(parsed.lines)) {
-    throw new Error('Resposta da IA não contém o campo "lines".');
+  if (Array.isArray(parsed)) {
+    rawLines = parsed;
+  } else {
+    if (typeof parsed.title === 'string') {
+      title = parsed.title;
+    } else if (parsed.response && typeof parsed.response.title === 'string') {
+      title = parsed.response.title;
+    }
+
+    rawLines = parsed.lines;
+    if (!Array.isArray(rawLines)) {
+      if (parsed.response && Array.isArray(parsed.response.lines)) {
+        rawLines = parsed.response.lines;
+      } else if (parsed.data && Array.isArray(parsed.data.lines)) {
+        rawLines = parsed.data.lines;
+      } else {
+        const arrayKey = Object.keys(parsed).find(key => Array.isArray(parsed[key]));
+        if (arrayKey) {
+          rawLines = parsed[arrayKey];
+        } else {
+          // Search for nested objects that look like lines
+          const possibleLines: any[] = [];
+          Object.keys(parsed).forEach(key => {
+            const val = parsed[key];
+            if (val && typeof val === 'object' && !Array.isArray(val)) {
+              if ('original' in val || 'text' in val || 'originalText' in val) {
+                possibleLines.push(val);
+              }
+            }
+          });
+          if (possibleLines.length > 0) {
+            rawLines = possibleLines;
+          }
+        }
+      }
+    }
   }
 
-  const lines: ReadingLine[] = parsed.lines.map((line: any) => ({
-    id: line.id || crypto.randomUUID(),
-    original: typeof line.original === 'string' ? line.original : '',
-    translated: typeof line.translated === 'string' ? line.translated : '',
-    highlights: Array.isArray(line.highlights)
-      ? line.highlights.filter((h: any) => typeof h === 'string')
-      : [],
-    mastered: false,
-  }));
+  if (!Array.isArray(rawLines)) {
+    const keysStr = Object.keys(parsed).join(', ');
+    const sample = jsonString.length > 250 ? jsonString.substring(0, 250) + '...' : jsonString;
+    throw new Error(`Resposta da IA não contém o campo "lines" ou a lista de frases. Chaves encontradas: ${keysStr}. Retorno: ${sample}`);
+  }
+
+  const lines: ReadingLine[] = rawLines.map((line: any) => {
+    // Defensively map original text
+    const original = typeof line.original === 'string' ? line.original 
+                     : typeof line.text === 'string' ? line.text
+                     : typeof line.originalText === 'string' ? line.originalText
+                     : '';
+
+    // Defensively map translation
+    const translated = typeof line.translated === 'string' ? line.translated 
+                       : typeof line.translation === 'string' ? line.translation
+                       : typeof line.translatedText === 'string' ? line.translatedText
+                       : '';
+
+    // Highlights mapping
+    let highlights: string[] = [];
+    if (Array.isArray(line.highlights)) {
+      highlights = line.highlights.filter((h: any) => typeof h === 'string');
+    } else if (Array.isArray(line.keywords)) {
+      highlights = line.keywords.filter((h: any) => typeof h === 'string');
+    } else if (typeof line.highlights === 'string') {
+      highlights = (line.highlights as string).split(',').map(h => h.trim()).filter(Boolean);
+    }
+
+    return {
+      id: line.id || crypto.randomUUID(),
+      original,
+      translated,
+      highlights,
+      mastered: false,
+    };
+  });
 
   const translatedText = lines.map((l) => l.translated).join('\n');
 

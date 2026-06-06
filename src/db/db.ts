@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { Deck, Card, Note, Revision, DeckPreset, TextResource, ReadingSession, ReadingCollection, ChatMessage, AudioTrack, Playlist, CefrExam, CefrExamAttempt, MiningItem } from '../types';
+import type { Deck, Card, Note, Revision, DeckPreset, TextResource, ReadingSession, ReadingCollection, ChatMessage, AudioTrack, Playlist, CefrExam, CefrExamAttempt, MiningItem, MinedSentence } from '../types';
 
 class MemorizeDatabase extends Dexie {
   decks!: Table<Deck>;
@@ -16,6 +16,7 @@ class MemorizeDatabase extends Dexie {
   cefrExams!: Table<CefrExam>;
   cefrExamAttempts!: Table<CefrExamAttempt>;
   miningItems!: Table<MiningItem>;
+  minedSentences!: Table<MinedSentence>;
 
   constructor() {
     super('MemorizeDatabase');
@@ -312,6 +313,24 @@ class MemorizeDatabase extends Dexie {
       cefrExams: 'id, level',
       cefrExamAttempts: 'id, examId, level, timestamp',
       miningItems: 'id, status, createdAt'
+    });
+
+    this.version(14).stores({
+      decks: 'id, name, createdAt, updatedAt, presetId',
+      cards: 'id, deckId, dueDate, [deckId+dueDate], noteId, createdAt, updatedAt',
+      revisions: 'id, cardId, timestamp',
+      presets: 'id, name',
+      texts: 'id, title, type, showInReadings, cefrLevel, createdAt, collectionId',
+      readingSessions: 'id, readingId, timestamp',
+      readingCollections: 'id, title, createdAt',
+      notes: 'id, deckId, createdAt',
+      chatMessages: 'id, partnerId, timestamp',
+      audioTracks: 'id, playlistId, title, textId, createdAt',
+      playlists: 'id, name, createdAt',
+      cefrExams: 'id, level',
+      cefrExamAttempts: 'id, examId, level, timestamp',
+      miningItems: 'id, status, createdAt',
+      minedSentences: 'id, timestamp'
     });
   }
 }
