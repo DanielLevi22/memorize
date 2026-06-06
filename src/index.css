@@ -292,3 +292,39 @@
 .animate-badge-pop-in {
   animation: badge-pop-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
+
+/* --- GRADE CONFIRMATION ANIMATIONS --- */
+@keyframes grade-confirm-pulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(var(--confirm-color-rgb), 0.7);
+  }
+  50% {
+    transform: scale(1.08);
+    box-shadow: 0 0 20px 10px rgba(var(--confirm-color-rgb), 0.4);
+  }
+  100% {
+    transform: scale(1.04);
+    box-shadow: 0 0 15px 5px rgba(var(--confirm-color-rgb), 0);
+  }
+}
+
+.animate-grade-confirm-1 {
+  --confirm-color-rgb: 239, 68, 68; /* Red */
+  animation: grade-confirm-pulse 0.35s ease-in-out forwards !important;
+}
+
+.animate-grade-confirm-2 {
+  --confirm-color-rgb: 245, 158, 11; /* Amber */
+  animation: grade-confirm-pulse 0.35s ease-in-out forwards !important;
+}
+
+.animate-grade-confirm-3 {
+  --confirm-color-rgb: 14, 165, 233; /* Sky */
+  animation: grade-confirm-pulse 0.35s ease-in-out forwards !important;
+}
+
+.animate-grade-confirm-4 {
+  --confirm-color-rgb: 16, 185, 129; /* Emerald */
+  animation: grade-confirm-pulse 0.35s ease-in-out forwards !important;
+}

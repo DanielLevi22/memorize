@@ -79,6 +79,11 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  const [activeSelectedGrade, setActiveSelectedGrade] = useState<number | null>(null);
+  const [animatingGrade, setAnimatingGrade] = useState<number | null>(null);
+  const lastKeyTimeRef = useRef<number>(0);
+  const mouseDragStartRef = useRef<{ x: number; y: number } | null>(null);
+
 
   // Tradução
   const [selectedText, setSelectedText] = useState('');
@@ -226,6 +231,11 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
     // Reset states for the new card
     cardStartTimeRef.current = Date.now();
     setIsAudioTextRevealed(false);
+    setActiveSelectedGrade(null);
+    setAnimatingGrade(null);
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
     setTypedAnswer('');
     setHasCheckedAnswer(false);
     setIsAnswerCorrect(null);
@@ -510,6 +520,9 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
 
   const handleReveal = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
     if (studyMode === 'classic') {
       if (isListeningFront) {
         setIsAudioTextRevealed(true);
@@ -549,6 +562,9 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
   };
 
   const handleGrade = (rating: number) => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
     stopActiveAudio();
     const elapsedSeconds = (Date.now() - cardStartTimeRef.current) / 1000;
     const maxSec = preset?.maxAnswerSeconds || 60;
@@ -622,6 +638,51 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
     } else {
       confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
       onFinishSession(studiedCount + 1);
+    }
+  };
+
+  const handleGradeWithAnimation = (rating: number) => {
+    setAnimatingGrade(rating);
+    setActiveSelectedGrade(rating);
+    setTimeout(() => {
+      handleGrade(rating);
+      setAnimatingGrade(null);
+      setActiveSelectedGrade(null);
+    }, 350);
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    mouseDragStartRef.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const handleCardClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('input') || target.closest('textarea')) {
+      return;
+    }
+
+    // Evita virar se houve arrasto de mouse (seleção de texto)
+    if (mouseDragStartRef.current) {
+      const dx = Math.abs(e.clientX - mouseDragStartRef.current.x);
+      const dy = Math.abs(e.clientY - mouseDragStartRef.current.y);
+      mouseDragStartRef.current = null;
+      if (dx > 8 || dy > 8) {
+        return;
+      }
+    }
+
+    // Evita virar se houver seleção de texto ativa
+    const selection = window.getSelection();
+    if (selection && selection.toString().trim() !== '') {
+      return;
+    }
+
+    if (studyMode === 'classic') {
+      if (!isFlipped) handleReveal();
+    } else {
+      if (hasCheckedAnswer) {
+        setIsFlipped(!isFlipped);
+      }
     }
   };
 
@@ -724,22 +785,28 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
       } else if ((e.key === ' ' || e.key === 'Spacebar' || (e.key === 'Enter' && studyMode !== 'classic' && hasCheckedAnswer)) && !isFlipped) {
         e.preventDefault();
         handleReveal();
-      } else if ((e.key === ' ' || e.key === 'Spacebar' || e.key === 'Enter') && isFlipped) {
+      } else if (e.key === 'Enter' && isFlipped) {
         e.preventDefault();
         const recGrade = getRecommendedGrade();
         if (recGrade !== null) {
-          handleGrade(recGrade);
+          handleGradeWithAnimation(recGrade);
         } else {
-          handleGrade(3); // Default to "Bom" (3) like Anki
+          handleGradeWithAnimation(3); // Default to "Bom" (3) like Anki
         }
-      } else if (e.key === '1' && isFlipped) {
-        if (studyMode === 'classic') { e.preventDefault(); handleGrade(1); }
-      } else if (e.key === '2' && isFlipped) {
-        if (studyMode === 'classic') { e.preventDefault(); handleGrade(2); }
-      } else if (e.key === '3' && isFlipped) {
-        if (studyMode === 'classic') { e.preventDefault(); handleGrade(3); }
-      } else if (e.key === '4' && isFlipped) {
-        if (studyMode === 'classic') { e.preventDefault(); handleGrade(4); }
+      } else if (['1', '2', '3', '4'].includes(e.key) && isFlipped) {
+        if (studyMode === 'classic') {
+          e.preventDefault();
+          const keyGrade = parseInt(e.key, 10);
+          const now = Date.now();
+          const doublePressDelay = 800; // ms
+          
+          if (activeSelectedGrade === keyGrade && (now - lastKeyTimeRef.current) < doublePressDelay) {
+            handleGradeWithAnimation(keyGrade);
+          } else {
+            setActiveSelectedGrade(keyGrade);
+            lastKeyTimeRef.current = now;
+          }
+        }
       } else if (e.key === 'r' || e.key === 'R') {
         e.preventDefault();
         handlePlayAudio();
@@ -747,7 +814,7 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isFlipped, onCancel, currentIndex, audioUrl, isPlaying, studyMode, hasCheckedAnswer, typedAnswer, isAnswerCorrect, isAlmostCorrect, speechSimilarity, lockedGrade]);
+  }, [isFlipped, onCancel, currentIndex, audioUrl, isPlaying, studyMode, hasCheckedAnswer, typedAnswer, isAnswerCorrect, isAlmostCorrect, speechSimilarity, lockedGrade, activeSelectedGrade]);
 
   // Calcular contadores de cartões restantes (estilo Anki)
   const remainingQueue = sessionQueue.slice(currentIndex);
@@ -833,19 +900,8 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
       {/* 3D Card Area */}
       <div 
         className="card-perspective w-full max-w-xl mx-auto h-[380px] sm:h-[420px] my-2" 
-        onClick={(e) => {
-          const target = e.target as HTMLElement;
-          if (target.closest('button') || target.closest('input')) {
-            return;
-          }
-          if (studyMode === 'classic') {
-            if (!isFlipped) handleReveal();
-          } else {
-            if (hasCheckedAnswer) {
-              setIsFlipped(!isFlipped);
-            }
-          }
-        }}
+        onMouseDown={handleMouseDown}
+        onClick={handleCardClick}
       >
         <div className={`flashcard-3d w-full h-full cursor-pointer ${isFlipped ? 'flipped' : ''}`}>
           
@@ -1383,11 +1439,15 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                   <div className="grid grid-cols-4 gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
                     <Button 
                       className={`flex flex-col h-20 items-center justify-center rounded-xl font-bold transition-all duration-300 cursor-pointer ${
-                        recommendedGrade === 1
+                        animatingGrade === 1
+                          ? 'animate-grade-confirm-1 bg-red-500/30 border-2 border-red-500 text-red-500 dark:text-red-400 scale-[1.08] shadow-[0_0_20px_rgba(239,68,68,0.7)] z-10'
+                          : activeSelectedGrade === 1
                           ? 'bg-red-500/20 border-2 border-red-500 text-red-500 dark:text-red-400 scale-[1.04] shadow-[0_0_15px_rgba(239,68,68,0.5)] z-10 animate-pulse'
+                          : recommendedGrade === 1
+                          ? 'bg-red-500/20 border-2 border-red-500 text-red-500 dark:text-red-400 scale-[1.04] shadow-[0_0_15px_rgba(239,68,68,0.5)] z-10'
                           : 'bg-red-500/10 border border-red-500/20 hover:bg-red-500 hover:text-zinc-50 text-red-500 dark:text-red-400 text-sm'
                       }`}
-                      onClick={() => handleGrade(1)}
+                      onClick={() => handleGradeWithAnimation(1)}
                     >
                       <span>Errei</span>
                       <span className="text-[10px] font-medium opacity-70">
@@ -1401,11 +1461,15 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                     </Button>
                     <Button 
                       className={`flex flex-col h-20 items-center justify-center rounded-xl font-bold transition-all duration-300 cursor-pointer ${
-                        recommendedGrade === 2
+                        animatingGrade === 2
+                          ? 'animate-grade-confirm-2 bg-amber-500/30 border-2 border-amber-500 text-amber-600 dark:text-amber-400 scale-[1.08] shadow-[0_0_20px_rgba(245,158,11,0.7)] z-10'
+                          : activeSelectedGrade === 2
                           ? 'bg-amber-500/20 border-2 border-amber-500 text-amber-600 dark:text-amber-400 scale-[1.04] shadow-[0_0_15px_rgba(245,158,11,0.5)] z-10 animate-pulse'
+                          : recommendedGrade === 2
+                          ? 'bg-amber-500/20 border-2 border-amber-500 text-amber-600 dark:text-amber-400 scale-[1.04] shadow-[0_0_15px_rgba(245,158,11,0.5)] z-10'
                           : 'bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500 hover:text-zinc-950 dark:hover:text-zinc-950 text-amber-500 text-sm'
                       }`}
-                      onClick={() => handleGrade(2)}
+                      onClick={() => handleGradeWithAnimation(2)}
                     >
                       <span>Difícil</span>
                       <span className="text-[10px] font-medium opacity-70">
@@ -1419,11 +1483,15 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                     </Button>
                     <Button 
                       className={`flex flex-col h-20 items-center justify-center rounded-xl font-bold transition-all duration-300 cursor-pointer ${
-                        recommendedGrade === 3
+                        animatingGrade === 3
+                          ? 'animate-grade-confirm-3 bg-sky-500/30 border-2 border-sky-500 text-sky-600 dark:text-sky-400 scale-[1.08] shadow-[0_0_20px_rgba(14,165,233,0.7)] z-10'
+                          : activeSelectedGrade === 3
                           ? 'bg-sky-500/20 border-2 border-sky-500 text-sky-600 dark:text-sky-400 scale-[1.04] shadow-[0_0_15px_rgba(14,165,233,0.5)] z-10 animate-pulse'
+                          : recommendedGrade === 3
+                          ? 'bg-sky-500/20 border-2 border-sky-500 text-sky-600 dark:text-sky-400 scale-[1.04] shadow-[0_0_15px_rgba(14,165,233,0.5)] z-10'
                           : 'bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500 hover:text-zinc-50 text-sky-600 dark:text-sky-400 text-sm'
                       }`}
-                      onClick={() => handleGrade(3)}
+                      onClick={() => handleGradeWithAnimation(3)}
                     >
                       <span>Bom</span>
                       <span className="text-[10px] font-medium opacity-70">
@@ -1437,11 +1505,15 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                     </Button>
                     <Button 
                       className={`flex flex-col h-20 items-center justify-center rounded-xl font-bold transition-all duration-300 cursor-pointer ${
-                        recommendedGrade === 4
+                        animatingGrade === 4
+                          ? 'animate-grade-confirm-4 bg-emerald-500/30 border-2 border-emerald-500 text-emerald-600 dark:text-emerald-400 scale-[1.08] shadow-[0_0_20px_rgba(16,185,129,0.7)] z-10'
+                          : activeSelectedGrade === 4
                           ? 'bg-emerald-500/20 border-2 border-emerald-500 text-emerald-600 dark:text-emerald-400 scale-[1.04] shadow-[0_0_15px_rgba(16,185,129,0.5)] z-10 animate-pulse'
+                          : recommendedGrade === 4
+                          ? 'bg-emerald-500/20 border-2 border-emerald-500 text-emerald-600 dark:text-emerald-400 scale-[1.04] shadow-[0_0_15px_rgba(16,185,129,0.5)] z-10'
                           : 'bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500 hover:text-zinc-50 text-emerald-600 dark:text-emerald-400 text-sm'
                       }`}
-                      onClick={() => handleGrade(4)}
+                      onClick={() => handleGradeWithAnimation(4)}
                     >
                       <span>Fácil</span>
                       <span className="text-[10px] font-medium opacity-70">
@@ -1463,13 +1535,15 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                   <div className="flex flex-col w-full items-center gap-1.5 animate-in fade-in slide-in-from-bottom-2 duration-300">
                     <Button
                       className={`w-full py-6 rounded-xl font-bold gap-2 cursor-pointer shadow-lg text-base transition-all duration-300 ${
+                        animatingGrade !== null ? 'scale-[1.04] opacity-90 animate-pulse' : ''
+                      } ${
                         recommendedGrade === 1
                           ? 'bg-red-600 hover:bg-red-600/90 text-white shadow-red-600/20'
                           : recommendedGrade === 2
                           ? 'bg-amber-600 hover:bg-amber-600/90 text-white shadow-amber-600/20'
                           : 'bg-primary hover:bg-primary/90 text-primary-foreground'
                       }`}
-                      onClick={() => handleGrade(recommendedGrade)}
+                      onClick={() => handleGradeWithAnimation(recommendedGrade)}
                     >
                       <span>Continuar</span>
                       <span className="text-xs opacity-80 font-medium">

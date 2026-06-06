@@ -4,6 +4,7 @@ import { Card as ShadcnCard } from '../components/ui/card';
 import { Progress } from '../components/ui/progress';
 import { db } from '../db/db';
 import { classifyLocal, classifyWithGemini } from '../utils/cefrClassifier';
+import { useAI } from '../services/ai/AIContext';
 
 interface ProfilePageProps {
   streak: number;
@@ -26,6 +27,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
   userName,
   userPhoto
 }) => {
+  const { aiService, aiProvider, geminiApiKey } = useAI();
   const [cefrCounts, setCefrCounts] = useState<Record<string, number>>({
     A1: 0, A2: 0, B1: 0, B2: 0, C1: 0, C2: 0
   });
@@ -83,16 +85,17 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
         setCefrCounts({ ...counts });
         updateEstimatedLevelState(counts);
 
-        // 2. Background query for remaining unclassified cards via Gemini (if API Key is available)
-        const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
-        if (geminiApiKey.trim() && unclassifiedAll.length > 0) {
-          setAnalysisStatus(`Analisando com I.A. Gemini (${unclassifiedAll.length} pendentes)...`);
+        // 2. Background query for remaining unclassified cards via AI (if configured)
+        const hasAI = aiProvider === 'ollama' || geminiApiKey.trim().length > 0;
+        if (hasAI && unclassifiedAll.length > 0) {
+          const providerName = aiProvider === 'ollama' ? 'Ollama' : 'Gemini';
+          setAnalysisStatus(`Analisando com I.A. ${providerName} (${unclassifiedAll.length} pendentes)...`);
           
           // Take first 20 unclassified cards to avoid huge prompts
           const batch = unclassifiedAll.slice(0, 20);
           const wordsToClassify = batch.map(c => c.front.toLowerCase());
           
-          const resolvedMap = await classifyWithGemini(wordsToClassify, geminiApiKey);
+          const resolvedMap = await classifyWithGemini(wordsToClassify, aiService);
           
           let updatedAny = false;
           for (const card of batch) {

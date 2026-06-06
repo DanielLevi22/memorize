@@ -7,6 +7,7 @@ import { downloadPresetFile, openPresetFile, deserializePreset } from '../utils/
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../components/ui/dialog';
 import { AlertTriangle } from 'lucide-react';
+import { useAI } from '../services/ai/AIContext';
 
 interface SettingsPageProps {
   theme: 'light' | 'dark';
@@ -52,6 +53,10 @@ interface SettingsPageProps {
   handleDriveSync: (forceMode?: 'upload' | 'download') => Promise<void>;
   driveAccessToken: string;
   handleDisconnectDrive: () => Promise<void>;
+  onNavigateTab?: (
+    tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke',
+    subTab?: 'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math' | 'ollama_setup'
+  ) => void;
 }
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({
@@ -92,7 +97,51 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   handleDriveSync,
   driveAccessToken,
   handleDisconnectDrive,
+  onNavigateTab,
 }) => {
+  const {
+    aiProvider,
+    setAiProvider,
+    ollamaApiUrl,
+    setOllamaApiUrl,
+    ollamaModel,
+    setOllamaModel,
+    testConnection
+  } = useAI();
+
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const handleTestConnection = async () => {
+    setTestingConnection(true);
+    setTestResult(null);
+    try {
+      const ok = await testConnection();
+      if (ok) {
+        setTestResult({
+          success: true,
+          message: `Conexão estabelecida com sucesso usando o provedor ${aiProvider === 'gemini' ? 'Gemini' : 'Ollama (' + ollamaModel + ')'}! ✅`
+        });
+        toast.success('Conectado com sucesso!');
+      } else {
+        setTestResult({
+          success: false,
+          message: 'A IA respondeu com sucesso, mas o formato do texto de retorno foi inesperado.'
+        });
+        toast.error('Conexão instável');
+      }
+    } catch (err: any) {
+      console.error('Settings AI test failed:', err);
+      setTestResult({
+        success: false,
+        message: err.message || 'Erro desconhecido ao testar conexão.'
+      });
+      toast.error('Falha na conexão com a IA');
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [notifPermission, setNotifPermission] = useState<NotificationPermission | 'unsupported'>(() => getNotificationPermission());
   const [showApiKey, setShowApiKey] = useState(false);
@@ -1236,95 +1285,215 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               Integração com Inteligência Artificial
             </span>
           </div>
-          <a
-            href="https://aistudio.google.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[10px] font-bold text-violet-500 hover:underline flex items-center gap-0.5"
-          >
-            Obter chave grátis ↗
-          </a>
         </div>
 
-        <div className="p-4 bg-card space-y-3">
-          <div className="flex flex-col gap-1.5">
-            <div className="flex justify-between items-center">
-              <span className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-                <Key size={14} className="text-muted-foreground" /> Chave de API do Gemini
-                <a
-                  href="https://aistudio.google.com/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[10px] font-bold text-violet-500 hover:underline inline-flex items-center gap-0.5 ml-1"
-                >
-                  (Obter chave grátis ↗)
-                </a>
-              </span>
-              <div className="flex items-center gap-3">
-                {geminiApiKey && (
-                  <span className="text-[10px] text-emerald-500 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                    Configurada ✅
+        <div className="p-4 bg-card space-y-4">
+          {/* Seletor de Provedor (Segmented Control) */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+              Provedor Ativo
+            </label>
+            <div className="flex bg-muted p-1 rounded-xl w-full max-w-xs border border-border">
+              <button
+                type="button"
+                onClick={() => setAiProvider('gemini')}
+                className={`flex-1 text-center py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  aiProvider === 'gemini'
+                    ? 'bg-card text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                Google Gemini (Nuvem)
+              </button>
+              <button
+                type="button"
+                onClick={() => setAiProvider('ollama')}
+                className={`flex-1 text-center py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  aiProvider === 'ollama'
+                    ? 'bg-card text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                Ollama (Local / Grátis)
+              </button>
+            </div>
+          </div>
+
+          {/* Configurações do Gemini */}
+          {aiProvider === 'gemini' && (
+            <div className="space-y-3 animate-in fade-in slide-in-from-top-1 duration-200">
+              <div className="flex flex-col gap-1.5">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                    <Key size={14} className="text-muted-foreground" /> Chave de API do Gemini
+                    <a
+                      href="https://aistudio.google.com/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] font-bold text-violet-500 hover:underline inline-flex items-center gap-0.5 ml-1"
+                    >
+                      (Obter chave grátis ↗)
+                    </a>
                   </span>
-                )}
+                  <div className="flex items-center gap-3">
+                    {geminiApiKey && (
+                      <span className="text-[10px] text-emerald-500 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                        Configurada ✅
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setShowApiKey(!showApiKey)}
+                      className="text-xs text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1 font-semibold"
+                    >
+                      {showApiKey ? (
+                        <>
+                          <EyeOff size={13} /> Ocultar
+                        </>
+                      ) : (
+                        <>
+                          <Eye size={13} /> Revelar
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type={showApiKey ? "text" : "password"}
+                      placeholder={geminiApiKey ? "•••••••••••••••• (Chave Salva - Digite para alterar)" : "Cole sua API Key do Gemini aqui..."}
+                      value={localApiKey}
+                      onChange={(e) => setLocalApiKey(e.target.value)}
+                      className="w-full bg-muted border border-border text-foreground px-3 py-2 rounded-xl text-xs outline-none focus:border-violet-500/50 pr-10 font-mono transition-colors"
+                    />
+                    <div className="absolute right-3 top-2.5 text-muted-foreground pointer-events-none">
+                      🔑
+                    </div>
+                  </div>
+                  <Button
+                    onClick={handleSaveApiKey}
+                    disabled={!localApiKey.trim()}
+                    className="bg-violet-600 hover:bg-violet-700 text-zinc-50 text-xs font-bold px-4 py-2 rounded-xl h-auto cursor-pointer flex-shrink-0"
+                  >
+                    Salvar
+                  </Button>
+                  {geminiApiKey && (
+                    <Button
+                      onClick={() => setShowRemoveKeyConfirm(true)}
+                      variant="outline"
+                      className="border-destructive/20 hover:bg-destructive/10 text-destructive text-xs font-bold px-3 py-2 rounded-xl h-auto cursor-pointer flex-shrink-0"
+                    >
+                      Remover
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {saveSuccess && (
+                <p className="text-[10px] text-emerald-500 font-bold animate-pulse">
+                  ✅ Chave de API salva com sucesso!
+                </p>
+              )}
+              <p className="text-[10px] text-muted-foreground leading-relaxed mt-1">
+                Sua chave é salva <strong>somente no seu navegador (localStorage)</strong> de forma 100% segura e privada. Ela é enviada diretamente para a API oficial da Google para gerar os cartões.
+              </p>
+            </div>
+          )}
+
+          {/* Configurações do Ollama */}
+          {aiProvider === 'ollama' && (
+            <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                    🌐 Endpoint da API local
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ex: http://localhost:11434"
+                    value={ollamaApiUrl}
+                    onChange={(e) => setOllamaApiUrl(e.target.value)}
+                    className="w-full bg-muted border border-border text-foreground px-3 py-2 rounded-xl text-xs outline-none focus:border-violet-500/50 transition-colors font-mono"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                    🤖 Modelo Local (Recom. llama3.2)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ex: llama3.2 ou llama3"
+                    value={ollamaModel}
+                    onChange={(e) => setOllamaModel(e.target.value)}
+                    className="w-full bg-muted border border-border text-foreground px-3 py-2 rounded-xl text-xs outline-none focus:border-violet-500/50 transition-colors font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Guia de CORS */}
+              <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-xs leading-relaxed text-amber-600 dark:text-amber-400">
+                <span className="font-bold flex items-center gap-1.5 mb-1 text-amber-600 dark:text-amber-500">
+                  <AlertTriangle size={14} className="flex-shrink-0" /> Requisito de Origem (CORS)
+                </span>
+                Como a conexão é feita diretamente do navegador, o Ollama local precisa ser iniciado com cabeçalhos de CORS habilitados. Execute o seguinte comando no terminal antes de iniciar o Ollama:
+                <div className="mt-2 space-y-1.5 font-mono text-[10px]">
+                  <div>
+                    <span className="text-[10px] font-sans font-bold text-muted-foreground">PowerShell (Windows):</span>
+                    <pre className="bg-muted px-2.5 py-1.5 rounded-lg border border-border overflow-x-auto mt-1 select-all">
+                      $env:OLLAMA_ORIGINS="*" ; ollama serve
+                    </pre>
+                  </div>
+                  <div className="pt-1">
+                    <span className="text-[10px] font-sans font-bold text-muted-foreground">Terminal (macOS/Linux):</span>
+                    <pre className="bg-muted px-2.5 py-1.5 rounded-lg border border-border overflow-x-auto mt-1 select-all">
+                      OLLAMA_ORIGINS="*" ollama serve
+                    </pre>
+                  </div>
+                </div>
+              </div>
+
+              {/* Link para o Guia Completo */}
+              <div className="text-[11px] text-muted-foreground flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 bg-muted/40 px-3.5 py-2.5 rounded-xl border border-border">
+                <span>Não sabe como baixar ou instalar o Ollama no seu computador?</span>
                 <button
                   type="button"
-                  onClick={() => setShowApiKey(!showApiKey)}
-                  className="text-xs text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1 font-semibold"
+                  onClick={() => onNavigateTab?.('guide', 'ollama_setup')}
+                  className="text-xs font-bold text-violet-500 hover:text-violet-600 hover:underline cursor-pointer bg-transparent border-none p-0 inline-flex items-center gap-0.5"
                 >
-                  {showApiKey ? (
-                    <>
-                      <EyeOff size={13} /> Ocultar
-                    </>
-                  ) : (
-                    <>
-                      <Eye size={13} /> Revelar
-                    </>
-                  )}
+                  Ver Guia Passo a Passo ↗
                 </button>
               </div>
             </div>
-            
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <input
-                  type={showApiKey ? "text" : "password"}
-                  placeholder={geminiApiKey ? "•••••••••••••••• (Chave Salva - Digite para alterar)" : "Cole sua API Key do Gemini aqui..."}
-                  value={localApiKey}
-                  onChange={(e) => setLocalApiKey(e.target.value)}
-                  className="w-full bg-muted border border-border text-foreground px-3 py-2 rounded-xl text-xs outline-none focus:border-violet-500/50 pr-10 font-mono transition-colors"
-                />
-                <div className="absolute right-3 top-2.5 text-muted-foreground pointer-events-none">
-                  🔑
-                </div>
-              </div>
-              <Button
-                onClick={handleSaveApiKey}
-                disabled={!localApiKey.trim()}
-                className="bg-violet-600 hover:bg-violet-700 text-zinc-50 text-xs font-bold px-4 py-2 rounded-xl h-auto cursor-pointer flex-shrink-0"
-              >
-                Salvar
-              </Button>
-              {geminiApiKey && (
-                <Button
-                  onClick={() => setShowRemoveKeyConfirm(true)}
-                  variant="outline"
-                  className="border-destructive/20 hover:bg-destructive/10 text-destructive text-xs font-bold px-3 py-2 rounded-xl h-auto cursor-pointer flex-shrink-0"
-                >
-                  Remover
-                </Button>
-              )}
-            </div>
-          </div>
+          )}
 
-          {saveSuccess && (
-              <p className="text-[10px] text-emerald-500 font-bold animate-pulse">
-                ✅ Chave de API salva com sucesso!
-              </p>
+          {/* Seção Comum: Teste de Conexão */}
+          <div className="pt-2 border-t border-border/40 space-y-2">
+            <div className="flex items-center gap-3">
+              <Button
+                onClick={handleTestConnection}
+                disabled={testingConnection}
+                className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-bold px-4 py-2 rounded-xl h-auto cursor-pointer"
+              >
+                {testingConnection ? 'Conectando...' : 'Testar Conexão'}
+              </Button>
+              <span className="text-[10px] text-muted-foreground font-medium">
+                Envia uma requisição de teste para validar a conectividade.
+              </span>
+            </div>
+
+            {testResult && (
+              <div className={`p-3 rounded-xl border text-xs leading-relaxed transition-all ${
+                testResult.success
+                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                  : 'bg-destructive/10 border-destructive/20 text-destructive'
+              }`}>
+                {testResult.message}
+              </div>
             )}
-            <p className="text-[10px] text-muted-foreground leading-relaxed mt-1">
-              Sua chave é salva <strong>somente no seu navegador (localStorage)</strong> de forma 100% segura e privada. Ela é enviada diretamente para a API oficial da Google para gerar os cartões.
-            </p>
           </div>
+        </div>
 
         {/* Card: OpenAI API Key */}
         <div className="p-4 bg-card space-y-3 border-t border-border/40">

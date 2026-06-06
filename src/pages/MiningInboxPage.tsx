@@ -15,6 +15,7 @@ import { findBackupFile, downloadBackupFile, createBackupFile, updateBackupFile,
 import { exportMiningDatabase, mergeMiningSync } from '../utils/sync';
 import { translateWithMyMemory } from '../utils/readingProcessor';
 import { Checkbox } from '../components/ui/checkbox';
+import { useAI } from '../services/ai/AIContext';
 
 
 interface MiningInboxPageProps {
@@ -30,6 +31,12 @@ export function MiningInboxPage({
   setDriveAccessToken,
   driveClientId
 }: MiningInboxPageProps) {
+  const { 
+    aiService, 
+    aiProvider, 
+    setAiProvider 
+  } = useAI();
+
   const [activeCaptureMode, setActiveCaptureMode] = useState<'photo' | 'voice' | 'text'>('photo');
   
   // States for capturing
@@ -384,9 +391,9 @@ export function MiningInboxPage({
     }
   };
 
-  // --- GEMINI PROCESSOR ---
-  const handleAnalyzeWithGemini = async (item: MiningItem) => {
-    if (!geminiApiKey.trim()) {
+  // --- IA PROCESSOR ---
+  const handleAnalyzeWithAI = async (item: MiningItem) => {
+    if (aiProvider === 'gemini' && !geminiApiKey.trim()) {
       toast.error('Chave de API do Gemini não configurada! Vá em Configurações para definir.');
       return;
     }
@@ -394,75 +401,48 @@ export function MiningInboxPage({
     setProcessingItemIds(prev => ({ ...prev, [item.id]: true }));
     
     try {
-      let requestBody = {};
       const themeContext = item.theme 
         ? `Note that the user is studying this sentence under the theme: "${item.theme}". If relevant, emphasize or tailor the translation/explanation vocabulary notes to match this theme.` 
         : '';
 
+      let systemPrompt = '';
+      let userPrompt = '';
+      let images: Array<{ mimeType: string; data: string }> | undefined = undefined;
+      let audio: { mimeType: string; data: string } | undefined = undefined;
+
       if (item.source === 'photo' && item.imageUrl) {
         const base64Data = item.imageUrl.split(',')[1];
-        requestBody = {
-          contents: [{
-            parts: [
-              {
-                inlineData: {
-                  mimeType: 'image/jpeg',
-                  data: base64Data
-                }
-              },
-              {
-                text: `Below is an image of subtitles from a movie/series or a picture containing English text. Extract the main English sentence/phrase being studied (do not include Portuguese translations or other UI elements, focus on the English text). Translate it to Portuguese, and write a brief grammatical/contextual explanation of key words or expressions in Portuguese. Keep the explanation short and formatted in Markdown bullet points. ${themeContext} Return ONLY a valid JSON object in the following format: {\n  "originalText": "the extracted english sentence",\n  "translation": "tradução em português",\n  "explanation": "explicação curta da frase/palavras novas"\n}`
-              }
-            ]
-          }]
-        };
+        const mimeType = item.imageUrl.split(';')[0].split(':')[1] || 'image/jpeg';
+        
+        systemPrompt = "You are an assistant that extracts and analyzes English subtitles or sentences from images.";
+        userPrompt = `Below is an image of subtitles from a movie/series or a picture containing English text. Extract the main English sentence/phrase being studied (do not include Portuguese translations or other UI elements, focus on the English text). Translate it to Portuguese, and write a brief grammatical/contextual explanation of key words or expressions in Portuguese. Keep the explanation short and formatted in Markdown bullet points. ${themeContext} Return ONLY a valid JSON object in the following format: {\n  "originalText": "the extracted english sentence",\n  "translation": "tradução em português",\n  "explanation": "explicação curta da frase/palavras novas"\n}`;
+        images = [{ mimeType, data: base64Data }];
       } else if (item.source === 'voice' && item.voiceUrl) {
         const base64Data = item.voiceUrl.split(',')[1];
-        requestBody = {
-          contents: [{
-            parts: [
-              {
-                inlineData: {
-                  mimeType: 'audio/ogg',
-                  data: base64Data
-                }
-              },
-              {
-                text: `Listen to the English audio. Transcribe the main English sentence spoken, translate it to Portuguese, and write a brief grammatical/contextual explanation of key words or expressions in Portuguese. Keep the explanation short and formatted in Markdown bullet points. ${themeContext} Return ONLY a valid JSON object in the following format: {\n  "originalText": "the transcribed english sentence",\n  "translation": "tradução em português",\n  "explanation": "explicação curta da frase/palavras novas"\n}`
-              }
-            ]
-          }]
-        };
+        const mimeType = item.voiceUrl.split(';')[0].split(':')[1] || 'audio/ogg';
+        
+        systemPrompt = "You are an assistant that transcribes and analyzes spoken English audio.";
+        userPrompt = `Listen to the English audio. Transcribe the main English sentence spoken, translate it to Portuguese, and write a brief grammatical/contextual explanation of key words or expressions in Portuguese. Keep the explanation short and formatted in Markdown bullet points. ${themeContext} Return ONLY a valid JSON object in the following format: {\n  "originalText": "the transcribed english sentence",\n  "translation": "tradução em português",\n  "explanation": "explicação curta da frase/palavras novas"\n}`;
+        audio = { mimeType, data: base64Data };
       } else {
-        // Text mining
         const textToAnalyze = item.originalText || '';
-        requestBody = {
-          contents: [{
-            parts: [{
-              text: `Analyze the following English sentence. Translate it to Portuguese, and write a brief grammatical/contextual explanation of key words or expressions in Portuguese. Keep the explanation short and formatted in Markdown bullet points. ${themeContext} Return ONLY a valid JSON object in the following format: {\n  "originalText": "the sentence",\n  "translation": "tradução em português",\n  "explanation": "explicação curta da frase/palavras novas"\n}. The sentence is: "${textToAnalyze}"`
-            }]
-          }]
-        };
+        systemPrompt = "You are an assistant that translates and explains English sentences.";
+        userPrompt = `Analyze the following English sentence. Translate it to Portuguese, and write a brief grammatical/contextual explanation of key words or expressions in Portuguese. Keep the explanation short and formatted in Markdown bullet points. ${themeContext} Return ONLY a valid JSON object in the following format: {\n  "originalText": "the sentence",\n  "translation": "tradução em português",\n  "explanation": "explicação curta da frase/palavras novas"\n}. The sentence is: "${textToAnalyze}"`;
       }
 
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(requestBody)
-        }
-      );
+      const modelOverride = aiProvider === 'ollama'
+        ? (item.source === 'photo' ? 'gemma3' : 'llama3.2')
+        : undefined;
 
-      if (!response.ok) {
-        throw new Error(`Gemini API error: ${response.statusText}`);
-      }
+      const responseText = await aiService.generateContent({
+        systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        responseMimeType: 'application/json',
+        images,
+        audio,
+        model: modelOverride
+      });
 
-      const resData = await response.json();
-      const responseText = resData.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      
       const cleanJson = responseText.replace(/```json/gi, '').replace(/```/gi, '').trim();
       const parsedResult = JSON.parse(cleanJson);
 
@@ -476,9 +456,9 @@ export function MiningInboxPage({
 
       await miningDb.miningItems.put(updatedItem);
       toast.success('Análise de IA concluída com sucesso!');
-    } catch (err) {
-      console.error('Gemini Analysis Failed:', err);
-      toast.error('Falha ao analisar item com o Gemini. Tente novamente.');
+    } catch (err: any) {
+      console.error('AI Analysis Failed:', err);
+      toast.error('Falha ao analisar item com IA: ' + err.message);
     } finally {
       setProcessingItemIds(prev => ({ ...prev, [item.id]: false }));
     }
@@ -695,9 +675,9 @@ export function MiningInboxPage({
       // Compile lines
       const textLines: TextLine[] = selectedList.map(item => {
         const editing = editingFields[item.id] || {};
-        const finalOriginalText = editing.originalText !== undefined ? editing.originalText : item.originalText || '';
-        const finalTranslation = editing.translation !== undefined ? editing.translation : item.translation || '';
-        const finalExplanation = editing.explanation !== undefined ? editing.explanation : item.explanation || '';
+        const finalOriginalText = String(editing.originalText !== undefined ? editing.originalText : item.originalText || '');
+        const finalTranslation = String(editing.translation !== undefined ? editing.translation : item.translation || '');
+        const finalExplanation = String(editing.explanation !== undefined ? editing.explanation : item.explanation || '');
         
         // Context contains both explanation and theme information if available
         let context = finalExplanation;
@@ -725,12 +705,14 @@ export function MiningInboxPage({
         const newTextId = crypto.randomUUID();
         const fullOriginal = selectedList.map(item => {
           const editing = editingFields[item.id] || {};
-          return editing.originalText !== undefined ? editing.originalText : item.originalText || '';
+          const val = editing.originalText !== undefined ? editing.originalText : item.originalText || '';
+          return String(val);
         }).join('\n');
         
         const fullTranslated = selectedList.map(item => {
           const editing = editingFields[item.id] || {};
-          return editing.translation !== undefined ? editing.translation : item.translation || '';
+          const val = editing.translation !== undefined ? editing.translation : item.translation || '';
+          return String(val);
         }).join('\n');
 
         const newTextResource: TextResource = {
@@ -764,21 +746,23 @@ export function MiningInboxPage({
           return;
         }
 
-        const appendedLines = [...targetText.lines, ...textLines];
+        const appendedLines = [...(targetText.lines || []), ...textLines];
         const newOriginals = selectedList.map(item => {
           const editing = editingFields[item.id] || {};
-          return editing.originalText !== undefined ? editing.originalText : item.originalText || '';
+          const val = editing.originalText !== undefined ? editing.originalText : item.originalText || '';
+          return String(val);
         }).join('\n');
         const newTranslations = selectedList.map(item => {
           const editing = editingFields[item.id] || {};
-          return editing.translation !== undefined ? editing.translation : item.translation || '';
+          const val = editing.translation !== undefined ? editing.translation : item.translation || '';
+          return String(val);
         }).join('\n');
 
         const updatedText: TextResource = {
           ...targetText,
           lines: appendedLines,
-          fullTextOriginal: (targetText.fullTextOriginal + '\n' + newOriginals).trim(),
-          fullTextTranslated: (targetText.fullTextTranslated + '\n' + newTranslations).trim(),
+          fullTextOriginal: ((targetText.fullTextOriginal || '') + '\n' + newOriginals).trim(),
+          fullTextTranslated: ((targetText.fullTextTranslated || '') + '\n' + newTranslations).trim(),
           updatedAt: Date.now()
         };
 
@@ -819,6 +803,21 @@ export function MiningInboxPage({
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap justify-end">
+          {/* Seletor de IA Rápido */}
+          <div className="flex items-center gap-2 bg-zinc-900/60 border border-zinc-800/80 px-2.5 py-1.5 rounded-xl shadow-inner">
+            <span className="text-[10px] text-muted-foreground font-black uppercase tracking-wider flex items-center gap-1 select-none">
+              <Bot size={12} className="text-violet-400" /> IA:
+            </span>
+            <select
+              value={aiProvider}
+              onChange={(e) => setAiProvider(e.target.value as 'gemini' | 'ollama')}
+              className="bg-transparent text-xs font-bold text-foreground outline-none border-none cursor-pointer pr-1 focus:text-violet-400"
+            >
+              <option value="gemini" className="bg-zinc-950 text-foreground">Gemini Flash (Nuvem)</option>
+              <option value="ollama" className="bg-zinc-950 text-foreground">Ollama (Local / Auto)</option>
+            </select>
+          </div>
+
           {isSyncing && syncStatusMessage && (
             <span className="text-[10px] text-muted-foreground animate-pulse font-semibold">
               {syncStatusMessage}
@@ -848,7 +847,7 @@ export function MiningInboxPage({
               )}
             </button>
           )}
-          {!geminiApiKey.trim() && (
+          {aiProvider === 'gemini' && !geminiApiKey.trim() && (
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-xs font-semibold">
               <AlertCircle size={14} />
               <span>Chave Gemini ausente</span>
@@ -1219,11 +1218,11 @@ export function MiningInboxPage({
                           Transcrições e análises automáticas pendentes
                         </span>
                         <button
-                          onClick={() => handleAnalyzeWithGemini(item)}
-                          className="w-full py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-zinc-950 font-black text-xs flex items-center justify-center gap-1 shadow-md hover:scale-[1.01] active:scale-[0.99] transition-all cursor-pointer border-none"
+                          onClick={() => handleAnalyzeWithAI(item)}
+                          className="w-full py-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-amber-500 hover:from-violet-500 hover:to-amber-400 text-white font-black text-xs flex items-center justify-center gap-1 shadow-md hover:scale-[1.01] active:scale-[0.99] transition-all cursor-pointer border-none"
                         >
                           <Sparkles size={12} className="fill-current" />
-                          <span>Analisar com Gemini</span>
+                          <span>Analisar com IA</span>
                         </button>
                       </div>
                     )}

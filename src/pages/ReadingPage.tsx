@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { db } from '../db/db';
 import type { ReadingText, ReadingCollection, Note, Card } from '../types';
 import { toast } from 'sonner';
+import { useAI } from '../services/ai/AIContext';
 
 interface DraftCard {
   id: string; // Temporary UI id
@@ -73,6 +74,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   isZenMode,
   setIsZenMode,
 }) => {
+  const { aiService, aiProvider } = useAI();
   const readings = useLiveQuery(() => db.texts.orderBy('createdAt').reverse().filter(t => t.showInReadings !== false).toArray());
   const collections = useLiveQuery(() => db.readingCollections?.orderBy('createdAt').reverse().toArray()) || [];
   const decks = useLiveQuery(() => db.decks.orderBy('name').toArray()) || [];
@@ -1354,11 +1356,12 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
       let newLines;
       
       if (appendBlockMode === 'gemini') {
-        if (!geminiApiKey.trim()) {
-          throw new Error('Chave de API do Gemini não configurada.');
+        const isAIConfigured = aiProvider === 'ollama' || !!geminiApiKey.trim();
+        if (!isAIConfigured) {
+          throw new Error('Inteligência Artificial não configurada nas Configurações.');
         }
-        setAppendBlockProcessingStep('🤖 Gemini está segmentando e traduzindo o texto...');
-        const aiResult = await processTextWithAI(appendBlockOriginalText, geminiApiKey);
+        setAppendBlockProcessingStep('🤖 A Inteligência Artificial está segmentando e traduzindo o texto...');
+        const aiResult = await processTextWithAI(appendBlockOriginalText, aiService);
         newLines = aiResult.lines;
       } else if (appendBlockMode === 'mymemory') {
         setAppendBlockProcessingStep('🌐 Traduzindo e segmentando gratuitamente...');
@@ -3386,17 +3389,17 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                           value="gemini"
                           checked={appendBlockMode === 'gemini'}
                           onChange={() => setAppendBlockMode('gemini')}
-                          disabled={appendBlockIsProcessing || !geminiApiKey.trim()}
+                          disabled={appendBlockIsProcessing || !(aiProvider === 'ollama' || !!geminiApiKey.trim())}
                           className="mt-1.5 w-4 h-4 text-violet-600 border-zinc-300 dark:border-zinc-700 bg-background focus:ring-violet-500 cursor-pointer"
                         />
                         <div className="flex flex-col gap-0.5">
                           <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
                             <Sparkles size={12} className="text-violet-500" />
-                            Segmentação e Tradução por IA (Gemini)
+                            Segmentação e Tradução por IA
                           </span>
-                          {!geminiApiKey.trim() ? (
+                          {!(aiProvider === 'ollama' || !!geminiApiKey.trim()) ? (
                             <span className="text-[9px] text-destructive font-semibold">
-                              Requer chave de API nas Configurações (Permite destacar palavras-chave)
+                              Requer IA configurada nas Configurações (Permite destacar palavras-chave)
                             </span>
                           ) : (
                             <span className="text-[9px] text-muted-foreground">

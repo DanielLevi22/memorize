@@ -5,6 +5,7 @@ import type { CefrExam, CefrExamAttempt } from '../types';
 import { toast } from 'sonner';
 import { calculateExamScore, getPassingCut } from '../utils/cefrExamHelper';
 import { evaluateWritingWithGemini } from '../utils/cefrWritingEvaluator';
+import { useAI } from '../services/ai/AIContext';
 
 interface ExamArenaPageProps {
   exam: CefrExam;
@@ -19,6 +20,7 @@ export const ExamArenaPage: React.FC<ExamArenaPageProps> = ({
   onClose,
   geminiApiKey = ''
 }) => {
+  const { aiService, aiProvider, geminiApiKey: contextApiKey } = useAI();
   const [currentStep, setCurrentStep] = useState<number>(0); // 0: Instruções, 1: Reading, 2: Listening, 3: Writing, 4: Envio/Resultado
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [writingContent, setWritingContent] = useState<string>('');
@@ -97,21 +99,22 @@ export const ExamArenaPage: React.FC<ExamArenaPageProps> = ({
       let writingScore = 100;
       let aiFeedback = 'Simulação de avaliação offline. A correção inteligente por IA exige uma chave de API do Gemini configurada.';
 
-      const apiKey = localStorage.getItem('memorize_gemini_api_key') || geminiApiKey;
+      const apiKey = localStorage.getItem('memorize_gemini_api_key') || geminiApiKey || contextApiKey;
+      const isAIConfigured = aiProvider === 'ollama' || !!(apiKey && apiKey.trim());
 
-      if (apiKey && apiKey.trim()) {
+      if (isAIConfigured) {
         try {
           const evalResult = await evaluateWritingWithGemini(
             exam.level,
             exam.writingPrompt.instructions,
             writingContent,
-            apiKey
+            aiService
           );
           writingScore = evalResult.score;
           aiFeedback = evalResult.feedback;
         } catch (err) {
-          console.warn('Erro ao chamar API do Gemini para correção de redação:', err);
-          toast.error('Erro na chamada da IA do Gemini. Usando nota padrão temporária.');
+          console.warn('Erro ao chamar API de IA para correção de redação:', err);
+          toast.error('Erro na chamada da IA. Usando nota padrão temporária.');
         }
       }
 

@@ -1,3 +1,5 @@
+import type { AIService } from '../services/ai/types';
+
 /**
  * Constrói o prompt para avaliação da redação CEFR.
  */
@@ -26,33 +28,21 @@ export interface WritingEvaluationResult {
 }
 
 /**
- * Faz a chamada de API para o Gemini e retorna o resultado estruturado.
+ * Faz a chamada de API para a IA e retorna o resultado estruturado.
  */
 export async function evaluateWritingWithGemini(
   level: string,
   instructions: string,
   text: string,
-  apiKey: string
+  aiService: AIService
 ): Promise<WritingEvaluationResult> {
   const promptText = buildGeminiWritingPrompt(level, instructions, text);
   
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: promptText }] }]
-      })
-    }
-  );
+  const rawText = await aiService.generateContent({
+    messages: [{ role: 'user', content: promptText }],
+    responseMimeType: 'application/json'
+  });
 
-  if (!res.ok) {
-    throw new Error('Falha na chamada de API do Gemini');
-  }
-
-  const data = await res.json();
-  const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
   const cleanJsonStr = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
   
   const parsed = JSON.parse(cleanJsonStr);

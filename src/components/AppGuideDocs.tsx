@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { BookOpen, Keyboard, Info, Lightbulb, Zap, Laptop, Sliders, Brain, Headphones } from 'lucide-react';
+import { BookOpen, Keyboard, Info, Lightbulb, Zap, Laptop, Sliders, Brain, Headphones, AlertTriangle } from 'lucide-react';
 import { Card } from './ui/card';
 import { SrsAlgorithmsDocs } from './SrsAlgorithmsDocs';
 
 interface AppGuideDocsProps {
-  initialTab?: 'overview' | 'study_modes' | 'shortcuts' | 'reading' | 'playlist_transcription' | 'srs_presets' | 'srs_math';
+  initialTab?: 'overview' | 'study_modes' | 'shortcuts' | 'reading' | 'playlist_transcription' | 'srs_presets' | 'srs_math' | 'ollama_setup';
 }
 
 export const AppGuideDocs: React.FC<AppGuideDocsProps> = ({ initialTab = 'overview' }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'study_modes' | 'shortcuts' | 'reading' | 'playlist_transcription' | 'srs_presets' | 'srs_math'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'overview' | 'study_modes' | 'shortcuts' | 'reading' | 'playlist_transcription' | 'srs_presets' | 'srs_math' | 'ollama_setup'>(initialTab);
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -104,6 +104,17 @@ export const AppGuideDocs: React.FC<AppGuideDocsProps> = ({ initialTab = 'overvi
         >
           <Brain size={14} />
           Algoritmos SRS
+        </button>
+        <button
+          onClick={() => setActiveTab('ollama_setup')}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-all duration-200 ${
+            activeTab === 'ollama_setup'
+              ? 'bg-background text-primary shadow-sm font-bold'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Laptop size={14} />
+          Configurar Ollama (IA Local)
         </button>
       </div>
 
@@ -506,6 +517,174 @@ export const AppGuideDocs: React.FC<AppGuideDocsProps> = ({ initialTab = 'overvi
                   <span className="text-xs font-bold text-foreground block">⚖️ Escolha de Algoritmo SRS por Baralho</span>
                   <p className="text-xs text-muted-foreground leading-relaxed">
                     Você pode usar o algoritmo clássico **SM-2** em um baralho comum e ativar o algoritmo moderno **FSRS v4** (estado da arte de inteligência de repetição) em outro baralho específico, apenas configurando isso no Preset associado. Para entender as equações por trás de cada algoritmo, acesse a aba dedicada de <strong>Algoritmos SRS</strong> na barra superior deste guia.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: OLLAMA SETUP */}
+          {activeTab === 'ollama_setup' && (
+            <div className="space-y-6 animate-in fade-in duration-300">
+              <div className="space-y-2">
+                <span className="text-[10px] font-black uppercase text-violet-500 bg-violet-500/10 px-2 py-0.5 rounded tracking-wider">
+                  Guia de Configuração
+                </span>
+                <h3 className="text-base font-bold text-foreground flex items-center gap-2">
+                  <Laptop size={16} className="text-violet-500" /> Como Instalar e Configurar o Ollama (IA Local Grátis)
+                </h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  O <strong>Ollama</strong> é uma ferramenta que permite rodar modelos de linguagem (LMs) poderosos diretamente no seu computador. É 100% gratuito, offline, privado e não exige chave de API.
+                </p>
+              </div>
+
+              <div className="space-y-5">
+                {/* 1. INSTALAR */}
+                <div className="p-4 bg-muted/10 border border-border rounded-xl space-y-2">
+                  <span className="text-xs font-bold text-foreground block">📥 Passo 1: Baixar e Instalar o Ollama</span>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Acesse o site oficial do Ollama em <a href="https://ollama.com" target="_blank" rel="noopener noreferrer" className="text-violet-500 hover:underline font-bold inline-flex items-center gap-0.5">ollama.com ↗</a>, baixe o instalador adequado para o seu sistema operacional (Windows, macOS ou Linux) e faça a instalação padrão.
+                  </p>
+                  <div className="bg-destructive/10 border border-destructive/20 text-destructive rounded-xl p-3 text-[11px] leading-relaxed mt-2 space-y-3">
+                    <div>
+                      <span className="font-bold flex items-center gap-1.5 mb-1 text-red-500">
+                        ⚠️ Erro de Política de Controle (AppLocker)?
+                      </span>
+                      Se o comando PowerShell <code className="bg-muted px-1 rounded font-mono">irm https://ollama.com/install.ps1 | iex</code> falhar com o erro <em>"An Application Control policy has blocked this file"</em>, é porque o Windows bloqueia scripts que executam arquivos da pasta Temp.
+                    </div>
+                    
+                    <div className="pt-2 border-t border-destructive/10">
+                      <span className="font-bold flex items-center gap-1.5 mb-1 text-red-500">
+                        🛡️ Bloqueado pelo Smart App Control (SAC) ou SmartScreen?
+                      </span>
+                      No Windows 11, o <strong>Smart App Control (SAC)</strong> pode bloquear o <code className="bg-muted px-1 rounded font-mono">OllamaSetup.exe</code> sem dar a opção de "Executar assim mesmo", alegando não poder verificar o editor.
+                    </div>
+
+                    <div className="space-y-2 pt-2 border-t border-destructive/10 text-foreground dark:text-foreground">
+                      <span className="font-bold block text-xs">Como contornar esses bloqueios (Escolha uma opção):</span>
+                      <ul className="list-decimal pl-4 space-y-2">
+                        <li>
+                          <strong>Opção A (Via Terminal - Winget):</strong> Use o Gerenciador de Pacotes do Windows (Winget) que possui assinatura confiável. Abra o PowerShell ou Terminal e execute:
+                          <pre className="bg-muted px-3 py-1.5 rounded-lg border border-border font-mono text-[10px] mt-1 select-all overflow-x-auto text-foreground">
+                            winget install --id Ollama.Ollama -e
+                          </pre>
+                        </li>
+                        <li>
+                          <strong>Opção B (Desbloquear Executável):</strong> 
+                          <ul className="list-disc pl-4 mt-1 space-y-1">
+                            <li>
+                              <strong>Via Interface:</strong> Clique com o botão direito no arquivo <code className="bg-muted px-1 rounded font-mono">OllamaSetup.exe</code> baixado → vá em <strong>Propriedades</strong> → na aba Geral (no rodapé), marque a caixa <strong>Desbloquear</strong> (Unblock) → clique em Aplicar/OK.
+                            </li>
+                            <li>
+                              <strong>Via PowerShell:</strong> Execute o comando:
+                              <pre className="bg-muted px-3 py-1.5 rounded-lg border border-border font-mono text-[10px] mt-1 select-all overflow-x-auto text-foreground">
+                                Unblock-File -Path "$env:USERPROFILE\Downloads\OllamaSetup.exe"
+                              </pre>
+                            </li>
+                          </ul>
+                        </li>
+                        <li>
+                          <strong>Opção C (Desativar Smart App Control):</strong> Se o Windows ainda bloquear por reputação da nuvem, desative o Smart App Control:
+                          <ol className="list-decimal pl-4 mt-1 space-y-1">
+                            <li>Abra o menu <strong>Iniciar</strong> e pesquise por <strong>"Segurança do Windows"</strong>.</li>
+                            <li>Vá em <strong>Controle de aplicativos e do navegador</strong>.</li>
+                            <li>Clique em <strong>Configurações do Smart App Control</strong>.</li>
+                            <li>Altere de <em>Ligado</em> (ou <em>Avaliação</em>) para <strong>Desligado</strong>.</li>
+                          </ol>
+                          <span className="text-[10px] text-muted-foreground block mt-1">
+                            <em>Nota: O próprio Windows avisa que, ao desativar permanentemente, não é possível reativá-lo sem reinstalar o Windows, mas desativá-lo é uma prática comum para desenvolvedores que precisam rodar ferramentas de terceiros locais como o Ollama.</em>
+                          </span>
+                        </li>
+                        <li>
+                          <strong>Opção D (WSL - Linux no Windows):</strong> Se você tem o WSL instalado, execute o Ollama em ambiente Linux:
+                          <pre className="bg-muted px-3 py-1.5 rounded-lg border border-border font-mono text-[10px] mt-1 select-all overflow-x-auto text-foreground">
+                            curl -fsSL https://ollama.com/install.sh | sh
+                          </pre>
+                        </li>
+                        <li>
+                          <strong>Opção E (SmartScreen clássico):</strong> Se for apenas a tela azul do SmartScreen comum, clique em <strong>"Mais informações"</strong> e depois no botão <strong>"Executar assim mesmo"</strong>.
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. BAIXAR MODELO */}
+                <div className="p-4 bg-muted/10 border border-border rounded-xl space-y-2">
+                  <span className="text-xs font-bold text-foreground block">🤖 Passo 2: Baixar o Modelo de Linguagem</span>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    <strong>Importante:</strong> Após concluir a instalação do passo anterior, <strong>feche todas as janelas de terminal abertas e abra-as novamente</strong> para recarregar as variáveis de ambiente. Caso o comando continue não sendo reconhecido, reinicie o computador, abra o terminal e tente novamente.
+                    <br />
+                    Execute o comando abaixo para baixar e iniciar o modelo padrão recomendado (altamente compatível e estável para traduções e análise gramatical):
+                  </p>
+                  <pre className="bg-muted px-3 py-2 rounded-lg border border-border font-mono text-[11px] select-all overflow-x-auto text-foreground">
+                    ollama run llama3.2
+                  </pre>
+                  <p className="text-[10px] text-muted-foreground italic leading-relaxed">
+                    Nota: O download do modelo `llama3.2` tem cerca de 2.0 GB. Quando a instalação terminar no terminal e você ver o prompt de chat, digite <code className="bg-muted px-1 rounded text-red-500 font-mono">/exit</code> e aperte Enter para fechar.
+                  </p>
+                  <div className="bg-muted/40 border border-border rounded-xl p-3 text-[11px] leading-relaxed mt-2 space-y-1">
+                    <span className="font-bold block text-foreground">💡 Dica para Recursos Visuais (Opcional):</span>
+                    Se você deseja que o Ollama consiga processar imagens/legendas tiradas da câmera e fazer OCR local, você pode usar um modelo de visão:
+                    <ul className="list-disc pl-4 mt-1 space-y-1">
+                      <li>
+                        <strong>Gemma 3 (Recomendado):</strong> O modelo <code className="bg-muted px-1 rounded font-mono">gemma3</code> (4B, ~2.3 GB) possui excelente suporte a visão e carrega perfeitamente na maioria das GPUs (inclusive CUDA v12) e CPUs. Baixe e teste com uma imagem rodando: <code className="bg-muted px-1 rounded font-mono">ollama run gemma3 ./imagem.png "o que está escrito nesta imagem?"</code>.
+                      </li>
+                      <li>
+                        <strong>Llama 3.2 Vision:</strong> O modelo <code className="bg-muted px-1 rounded font-mono">llama3.2-vision</code> (~2.9 GB) também é de visão, mas exige suporte específico à arquitetura <code className="bg-muted px-1 rounded font-mono">mllama</code>.
+                      </li>
+                    </ul>
+                    <span className="text-[10px] text-muted-foreground block mt-1">
+                      <em>Atenção: Se receber o erro <strong>"unknown model architecture: mllama"</strong> ao carregar o Llama 3.2 Vision devido à arquitetura de sua GPU/driver, utilize o <strong>gemma3</strong> no seletor, pois ele é 100% compatível e livre deste erro.</em>
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3. CORS CONFIG */}
+                <div className="p-4 bg-muted/10 border border-border rounded-xl space-y-2.5">
+                  <span className="text-xs font-bold text-foreground block flex items-center gap-1.5 text-amber-600 dark:text-amber-500">
+                    <AlertTriangle size={14} className="flex-shrink-0" /> Passo 3: Configurar o CORS (Obrigatório para Navegadores)
+                  </span>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Como o Memorize é executado diretamente no seu navegador de internet, a segurança padrão impede conexões a servidores locais (como a porta padrão do Ollama) sem cabeçalhos CORS liberados.
+                  </p>
+                  <p className="text-xs text-muted-foreground leading-relaxed font-bold">
+                    Importante: Feche o aplicativo do Ollama na barra de tarefas (clique com o botão direito no ícone do Ollama e clique em "Quit Ollama"). Depois, inicie com o comando CORS:
+                  </p>
+                  <div className="space-y-3 font-mono text-[10px] mt-2">
+                    <div>
+                      <span className="text-[10px] font-sans font-bold text-muted-foreground">PowerShell (Windows):</span>
+                      <pre className="bg-muted px-2.5 py-1.5 rounded-lg border border-border overflow-x-auto mt-1 select-all text-foreground">
+                        $env:OLLAMA_ORIGINS="*" ; ollama serve
+                      </pre>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-sans font-bold text-muted-foreground">Terminal (macOS):</span>
+                      <pre className="bg-muted px-2.5 py-1.5 rounded-lg border border-border overflow-x-auto mt-1 select-all text-foreground">
+                        OLLAMA_ORIGINS="*" open -a Ollama
+                      </pre>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-sans font-bold text-muted-foreground">Terminal (Linux / systemd):</span>
+                      <p className="font-sans text-[11px] text-muted-foreground leading-relaxed mb-1">
+                        Se você usa o systemd do Linux, execute <code className="bg-muted px-1 rounded font-mono">sudo systemctl edit ollama</code> e adicione:
+                      </p>
+                      <pre className="bg-muted px-2.5 py-1.5 rounded-lg border border-border overflow-x-auto mt-1 text-foreground">
+                        [Service]
+                        Environment="OLLAMA_ORIGINS=*"
+                      </pre>
+                      <p className="font-sans text-[11px] text-muted-foreground leading-relaxed mt-1">
+                        Salve o arquivo e depois execute: <code className="bg-muted px-1 rounded font-mono">sudo systemctl daemon-reload && sudo systemctl restart ollama</code>.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4. CONECTAR */}
+                <div className="p-4 bg-muted/10 border border-border rounded-xl space-y-2">
+                  <span className="text-xs font-bold text-foreground block">⚙️ Passo 4: Ativar no Memorize</span>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Vá em **Configurações (⚙️)** do Memorize, na seção **Integração com Inteligência Artificial**, escolha o provedor como **Ollama (Local / Grátis)**, verifique o modelo (`llama3.2`) e clique em **Testar Conexão**. Conexão configurada!
                   </p>
                 </div>
               </div>

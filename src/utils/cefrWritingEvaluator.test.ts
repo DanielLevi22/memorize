@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { buildGeminiWritingPrompt, evaluateWritingWithGemini } from './cefrWritingEvaluator';
+import type { AIService } from '../services/ai/types';
 
 describe('cefrWritingEvaluator: Avaliador de Redação Gemini', () => {
   beforeEach(() => {
@@ -15,82 +16,49 @@ describe('cefrWritingEvaluator: Avaliador de Redação Gemini', () => {
     expect(prompt).toContain('JSON');
   });
 
-  it('deve processar resposta de sucesso do Gemini e extrair nota e feedback', async () => {
-    const mockResponse = {
-      candidates: [
-        {
-          content: {
-            parts: [
-              {
-                text: '```json\n{"score": 85, "feedback": "Excelente escrita e coesão."}\n```'
-              }
-            ]
-          }
-        }
-      ]
+  it('deve processar resposta de sucesso da IA e extrair nota e feedback', async () => {
+    const mockService: AIService = {
+      generateContent: vi.fn().mockResolvedValue('{"score": 85, "feedback": "Excelente escrita e coesão."}')
     };
-
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
-      return {
-        ok: true,
-        json: async () => mockResponse
-      } as Response;
-    });
 
     const result = await evaluateWritingWithGemini(
       'B2',
       'Write about sports',
       'I love soccer',
-      'test-api-key'
+      mockService
     );
 
     expect(result.score).toBe(85);
     expect(result.feedback).toBe('Excelente escrita e coesão.');
-    expect(fetchSpy).toHaveBeenCalledWith(
-      expect.stringContaining('test-api-key'),
+    expect(mockService.generateContent).toHaveBeenCalledWith(
       expect.objectContaining({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            content: expect.stringContaining('I love soccer')
+          })
+        ]),
+        responseMimeType: 'application/json'
       })
     );
   });
 
-  it('deve disparar erro se a chamada de rede falhar', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
-      return {
-        ok: false
-      } as Response;
-    });
+  it('deve disparar erro se a chamada do serviço falhar', async () => {
+    const mockService: AIService = {
+      generateContent: vi.fn().mockRejectedValue(new Error('Erro do serviço de IA'))
+    };
 
     await expect(
-      evaluateWritingWithGemini('B2', 'Write', 'Text', 'key')
-    ).rejects.toThrow('Falha na chamada de API do Gemini');
+      evaluateWritingWithGemini('B2', 'Write', 'Text', mockService)
+    ).rejects.toThrow('Erro do serviço de IA');
   });
 
   it('deve disparar erro se a estrutura JSON retornada for inválida ou incompleta', async () => {
-    const mockInvalidResponse = {
-      candidates: [
-        {
-          content: {
-            parts: [
-              {
-                text: '{"nota_invalida": 90}' // Falta o campo score e feedback
-              }
-            ]
-          }
-        }
-      ]
+    const mockService: AIService = {
+      generateContent: vi.fn().mockResolvedValue('{"nota_invalida": 90}')
     };
 
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
-      return {
-        ok: true,
-        json: async () => mockInvalidResponse
-      } as Response;
-    });
-
     await expect(
-      evaluateWritingWithGemini('B2', 'Write', 'Text', 'key')
+      evaluateWritingWithGemini('B2', 'Write', 'Text', mockService)
     ).rejects.toThrow('Formato de resposta JSON do Gemini inválido');
   });
 });

@@ -1,4 +1,5 @@
 import type { ReadingLine } from '../types';
+import type { AIService } from '../services/ai/types';
 
 /**
  * Extrai texto de um arquivo PDF usando pdf.js (pdfjs-dist).
@@ -30,14 +31,14 @@ export async function extractTextFromPdf(file: File): Promise<string> {
 }
 
 /**
- * Processa texto com Gemini AI:
+ * Processa texto com IA:
  * - Segmenta em frases
  * - Traduz cada frase
  * - Identifica palavras-chave para highlight
  */
 export async function processTextWithAI(
   originalText: string,
-  apiKey: string
+  aiService: AIService
 ): Promise<{ title: string; translatedText: string; lines: ReadingLine[] }> {
   const promptText = `
 Você é um especialista em ensino de idiomas. Receba o texto fornecido (que pode ser a extração de um PDF contendo texto bilíngue com frases no idioma original e suas respectivas traduções logo abaixo, ou apenas o texto simples no idioma original).
@@ -61,66 +62,35 @@ TEXTO:
 ${originalText}
 `;
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: promptText }] }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: {
+  const textResponse = await aiService.generateContent({
+    messages: [{ role: 'user', content: promptText }],
+    responseMimeType: 'application/json',
+    responseSchema: {
+      type: 'OBJECT',
+      properties: {
+        title: { type: 'STRING', description: 'Título curto e descritivo do texto' },
+        lines: {
+          type: 'ARRAY',
+          items: {
             type: 'OBJECT',
             properties: {
-              title: { type: 'STRING', description: 'Título curto e descritivo do texto' },
-              lines: {
+              original: { type: 'STRING', description: 'A frase no idioma original de estudo (ex: em inglês, sem tradução).' },
+              translated: { type: 'STRING', description: 'A tradução da frase original para português do Brasil.' },
+              highlights: {
                 type: 'ARRAY',
-                items: {
-                  type: 'OBJECT',
-                  properties: {
-                    original: { type: 'STRING', description: 'A frase no idioma original de estudo (ex: em inglês, sem tradução).' },
-                    translated: { type: 'STRING', description: 'A tradução da frase original para português do Brasil.' },
-                    highlights: {
-                      type: 'ARRAY',
-                      items: { type: 'STRING' },
-                      description: '2-4 palavras-chave do original (no idioma original)',
-                    },
-                  },
-                  required: ['original', 'translated', 'highlights'],
-                },
+                items: { type: 'STRING' },
+                description: '2-4 palavras-chave do original (no idioma original)',
               },
             },
-            required: ['title', 'lines'],
+            required: ['original', 'translated', 'highlights'],
           },
         },
-      }),
+      },
+      required: ['title', 'lines'],
     }
-  );
+  });
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    const message = errorData.error?.message || `Erro da API (código ${response.status})`;
-    const isQuotaExceeded = response.status === 429 || (message && /quota|limit|exhausted/i.test(message));
-    const isHighDemand = response.status === 503 || (message && /high demand|try again later/i.test(message));
-    
-    if (isQuotaExceeded) {
-      throw new Error('Seu limite diário foi atingido');
-    } else if (isHighDemand) {
-      throw new Error('Este modelo está enfrentando alta demanda no momento. Picos de demanda geralmente são temporários. Por favor, tente novamente mais tarde.');
-    } else if (response.status === 400 || response.status === 403) {
-      throw new Error('Chave de API inválida ou sem permissão. Verifique sua chave nas configurações.');
-    }
-    throw new Error(message);
-  }
-
-  const result = await response.json();
-  const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    throw new Error('A IA respondeu, mas não retornou um conteúdo estruturado válido.');
-  }
-
-  const parsed = parseAIResponse(text);
+  const parsed = parseAIResponse(textResponse);
   return parsed;
 }
 

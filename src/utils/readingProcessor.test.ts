@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { segmentTextManually, parseAIResponse } from './readingProcessor';
+import { describe, it, expect, vi } from 'vitest';
+import { segmentTextManually, parseAIResponse, processTextWithAI } from './readingProcessor';
+import type { AIService } from '../services/ai/types';
 
 // ═════════════════════════════════════════════════════════════════════
 // segmentTextManually
@@ -162,5 +163,42 @@ describe('parseAIResponse', () => {
     });
     const result = parseAIResponse(json);
     expect(result.lines[0].highlights).toEqual(['valid', 'also valid']);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════
+// processTextWithAI
+// ═════════════════════════════════════════════════════════════════════
+
+describe('processTextWithAI', () => {
+  it('deve chamar o serviço de IA e processar a resposta corretamente', async () => {
+    const mockJson = JSON.stringify({
+      title: 'Decoded Title',
+      lines: [
+        { original: 'This is line 1.', translated: 'Esta é a linha 1.', highlights: ['line'] }
+      ]
+    });
+
+    const mockService: AIService = {
+      generateContent: vi.fn().mockResolvedValue(mockJson)
+    };
+
+    const result = await processTextWithAI('This is line 1.', mockService);
+
+    expect(result.title).toBe('Decoded Title');
+    expect(result.lines).toHaveLength(1);
+    expect(result.lines[0].original).toBe('This is line 1.');
+    expect(result.lines[0].translated).toBe('Esta é a linha 1.');
+    expect(result.lines[0].highlights).toEqual(['line']);
+    expect(mockService.generateContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            content: expect.stringContaining('This is line 1.')
+          })
+        ]),
+        responseMimeType: 'application/json'
+      })
+    );
   });
 });

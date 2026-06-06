@@ -1,3 +1,5 @@
+import type { AIService } from '../services/ai/types';
+
 // Dictionary of representative English words classified by CEFR levels
 export const cefrDict: Record<string, 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2'> = {
   // A1 (Basic I)
@@ -139,13 +141,13 @@ export const classifyLocal = (text: string): 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 
   return highestLevelIdx === -1 ? null : (levels[highestLevelIdx] as any);
 };
 
-// Classifies a batch of words using the Gemini API.
+// Classifies a batch of words using the AI Service.
 // Retries/returns a dictionary map of word -> level.
 export const classifyWithGemini = async (
   words: string[],
-  apiKey: string
+  aiService: AIService
 ): Promise<Record<string, 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | 'C2'>> => {
-  if (!apiKey.trim() || words.length === 0) return {};
+  if (words.length === 0) return {};
 
   const prompt = `Classifique cada uma das seguintes palavras/frases em inglês em um dos níveis de proficiência do CEFR (A1, A2, B1, B2, C1, C2). 
 Retorne APENAS um objeto JSON puro mapeando a palavra/frase em minúsculas para o nível correspondente, sem explicações, comentários ou marcações adicionais.
@@ -159,24 +161,11 @@ Palavras/Frases a classificar:
 ${JSON.stringify(words)}`;
 
   try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: "application/json" }
-        })
-      }
-    );
+    const textResponse = await aiService.generateContent({
+      messages: [{ role: 'user', content: prompt }],
+      responseMimeType: 'application/json'
+    });
 
-    if (!res.ok) {
-      throw new Error(`API returned status ${res.status}`);
-    }
-
-    const data = await res.json();
-    const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
     const classificationMap = JSON.parse(textResponse.trim());
 
     // Validate that the mapping contains valid CEFR levels
@@ -192,7 +181,7 @@ ${JSON.stringify(words)}`;
 
     return result;
   } catch (err) {
-    console.error("Gemini classification failed:", err);
+    console.error("AI classification failed:", err);
     return {};
   }
 };

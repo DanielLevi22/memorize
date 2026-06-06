@@ -53,6 +53,7 @@ import { GlobalSearch } from './components/GlobalSearch';
 import { AiGeneratorModal } from './components/AiGeneratorModal';
 import { PomodoroWidget } from './components/PomodoroWidget';
 import { getTagColors } from './utils/tagColors';
+import { AIProvider, useAI } from './services/ai/AIContext';
 
 // Utilitários
 import { setupNotifications, requestNotificationPermission, getNotificationPermission, clearAppBadge, triggerLocalNotification } from './utils/notifications';
@@ -81,7 +82,7 @@ const stripHtmlTags = (str: string) => {
 
 const DRIVE_CLIENT_ID = '754580033922-j6fhjnrhe8gr1c0olic52tkcjp12j70s.apps.googleusercontent.com';
 
-function App() {
+function MainApp() {
   // --- ESTADO DE TEMA (CLARO/ESCURO) ---
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('memorize_theme');
@@ -104,13 +105,13 @@ function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke' | 'mining'>('dashboard');
   const [activeKaraokeTrackId, setActiveKaraokeTrackId] = useState<string | null>(null);
   const [isKaraokeFullscreen, setIsKaraokeFullscreen] = useState(false);
-  const [guideInitialTab, setGuideInitialTab] = useState<'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math'>('overview');
+  const [guideInitialTab, setGuideInitialTab] = useState<'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math' | 'ollama_setup'>('overview');
   const [searchTerm, setSearchTerm] = useState('');
   const [isPomodoroOpen, setIsPomodoroOpen] = useState(false);
 
   const handleSetActiveTab = (
     tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke',
-    subTab?: 'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math'
+    subTab?: 'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math' | 'ollama_setup'
   ) => {
     setActiveTab(tab);
     if (tab === 'guide') {
@@ -173,21 +174,9 @@ function App() {
     localStorage.setItem('memorize_auto_play_audio', autoPlayAudio.toString());
   }, [autoPlayAudio]);
 
-  // --- ESTADO API GEMINI ---
-  const [geminiApiKey, setGeminiApiKey] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('memorize_gemini_api_key') || '';
-    }
-    return '';
-  });
-
-
-
+  // --- ESTADO API IA (UNIFICADO) ---
+  const { geminiApiKey, setGeminiApiKey, aiService, aiProvider } = useAI();
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
-
-  useEffect(() => {
-    localStorage.setItem('memorize_gemini_api_key', geminiApiKey);
-  }, [geminiApiKey]);
 
 
   // --- CONFIGURAÇÃO DE META DIÁRIA ---
@@ -629,16 +618,16 @@ function App() {
   ) => {
     // Helper function to classify and save card level asynchronously in the background
     const classifyCardAsync = async (card: Card) => {
-      const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
-      if (geminiApiKey.trim()) {
+      const hasAI = aiProvider === 'ollama' || geminiApiKey.trim().length > 0;
+      if (hasAI) {
         try {
-          const resolvedMap = await classifyWithGemini([card.front.toLowerCase()], geminiApiKey);
+          const resolvedMap = await classifyWithGemini([card.front.toLowerCase()], aiService);
           const resolvedLvl = resolvedMap[card.front.toLowerCase()];
           if (resolvedLvl) {
             await db.cards.update(card.id, { cefrLevel: resolvedLvl });
           }
         } catch (err) {
-          console.error("Async Gemini classification failed:", err);
+          console.error("Async AI classification failed:", err);
         }
       }
     };
@@ -2149,6 +2138,7 @@ function App() {
                 presets={presets}
                 onSavePreset={handleSavePreset}
                 onDeletePreset={handleDeletePreset}
+                onNavigateTab={handleSetActiveTab}
                 
                 // Google Drive Sync props
                 driveClientId={DRIVE_CLIENT_ID}
@@ -2678,6 +2668,14 @@ function App() {
         }}
       />
     </div>
+  );
+}
+
+function App() {
+  return (
+    <AIProvider>
+      <MainApp />
+    </AIProvider>
   );
 }
 
