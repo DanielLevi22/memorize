@@ -1234,7 +1234,7 @@ export function MiningInboxPage({
                           <div className="absolute inset-0 rounded-full border-2 border-amber-500/10 border-t-amber-500 animate-spin" />
                           <Bot size={14} className="text-amber-500 animate-pulse" />
                         </div>
-                        <span className="text-[10px] font-bold text-zinc-400">Gemini processando...</span>
+                        <span className="text-[10px] font-bold text-zinc-400">{aiProvider === 'ollama' ? 'Ollama' : 'Gemini'} processando...</span>
                       </div>
                     )}
 
