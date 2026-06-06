@@ -1452,6 +1452,24 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                     </pre>
                   </div>
                 </div>
+                
+                <div className="mt-3 border-t border-amber-500/15 pt-2.5">
+                  <span className="font-bold block mb-1 text-[10px] uppercase tracking-wider text-amber-700 dark:text-amber-500">
+                    ⚙️ Configuração Permanente no Windows (GUI - Recomendado):
+                  </span>
+                  <ol className="list-decimal pl-4 space-y-1 text-[11px] font-sans">
+                    <li>Pesquise por <strong>"Variáveis de Ambiente"</strong> no menu iniciar do Windows e abra.</li>
+                    <li>Clique em <strong>"Variáveis de Ambiente..."</strong>.</li>
+                    <li>Sob <strong>"Variáveis do usuário"</strong> (parte superior), clique em <strong>"Nova..."</strong>.</li>
+                    <li>Nome: <code className="bg-muted px-1.5 py-0.5 rounded font-mono font-bold text-foreground">OLLAMA_ORIGINS</code></li>
+                    <li>Valor: <code className="bg-muted px-1.5 py-0.5 rounded font-mono font-bold text-foreground">https://memorize-three.vercel.app,*</code></li>
+                    <li>Clique em <strong>OK</strong> em tudo. Para aplicar, reinicie o serviço com:
+                      <code className="bg-muted px-1 py-0.5 rounded font-mono font-bold text-foreground block mt-1 select-all text-[9px]">
+                        stop-service -name "ollama" -force ; restart-service -name "ollama" -force
+                      </code>
+                    </li>
+                  </ol>
+                </div>
               </div>
 
               {/* Link para o Guia Completo */}

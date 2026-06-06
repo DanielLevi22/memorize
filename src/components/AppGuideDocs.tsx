@@ -678,6 +678,24 @@ export const AppGuideDocs: React.FC<AppGuideDocsProps> = ({ initialTab = 'overvi
                       </p>
                     </div>
                   </div>
+
+                  <div className="mt-4 border-t border-border/40 pt-3">
+                    <span className="text-[10px] font-bold text-foreground block mb-1.5 uppercase tracking-wider">
+                      ⚙️ Alternativa: Configuração Permanente no Windows (Recomendado)
+                    </span>
+                    <ol className="list-decimal pl-4 space-y-1.5 text-xs text-muted-foreground leading-relaxed font-sans">
+                      <li>Abra o menu iniciar e digite <strong>"Variáveis de Ambiente"</strong>. Clique em <strong>"Editar as variáveis de ambiente do sistema"</strong>.</li>
+                      <li>Na aba <strong>Avançado</strong>, clique no botão <strong>"Variáveis de Ambiente..."</strong> (no rodapé).</li>
+                      <li>Na área superior (Variáveis do usuário), clique em <strong>"Nova..."</strong>.</li>
+                      <li>Defina o Nome como <code className="bg-muted px-1.5 py-0.5 rounded font-mono font-bold text-foreground">OLLAMA_ORIGINS</code> e o Valor como <code className="bg-muted px-1.5 py-0.5 rounded font-mono font-bold text-foreground">https://memorize-three.vercel.app,*</code>.</li>
+                      <li>Clique em <strong>OK</strong> em todas as janelas para fechar e aplicar.</li>
+                      <li>Reinicie o serviço do Ollama abrindo o PowerShell como Administrador e rodando:
+                        <pre className="bg-muted px-2.5 py-1.5 rounded-lg border border-border overflow-x-auto mt-1.5 text-foreground font-mono text-[9px] select-all">
+                          stop-service -name "ollama" -force ; restart-service -name "ollama" -force
+                        </pre>
+                      </li>
+                    </ol>
+                  </div>
                 </div>
 
                 {/* 4. CONECTAR */}
