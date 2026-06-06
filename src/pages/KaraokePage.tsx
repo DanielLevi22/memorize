@@ -16,6 +16,7 @@ import { getWordLevenshteinDistance, diffWords, type DiffWord, getLevenshteinDis
 import { separateVocalsCloud } from '../utils/vocalSeparationCloud';
 import { decodeAudioFile, adjustTimestampsSafeguard, bufferToMono16kWav } from '../utils/audioChunker';
 import { translateWithMyMemory } from '../utils/readingProcessor';
+import { useAI } from '../services/ai/AIContext';
 
 const cleanString = (str: string) => {
   if (!str) return '';
@@ -50,6 +51,8 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   isFullscreenMode = false,
   setIsFullscreenMode = () => {}
 }) => {
+  const { aiService, aiProvider } = useAI();
+
   // DB States
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [playlistCoverUrls, setPlaylistCoverUrls] = useState<Record<string, string>>({});
@@ -1898,7 +1901,7 @@ Não adicione markdown fora do bloco JSON.
     });
   };
 
-  const requestGeminiTranslationOnly = async (lines: TranscriptionLine[], apiKey: string): Promise<string[]> => {
+  const requestAiTranslationOnly = async (lines: TranscriptionLine[]): Promise<string[]> => {
     if (lines.length === 0) return [];
     
     const promptText = `
@@ -1919,38 +1922,14 @@ JSON de entrada:
 ${JSON.stringify({ texts: lines.map(l => l.text) })}
 `;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-    const response = await fetchWithRetry(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{ text: promptText }]
-        }],
-        generationConfig: {
-          responseMimeType: 'application/json'
-        }
-      })
-    }, 'Gemini Tradutor');
+    const textResponse = await aiService.generateContent({
+      systemPrompt: "Você é um tradutor pedagógico de altíssima precisão.",
+      messages: [{ role: 'user', content: promptText }],
+      responseMimeType: 'application/json'
+    });
 
-    if (!response.ok) {
-      let errMsg = `Erro na tradução do Gemini: status ${response.status}`;
-      try {
-        const errJson = await response.json();
-        if (errJson.error?.message) {
-          errMsg += `: ${errJson.error.message}`;
-        }
-      } catch (e) {}
-      throw new Error(errMsg);
-    }
-
-    const data = await response.json();
-    const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!textResponse) {
-      throw new Error('Tradução vazia da API do Gemini.');
-    }
-
-    const parsed = JSON.parse(textResponse);
+    const cleanJson = textResponse.replace(/```json/gi, '').replace(/```/gi, '').trim();
+    const parsed = JSON.parse(cleanJson);
     return parsed.translations || [];
   };
 
@@ -1966,7 +1945,7 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
       }));
     }
 
-    console.warn(`[GeminiAlign] Tamanho diferente: originais=${original.length}, corrigidos=${corrected.length}. Executando alinhamento inteligente...`);
+    console.warn(`[AiAlign] Tamanho diferente: originais=${original.length}, corrigidos=${corrected.length}. Executando alinhamento inteligente...`);
 
     return original.map((line, idx) => {
       const origText = line.text.trim();
@@ -2004,10 +1983,9 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
     });
   };
 
-  const requestGeminiOriginalAlignmentAndTranslation = async (
+  const requestAiOriginalAlignmentAndTranslation = async (
     lines: TranscriptionLine[],
-    officialLyrics: string,
-    apiKey: string
+    officialLyrics: string
   ): Promise<{ alignedLyrics: string[], translations: string[] }> => {
     if (lines.length === 0) return { alignedLyrics: [], translations: [] };
 
@@ -2047,46 +2025,30 @@ JSON de entrada:
 ${JSON.stringify({ texts: lines.map(l => l.text) })}
 `;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-    const response = await fetchWithRetry(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{ text: promptText }]
-        }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          temperature: 0.0,
-          responseSchema: {
-            type: 'OBJECT',
-            properties: {
-              aligned_original_lyrics: {
-                type: 'ARRAY',
-                items: { type: 'STRING' }
-              },
-              translations: {
-                type: 'ARRAY',
-                items: { type: 'STRING' }
-              }
-            },
-            required: ['aligned_original_lyrics', 'translations']
-          }
+    const responseSchema = {
+      type: 'OBJECT',
+      properties: {
+        aligned_original_lyrics: {
+          type: 'ARRAY',
+          items: { type: 'STRING' }
+        },
+        translations: {
+          type: 'ARRAY',
+          items: { type: 'STRING' }
         }
-      })
-    }, 'Gemini Alinhamento e Tradução');
+      },
+      required: ['aligned_original_lyrics', 'translations']
+    };
 
-    if (!response.ok) {
-      throw new Error(`Falha no processamento via Gemini: status ${response.status}`);
-    }
+    const textResponse = await aiService.generateContent({
+      systemPrompt: "Você é um especialista em transcrição, tradução e inteligência artificial de altíssima precisão para músicas.",
+      messages: [{ role: 'user', content: promptText }],
+      responseMimeType: 'application/json',
+      responseSchema
+    });
 
-    const data = await response.json();
-    const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!textResponse) {
-      throw new Error('Retorno vazio da API do Gemini.');
-    }
-
-    const parsed = JSON.parse(textResponse);
+    const cleanJson = textResponse.replace(/```json/gi, '').replace(/```/gi, '').trim();
+    const parsed = JSON.parse(cleanJson);
     return {
       alignedLyrics: parsed.aligned_original_lyrics || [],
       translations: parsed.translations || []
@@ -2098,20 +2060,22 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
       toast.error('Por favor, cole a letra original antes de alinhar!');
       return;
     }
-    const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
-    if (!geminiApiKey.trim()) {
-      toast.error('Configuração Requerida: Adicione sua Chave de API do Gemini nas Configurações.');
-      return;
+    if (aiProvider === 'gemini') {
+      const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
+      if (!geminiApiKey.trim()) {
+        toast.error('Configuração Requerida: Adicione sua Chave de API do Gemini nas Configurações.');
+        return;
+      }
     }
 
     // Fecha o modal de ajuste e abre o modal de processamento imediatamente
     setIsAdjustmentModalOpen(false);
     setIsTranscribingAi(true);
     setTranscribingPercent(50);
-    setTranscribingProgress('Alinhando e traduzindo letra com Gemini...');
+    setTranscribingProgress(`Alinhando e traduzindo letra com ${aiProvider === 'ollama' ? 'Ollama' : 'Gemini'}...`);
 
     try {
-      const result = await requestGeminiOriginalAlignmentAndTranslation(transcribedLinesTemp, pastedOriginalLyrics, geminiApiKey);
+      const result = await requestAiOriginalAlignmentAndTranslation(transcribedLinesTemp, pastedOriginalLyrics);
       
       const alignedLines = transcribedLinesTemp.map((line, idx) => ({
         ...line,
@@ -2122,10 +2086,10 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
       setTempLines(alignedLines);
       setTranscribedLinesTemp(alignedLines);
       setTranscriptionText(alignedLines.map(l => l.text).join('\n'));
-      toast.success('Letra alinhada e traduzida com IA com sucesso!');
+      toast.success(`Letra alinhada e traduzida com ${aiProvider === 'ollama' ? 'Ollama' : 'IA'} com sucesso!`);
     } catch (err: any) {
       console.error(err);
-      toast.error(err.message || 'Erro ao sincronizar letra com Gemini.');
+      toast.error(err.message || `Erro ao sincronizar letra com ${aiProvider === 'ollama' ? 'Ollama' : 'Gemini'}.`);
     } finally {
       setIsTranscribingAi(false);
       setTranscribingProgress('');
@@ -2152,19 +2116,19 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
       setTranscribingProgress('Traduzindo frases...');
       
       // Traduzir automaticamente as linhas alinhadas
-      const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
+      const hasAi = aiProvider === 'ollama' || (localStorage.getItem('memorize_gemini_api_key') || '').trim().length > 0;
       let translatedLines = [...alignedLines];
       
-      if (geminiApiKey.trim()) {
+      if (hasAi) {
         try {
-          const translations = await requestGeminiTranslationOnly(alignedLines, geminiApiKey);
+          const translations = await requestAiTranslationOnly(alignedLines);
           translatedLines = alignedLines.map((line, idx) => ({
             ...line,
             translation: translations[idx] || ''
           }));
-          toast.success('Letra alinhada e tradução com IA concluída!');
+          toast.success(`Letra alinhada e tradução com ${aiProvider === 'ollama' ? 'Ollama' : 'IA'} concluída!`);
         } catch (e) {
-          console.warn('Falha na tradução automática Gemini, tentando MyMemory...', e);
+          console.warn(`Falha na tradução automática com ${aiProvider === 'ollama' ? 'Ollama' : 'Gemini'}, tentando MyMemory...`, e);
           translatedLines = await translateLinesWithMyMemoryFallbackForProgress(alignedLines);
         }
       } else {
