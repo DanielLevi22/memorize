@@ -6,7 +6,8 @@ import {
   Camera, Mic, FileText, Check, Trash, RefreshCw, 
   Square, BookOpen, Sparkles, AlertCircle, 
   ChevronDown, PlusCircle, Bot, Tag,
-  X, FileSpreadsheet, Loader2, Eye, EyeOff
+  X, FileSpreadsheet, Loader2, Eye, EyeOff,
+  Upload
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { encryptData, decryptData } from '../utils/crypto';
@@ -107,6 +108,7 @@ export function MiningInboxPage({
 
   // References
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   // --- MIGRATION OF LEGACY MINING ITEMS ---
   useEffect(() => {
@@ -249,14 +251,23 @@ export function MiningInboxPage({
 
   // --- PHOTO CAPTURE HANDLER ---
   const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
     setIsCapturingLoading(true);
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const base64 = event.target?.result as string;
+    let processedCount = 0;
+    let failedCount = 0;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
       try {
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (event) => resolve(event.target?.result as string);
+          reader.onerror = (err) => reject(err);
+          reader.readAsDataURL(file);
+        });
+
         const compressed = await compressImage(base64);
         
         // Auto-save photo directly to the queue in pending state
@@ -269,15 +280,28 @@ export function MiningInboxPage({
           updatedAt: Date.now()
         };
         await miningDb.miningItems.add(newItem);
-        toast.success('Foto da legenda adicionada à fila! Processaremos depois.');
+        processedCount++;
       } catch (err) {
-        console.error('Image compression failed:', err);
-        toast.error('Erro ao processar imagem.');
-      } finally {
-        setIsCapturingLoading(false);
+        console.error('Image compression failed for file:', file.name, err);
+        failedCount++;
       }
-    };
-    reader.readAsDataURL(file);
+    }
+
+    setIsCapturingLoading(false);
+    
+    // Clear the input value so that the onChange fires even if the user selects the same files again
+    e.target.value = '';
+
+    if (processedCount > 0) {
+      if (processedCount === 1) {
+        toast.success('Foto da legenda adicionada à fila! Processaremos depois.');
+      } else {
+        toast.success(`${processedCount} fotos adicionadas à fila! Processaremos depois.`);
+      }
+    }
+    if (failedCount > 0) {
+      toast.error(`Falha ao processar ${failedCount} imagem(ns).`);
+    }
   };
 
   // --- AUDIO RECORDING HANDLERS ---
@@ -889,28 +913,69 @@ export function MiningInboxPage({
             
             {/* CAMERA / PHOTO MODE */}
             {activeCaptureMode === 'photo' && (
-              <div className="w-full flex flex-col items-center gap-3">
+              <div className="w-full max-w-xl flex flex-col sm:flex-row gap-4 items-stretch justify-center px-4">
+                {/* Upload Input - supports multiple images */}
                 <input
                   type="file"
                   accept="image/*"
+                  multiple
                   ref={fileInputRef}
+                  onChange={handlePhotoSelect}
+                  className="hidden"
+                  id="mining-upload-input"
+                />
+                
+                {/* Camera Input - opens camera directly on mobile */}
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  ref={cameraInputRef}
                   onChange={handlePhotoSelect}
                   className="hidden"
                   id="mining-camera-input"
                 />
+                
+                {/* Take Photo button (Camera) */}
+                <button
+                  onClick={() => cameraInputRef.current?.click()}
+                  disabled={isCapturingLoading}
+                  className="flex-1 flex flex-col items-center justify-center gap-3.5 py-6 px-4 border border-dashed border-zinc-800 hover:border-violet-500/40 rounded-2xl cursor-pointer bg-zinc-950/20 hover:bg-zinc-950/45 transition-all duration-300 group min-w-[200px]"
+                >
+                  {isCapturingLoading ? (
+                    <Loader2 className="animate-spin text-violet-500" size={28} />
+                  ) : (
+                    <Camera className="text-muted-foreground group-hover:text-violet-400 group-hover:scale-105 transition-all" size={28} />
+                  )}
+                  <div className="text-center">
+                    <span className="block text-xs font-extrabold text-zinc-300 group-hover:text-foreground transition-colors">
+                      Tirar Foto da Legenda
+                    </span>
+                    <span className="block text-[10px] text-zinc-500 mt-1">
+                      Abrir câmera no celular
+                    </span>
+                  </div>
+                </button>
+
+                {/* Upload Multiple Images button */}
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isCapturingLoading}
-                  className="w-full max-w-sm flex flex-col items-center justify-center gap-4 py-8 px-4 border border-dashed border-zinc-800 hover:border-violet-500/40 rounded-2xl cursor-pointer bg-zinc-950/20 hover:bg-zinc-950/45 transition-all duration-300 group"
+                  className="flex-1 flex flex-col items-center justify-center gap-3.5 py-6 px-4 border border-dashed border-zinc-800 hover:border-violet-500/40 rounded-2xl cursor-pointer bg-zinc-950/20 hover:bg-zinc-950/45 transition-all duration-300 group min-w-[200px]"
                 >
                   {isCapturingLoading ? (
-                    <RefreshCw className="animate-spin text-violet-500" size={32} />
+                    <Loader2 className="animate-spin text-violet-500" size={28} />
                   ) : (
-                    <Camera className="text-muted-foreground group-hover:text-violet-400 group-hover:scale-105 transition-all" size={32} />
+                    <Upload className="text-muted-foreground group-hover:text-violet-400 group-hover:scale-105 transition-all" size={28} />
                   )}
-                  <span className="text-xs font-extrabold text-muted-foreground group-hover:text-foreground transition-colors text-center">
-                    {isCapturingLoading ? 'Processando imagem...' : 'Tirar Foto ou Upload de Imagem'}
-                  </span>
+                  <div className="text-center">
+                    <span className="block text-xs font-extrabold text-zinc-300 group-hover:text-foreground transition-colors">
+                      Upload de Imagens
+                    </span>
+                    <span className="block text-[10px] text-zinc-500 mt-1">
+                      Selecione várias da galeria
+                    </span>
+                  </div>
                 </button>
               </div>
             )}
