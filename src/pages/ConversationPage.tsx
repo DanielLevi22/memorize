@@ -26,7 +26,8 @@ const CHAT_PARTNERS: ChatPartner[] = [
     avatar: '👩‍🏫',
     description: 'Conversa de forma calma, didática e traz dicas úteis de correção gramatical em português.',
     systemPrompt: 'You are Alice, a highly supportive, friendly English teacher. Your goal is to converse with the student in simple English. Keep your responses short (1-2 sentences) and end with a friendly question. Crucial rule: You must also output a JSON property "grammarCorrection" containing a short, helpful explanation in Portuguese if the student made a grammar mistake in their message, otherwise return null. Do not mention that you are an AI, keep the teacher persona.',
-    initialMessage: "Hello! I'm Alice, your English teacher. I'm so excited to chat with you today! How has your day been so far?"
+    initialMessage: "Hello! I'm Alice, your English teacher. I'm so excited to chat with you today! How has your day been so far?",
+    gender: 'female'
   },
   {
     id: 'partner-john',
@@ -35,7 +36,8 @@ const CHAT_PARTNERS: ChatPartner[] = [
     avatar: '✈️',
     description: 'Adora falar sobre viagens, países, hobbies e aventuras do cotidiano com expressões casuais naturais.',
     systemPrompt: 'You are John, a relaxed, friendly travel blogger. Speak in casual, conversational English using natural slang and contractions (e.g. gonna, wanna). Keep responses short (1-2 sentences) and ask a follow-up question. Crucial rule: You must also output a JSON property "grammarCorrection" containing a short, helpful explanation in Portuguese if the student made a grammar mistake, otherwise return null. Do not mention that you are an AI, keep the traveler persona.',
-    initialMessage: "Hey there! I'm John. I just got back from a crazy road trip! What's up? Do you like traveling?"
+    initialMessage: "Hey there! I'm John. I just got back from a crazy road trip! What's up? Do you like traveling?",
+    gender: 'male'
   },
   {
     id: 'partner-david',
@@ -44,7 +46,8 @@ const CHAT_PARTNERS: ChatPartner[] = [
     avatar: '💼',
     description: 'Ideal para praticar entrevistas de emprego. Vocabulário profissional e perguntas sobre carreira.',
     systemPrompt: 'You are David, a professional corporate recruiter. Conduct a mock job interview. Ask typical interview question, maintain a formal and encouraging tone. Keep responses short (1-2 sentences) and ask the next interview question. Crucial rule: You must also output a JSON property "grammarCorrection" containing a short, helpful explanation in Portuguese if the student made a grammar mistake, otherwise return null. Do not mention that you are an AI, keep the recruiter persona.',
-    initialMessage: "Good day. I am David, and I will be conducting your mock interview today. To start, could you please introduce yourself and tell me a bit about your professional background?"
+    initialMessage: "Good day. I am David, and I will be conducting your mock interview today. To start, could you please introduce yourself and tell me a bit about your professional background?",
+    gender: 'male'
   }
 ];
 
@@ -145,8 +148,42 @@ export function ConversationPage({ geminiApiKey, ttsRate, ttsVoice }: Conversati
     utt.lang = 'en-US';
     utt.rate = ttsRate;
 
-    if (ttsVoice) {
-      const voices = window.speechSynthesis?.getVoices() ?? [];
+    const voices = window.speechSynthesis?.getVoices() ?? [];
+
+    if (selectedPartner) {
+      const englishVoices = voices.filter(v => v.lang.toLowerCase().startsWith('en'));
+      
+      // Keywords to guess the voice gender based on standard browser voice names
+      const maleKeywords = ['male', 'david', 'george', 'mark', 'richard', 'james', 'guy', 'peter', 'john', 'microsoft david', 'microsoft james', 'google us english male'];
+      const femaleKeywords = ['female', 'zira', 'susan', 'hazel', 'linda', 'catherine', 'mary', 'google us english female', 'microsoft zira'];
+      
+      const targetKeywords = selectedPartner.gender === 'female' ? femaleKeywords : maleKeywords;
+      const otherKeywords = selectedPartner.gender === 'female' ? maleKeywords : femaleKeywords;
+      
+      // 1. Try to find a voice that matches any target gender keyword
+      let matchedVoice = englishVoices.find(v => {
+        const nameLower = v.name.toLowerCase();
+        return targetKeywords.some(kw => nameLower.includes(kw));
+      });
+      
+      // 2. Fallback: find any English voice that does NOT contain the other gender's keywords
+      if (!matchedVoice) {
+        matchedVoice = englishVoices.find(v => {
+          const nameLower = v.name.toLowerCase();
+          return !otherKeywords.some(kw => nameLower.includes(kw));
+        });
+      }
+      
+      // 3. Fallback: use any English voice
+      if (!matchedVoice && englishVoices.length > 0) {
+        matchedVoice = englishVoices[0];
+      }
+      
+      if (matchedVoice) {
+        utt.voice = matchedVoice;
+        utt.lang = matchedVoice.lang;
+      }
+    } else if (ttsVoice) {
       const matched = voices.find((v) => v.name === ttsVoice);
       if (matched) {
         utt.voice = matched;

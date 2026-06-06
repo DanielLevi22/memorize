@@ -220,6 +220,7 @@ export interface ChatPartner {
   systemPrompt: string;
   avatar: string;               // Emoji
   initialMessage: string;
+  gender: 'male' | 'female';
 }
 
 /** Uma mensagem individual do chat de conversação */
