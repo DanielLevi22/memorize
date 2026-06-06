@@ -42,22 +42,32 @@ export async function processTextWithAI(
   providerType: 'gemini' | 'ollama' = 'gemini',
   onProgress?: (current: number, total: number) => void
 ): Promise<{ title: string; translatedText: string; lines: ReadingLine[] }> {
+  const { isBilingual, englishLines, translationMap } = extractBilingualMap(originalText);
   const linesOfText: string[] = [];
   
-  originalText.split('\n').forEach((line) => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
+  if (isBilingual) {
+    englishLines.forEach((line) => {
+      const trimmed = line.trim();
+      if (trimmed) {
+        linesOfText.push(trimmed);
+      }
+    });
+  } else {
+    originalText.split('\n').forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
 
-    // Segment lines by sentence boundaries (. ! ?) followed by whitespace and a capital letter/number/accented character,
-    // ignoring common abbreviations like Dr., Mr., vs., etc. and supporting optional enclosing quotes.
-    const sentences = trimmed
-      .replace(/(?<!\b(?:Dr|Mr|Ms|Mrs|Jr|Sr|vs|Prof|St|i\.e|e\.g))([.!?])(["'”’]?)\s+(?=["'“‘]?[A-Z0-9\u00C0-\u00FF])/gi, '$1$2|')
-      .split('|')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+      // Segment lines by sentence boundaries (. ! ?) followed by whitespace and a capital letter/number/accented character,
+      // ignoring common abbreviations like Dr., Mr., vs., etc. and supporting optional enclosing quotes.
+      const sentences = trimmed
+        .replace(/(?<!\b(?:Dr|Mr|Ms|Mrs|Jr|Sr|vs|Prof|St|i\.e|e\.g))([.!?])(["'”’]?)\s+(?=["'“‘]?[A-Z0-9\u00C0-\u00FF])/gi, '$1$2|')
+        .split('|')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
 
-    linesOfText.push(...sentences);
-  });
+      linesOfText.push(...sentences);
+    });
+  }
 
   if (linesOfText.length === 0) {
     return { title: 'Texto sem título', translatedText: '', lines: [] };
@@ -185,6 +195,23 @@ ${chunkText}
     allLines.push(...parsed.lines);
   }
 
+  // If bilingual, override the translations with our exact pre-aligned ones
+  if (isBilingual) {
+    const cleanKey = (str: string) => str.toLowerCase().replace(/[^a-z0-9\u00C0-\u00FF]/g, '');
+    const cleanMap = new Map<string, string>();
+    translationMap.forEach((val, key) => {
+      cleanMap.set(cleanKey(key), val);
+    });
+
+    allLines.forEach((line) => {
+      const k = cleanKey(line.original);
+      const matchedTranslation = cleanMap.get(k);
+      if (matchedTranslation) {
+        line.translated = matchedTranslation;
+      }
+    });
+  }
+
   const translatedText = allLines.map((l) => l.translated).join('\n');
   return { title: finalTitle, translatedText, lines: allLines };
 }
@@ -294,6 +321,17 @@ export function parseAIResponse(jsonString: string): {
                        : typeof line.translatedText === 'string' ? line.translatedText
                        : '';
 
+    // Cleanup if translation was merged into the original field by the AI
+    let cleanOriginal = original.trim();
+    const cleanTranslated = translated.trim();
+    if (cleanTranslated && cleanOriginal.toLowerCase().includes(cleanTranslated.toLowerCase())) {
+      const idx = cleanOriginal.toLowerCase().indexOf(cleanTranslated.toLowerCase());
+      if (idx > 0) {
+        cleanOriginal = cleanOriginal.substring(0, idx).trim();
+        cleanOriginal = cleanOriginal.replace(/[\s,\/;\\-]+$/, '').trim();
+      }
+    }
+
     // Highlights mapping
     let highlights: string[] = [];
     if (Array.isArray(line.highlights)) {
@@ -306,8 +344,8 @@ export function parseAIResponse(jsonString: string): {
 
     return {
       id: line.id || crypto.randomUUID(),
-      original,
-      translated,
+      original: cleanOriginal,
+      translated: cleanTranslated,
       highlights,
       mastered: false,
     };
@@ -422,5 +460,104 @@ export async function segmentAndTranslateWithFreeAPI(
   }
 
   return { title, lines };
+}
+
+/**
+ * Detecta se o texto original é composto por linhas bilíngues intercaladas (Inglês/Português)
+ * e retorna uma listagem apenas com as sentenças em inglês e o mapeamento de tradução correspondente.
+ */
+export function extractBilingualMap(originalText: string): {
+  isBilingual: boolean;
+  englishLines: string[];
+  translationMap: Map<string, string>;
+} {
+  const rawLines = originalText.split('\n').map(l => l.trim()).filter(Boolean);
+  if (rawLines.length < 2) {
+    return { isBilingual: false, englishLines: rawLines, translationMap: new Map() };
+  }
+
+  // Heurística simples de detecção de idioma baseada em palavras funcionais comuns
+  const detectLanguageSimple = (text: string): 'en' | 'pt' | 'unknown' => {
+    const words = text.toLowerCase().split(/\s+/);
+    
+    const enWords = new Set([
+      'the', 'and', 'of', 'to', 'a', 'in', 'is', 'that', 'was', 'he', 'for', 'it', 'with', 'his', 'as', 'on', 'you', 'i', 'they', 'at', 'be', 'this', 'have', 'from',
+      'soldier', 'called', 'lived', 'poor', 'coat', 'stupid', 'fox', 'sly', 'road', 'trip', 'travel', 'hobbies', 'job', 'interview', 'recruiter', 'teacher'
+    ]);
+    const ptWords = new Set([
+      'o', 'a', 'de', 'do', 'da', 'em', 'um', 'uma', 'que', 'se', 'com', 'não', 'é', 'para', 'os', 'as', 'seu', 'sua',
+      'soldado', 'chamado', 'vivia', 'velho', 'casaco', 'esperto', 'raposa', 'viagem', 'entrevista', 'recrutador', 'professor'
+    ]);
+    
+    let enCount = 0;
+    let ptCount = 0;
+    
+    words.forEach(w => {
+      const clean = w.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"'”’]/g, "");
+      if (enWords.has(clean)) enCount++;
+      if (ptWords.has(clean)) ptCount++;
+    });
+    
+    const ptChars = /[ãõçáéíóúâêô]/i;
+    if (ptChars.test(text)) {
+      ptCount += 2;
+    }
+    
+    if (enCount > ptCount) return 'en';
+    if (ptCount > enCount) return 'pt';
+    return 'unknown';
+  };
+
+  // Verifica se as linhas iniciais se alternam entre inglês e português
+  let alternatingMatches = 0;
+  let checkedCount = 0;
+  const sampleSize = Math.min(rawLines.length - 1, 10);
+  
+  for (let i = 0; i < sampleSize; i += 2) {
+    const langA = detectLanguageSimple(rawLines[i]);
+    const langB = detectLanguageSimple(rawLines[i+1]);
+    if (langA === 'en' && langB === 'pt') {
+      alternatingMatches++;
+    }
+    checkedCount++;
+  }
+
+  const isBilingual = checkedCount > 0 && (alternatingMatches / checkedCount) >= 0.5;
+
+  if (!isBilingual) {
+    return { isBilingual: false, englishLines: rawLines, translationMap: new Map() };
+  }
+
+  // Alinha as linhas de forma pareada
+  const englishLines: string[] = [];
+  const translationMap = new Map<string, string>();
+  const pairedIndexes = new Set<number>();
+
+  for (let i = 0; i < rawLines.length; i++) {
+    if (pairedIndexes.has(i)) continue;
+    
+    const line = rawLines[i];
+    const lang = detectLanguageSimple(line);
+    
+    if (lang === 'pt') {
+      // Linha solta em português (provavelmente sem correspondente em inglês), ignora do original
+      continue;
+    }
+    
+    const nextLine = rawLines[i + 1];
+    if (nextLine) {
+      const nextLang = detectLanguageSimple(nextLine);
+      if (nextLang === 'pt') {
+        englishLines.push(line);
+        translationMap.set(line, nextLine);
+        pairedIndexes.add(i + 1);
+        continue;
+      }
+    }
+    
+    englishLines.push(line);
+  }
+
+  return { isBilingual: true, englishLines, translationMap };
 }
 
