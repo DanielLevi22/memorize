@@ -51,6 +51,7 @@ export function MiningInboxPage({
   // Processing states
   const [isCapturingLoading, setIsCapturingLoading] = useState(false);
   const [processingItemIds, setProcessingItemIds] = useState<Record<string, boolean>>({});
+  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
 
   // Selection states
   const [selectedItemIds, setSelectedItemIds] = useState<Record<string, boolean>>({});
@@ -392,10 +393,10 @@ export function MiningInboxPage({
   };
 
   // --- IA PROCESSOR ---
-  const handleAnalyzeWithAI = async (item: MiningItem) => {
+  const handleAnalyzeWithAI = async (item: MiningItem, showToast = true): Promise<boolean> => {
     if (aiProvider === 'gemini' && !geminiApiKey.trim()) {
       toast.error('Chave de API do Gemini não configurada! Vá em Configurações para definir.');
-      return;
+      return false;
     }
 
     setProcessingItemIds(prev => ({ ...prev, [item.id]: true }));
@@ -455,10 +456,16 @@ export function MiningInboxPage({
       };
 
       await miningDb.miningItems.put(updatedItem);
-      toast.success('Análise de IA concluída com sucesso!');
+      if (showToast) {
+        toast.success('Análise de IA concluída com sucesso!');
+      }
+      return true;
     } catch (err: any) {
       console.error('AI Analysis Failed:', err);
-      toast.error('Falha ao analisar item com IA: ' + err.message);
+      if (showToast) {
+        toast.error('Falha ao analisar item com IA: ' + err.message);
+      }
+      return false;
     } finally {
       setProcessingItemIds(prev => ({ ...prev, [item.id]: false }));
     }
@@ -544,6 +551,22 @@ export function MiningInboxPage({
     setSelectedItemIds(nextSelection);
   };
 
+  const handleSelectUnprocessed = (items: MiningItem[]) => {
+    const unprocessedItems = items.filter(item => !item.translation && !processingItemIds[item.id]);
+    if (unprocessedItems.length === 0) {
+      toast.info('Não há itens não processados pendentes na fila.');
+      return;
+    }
+
+    const allSelected = unprocessedItems.every(item => selectedItemIds[item.id]);
+
+    const nextSelection: Record<string, boolean> = { ...selectedItemIds };
+    unprocessedItems.forEach(item => {
+      nextSelection[item.id] = !allSelected;
+    });
+    setSelectedItemIds(nextSelection);
+  };
+
   // Get selected count
   const selectedCount = pendingItems 
     ? Object.keys(selectedItemIds).filter(id => selectedItemIds[id] && pendingItems.some(i => i.id === id)).length
@@ -567,6 +590,41 @@ export function MiningInboxPage({
         toast.error('Erro ao descartar itens em lote.');
       }
     }
+  };
+
+  const handleBulkAnalyzeWithAI = async () => {
+    const selectedIds = Object.keys(selectedItemIds).filter(id => selectedItemIds[id]);
+    const itemsToProcess = pendingItems?.filter(item => 
+      selectedIds.includes(item.id) && !processingItemIds[item.id]
+    ) || [];
+
+    if (itemsToProcess.length === 0) {
+      toast.info('Nenhum item selecionado pendente de análise.');
+      return;
+    }
+
+    setIsBulkProcessing(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let i = 0; i < itemsToProcess.length; i++) {
+      const item = itemsToProcess[i];
+      try {
+        const success = await handleAnalyzeWithAI(item, false);
+        if (success) {
+          successCount++;
+        } else {
+          failCount++;
+        }
+      } catch (err) {
+        console.error(`Falha ao processar item ${item.id}:`, err);
+        failCount++;
+      }
+    }
+
+    setIsBulkProcessing(false);
+    setSelectedItemIds({});
+    toast.success(`Processamento em lote concluído! Sucessos: ${successCount}. Falhas: ${failCount}.`);
   };
 
   // --- OPEN EXPORT DIALOG ---
@@ -1045,7 +1103,7 @@ export function MiningInboxPage({
 
       {/* Floating Bulk actions dock (macOS / dynamic-island inspired bottom dock) */}
       {selectedCount > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-[92%] sm:w-auto sm:min-w-[580px] bg-zinc-950/85 backdrop-blur-2xl border border-violet-500/30 text-zinc-50 rounded-2xl px-5 py-4 shadow-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in slide-in-from-bottom-6 duration-300">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-[92%] sm:w-auto sm:min-w-[620px] bg-zinc-950/85 backdrop-blur-2xl border border-violet-500/30 text-zinc-50 rounded-2xl px-5 py-4 shadow-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in slide-in-from-bottom-6 duration-300">
           <div className="flex items-center gap-3">
             <span className="h-7 w-7 rounded-lg bg-violet-500/25 text-violet-400 border border-violet-500/40 flex items-center justify-center text-xs font-black">
               {selectedCount}
@@ -1055,20 +1113,40 @@ export function MiningInboxPage({
           <div className="flex flex-wrap items-center gap-2 justify-end">
             <button
               onClick={() => setSelectedItemIds({})}
-              className="px-3.5 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-muted-foreground hover:text-foreground border border-zinc-800 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              disabled={isBulkProcessing}
+              className="px-3.5 py-1.5 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 text-muted-foreground hover:text-foreground border border-zinc-800 rounded-xl text-xs font-bold transition-all cursor-pointer"
             >
               Limpar Seleção
             </button>
             <button
               onClick={handleBulkDiscard}
-              className="px-3.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md hover:scale-[1.01] transition-all cursor-pointer"
+              disabled={isBulkProcessing}
+              className="px-3.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 disabled:opacity-40 text-rose-400 border border-rose-500/20 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md hover:scale-[1.01] transition-all cursor-pointer"
             >
               <Trash size={12} />
               <span>Descartar</span>
             </button>
             <button
+              onClick={handleBulkAnalyzeWithAI}
+              disabled={isBulkProcessing}
+              className="px-3.5 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 disabled:bg-zinc-900 disabled:text-zinc-500 text-amber-400 border border-amber-500/20 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md hover:scale-[1.01] transition-all cursor-pointer"
+            >
+              {isBulkProcessing ? (
+                <>
+                  <Loader2 size={12} className="animate-spin" />
+                  <span>Analisando...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles size={12} className="fill-current" />
+                  <span>Analisar com IA</span>
+                </>
+              )}
+            </button>
+            <button
               onClick={handleOpenExportModal}
-              className="px-4.5 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-lg shadow-indigo-950/30 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer border-none"
+              disabled={isBulkProcessing}
+              className="px-4.5 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:from-zinc-800 disabled:to-zinc-800 disabled:text-zinc-500 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 shadow-lg shadow-indigo-950/30 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer border-none"
             >
               <FileSpreadsheet size={13} />
               <span>Exportar para Leitura</span>
@@ -1087,15 +1165,24 @@ export function MiningInboxPage({
 
           {/* Select all toggle */}
           {pendingItems && pendingItems.length > 0 && (
-            <button
-              onClick={() => handleSelectAll(pendingItems)}
-              className="text-xs text-violet-400 hover:text-violet-300 font-extrabold transition-all cursor-pointer flex items-center gap-1 bg-violet-500/5 px-2.5 py-1 rounded-lg border border-violet-500/10 hover:border-violet-500/25"
-            >
-              {pendingItems.filter(i => !processingItemIds[i.id]).every(i => selectedItemIds[i.id]) 
-                ? 'Desmarcar Todos' 
-                : 'Selecionar Todos'
-              }
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handleSelectUnprocessed(pendingItems)}
+                className="text-xs text-amber-400 hover:text-amber-300 font-extrabold transition-all cursor-pointer flex items-center gap-1 bg-amber-500/5 px-2.5 py-1 rounded-lg border border-amber-500/10 hover:border-amber-500/25"
+              >
+                Selecionar Não Processados
+              </button>
+              
+              <button
+                onClick={() => handleSelectAll(pendingItems)}
+                className="text-xs text-violet-400 hover:text-violet-300 font-extrabold transition-all cursor-pointer flex items-center gap-1 bg-violet-500/5 px-2.5 py-1 rounded-lg border border-violet-500/10 hover:border-violet-500/25"
+              >
+                {pendingItems.filter(i => !processingItemIds[i.id]).every(i => selectedItemIds[i.id]) 
+                  ? 'Desmarcar Todos' 
+                  : 'Selecionar Todos'
+                }
+              </button>
+            </div>
           )}
         </div>
 
