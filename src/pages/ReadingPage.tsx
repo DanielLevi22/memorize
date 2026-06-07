@@ -201,6 +201,9 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   });
   const [revealedLines, setRevealedLines] = useState<Set<number>>(new Set());
 
+  // Toggleable grammar/context explanation tips state
+  const [expandedTips, setExpandedTips] = useState<Record<number, boolean>>({});
+
   useEffect(() => {
     localStorage.setItem('memorize_hide_active_translation', String(hideActiveTranslation));
   }, [hideActiveTranslation]);
@@ -209,6 +212,11 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
   useEffect(() => {
     setRevealedLines(new Set());
   }, [activeLineIdx]);
+
+  // Reset expanded tips when text changes
+  useEffect(() => {
+    setExpandedTips({});
+  }, [selectedTextId]);
 
   // Practice Mode states
   const [readingPracticeMode, setReadingPracticeMode] = useState<'none' | 'speaking' | 'writing'>('none');
@@ -2149,9 +2157,28 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                         <p className="text-sm font-semibold text-foreground leading-relaxed">
                           {renderHighlightedText(line.original, line.highlights)}
                         </p>
-                        <p className="text-xs text-muted-foreground leading-relaxed">
-                          {line.translated}
+                        <p className="text-xs text-muted-foreground leading-relaxed flex items-center gap-1.5 flex-wrap">
+                          <span>{line.translated}</span>
+                          {line.context && line.context.trim() && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExpandedTips(prev => ({ ...prev, [idx]: !prev[idx] }));
+                              }}
+                              className="text-[10px] font-bold text-amber-500 hover:text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-500/20 flex items-center gap-0.5 transition-all cursor-pointer ml-1 select-none"
+                              title="Ver dica gramatical / explicação"
+                            >
+                              <Sparkles size={9} className="animate-pulse" />
+                              <span>{expandedTips[idx] ? 'Ocultar Dica' : 'Ver Dica'}</span>
+                            </button>
+                          )}
                         </p>
+                        {line.context && line.context.trim() && expandedTips[idx] && (
+                          <div className="text-[10px] text-amber-400/80 bg-amber-500/5 px-2.5 py-2 rounded-xl border border-amber-500/10 font-mono leading-relaxed mt-2 animate-fadeIn whitespace-pre-wrap">
+                            <span className="font-bold text-amber-500 mr-1 select-none block mb-1">💡 Dica IA / Explicação:</span>
+                            {line.context}
+                          </div>
+                        )}
                       </div>
 
                       {/* Actions */}

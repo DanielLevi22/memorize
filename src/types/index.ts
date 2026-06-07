@@ -197,6 +197,7 @@ export interface TextLine {
   mastered: boolean;            // Se o usuário marcou como dominada ✅
   startTime?: number;           // Tempo de início em segundos (opcional para áudio)
   endTime?: number;             // Tempo de término em segundos (opcional para áudio)
+  context?: string;             // Explicação gramatical / contexto opcional
 }
 
 export type ReadingLine = TextLine;

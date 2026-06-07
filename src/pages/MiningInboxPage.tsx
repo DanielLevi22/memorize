@@ -403,7 +403,7 @@ export function MiningInboxPage({
     
     try {
       const themeContext = item.theme 
-        ? `Note that the user is studying this sentence under the theme: "${item.theme}". If relevant, emphasize or tailor the translation/explanation vocabulary notes to match this theme.` 
+        ? `Observe que o usuário está estudando esta frase sob o tema: "${item.theme}". Se relevante, enfatize ou adapte a tradução e a explicação do vocabulário para se alinharem a este tema.` 
         : '';
 
       let systemPrompt = '';
@@ -415,20 +415,20 @@ export function MiningInboxPage({
         const base64Data = item.imageUrl.split(',')[1];
         const mimeType = item.imageUrl.split(';')[0].split(':')[1] || 'image/jpeg';
         
-        systemPrompt = "You are an assistant that extracts and analyzes English subtitles or sentences from images.";
-        userPrompt = `Below is an image of subtitles from a movie/series or a picture containing English text. Extract the main English sentence/phrase being studied (do not include Portuguese translations or other UI elements, focus on the English text). Translate it to Portuguese, and write a brief grammatical/contextual explanation of key words or expressions in Portuguese. Keep the explanation short and formatted in Markdown bullet points. ${themeContext} Return ONLY a valid JSON object in the following format: {\n  "originalText": "the extracted english sentence",\n  "translation": "tradução em português",\n  "explanation": "explicação curta da frase/palavras novas"\n}`;
+        systemPrompt = "Você é um assistente que extrai e analisa legendas ou frases em inglês a partir de imagens.";
+        userPrompt = `Abaixo está uma imagem de legenda de um filme/série ou uma foto contendo texto em inglês. Extraia a frase/sentença principal em inglês que está sendo estudada (não inclua traduções em português ou outros elementos de interface, foque apenas no texto em inglês). Traduza essa frase para o português e escreva uma breve explicação gramatical/contextual em português sobre as palavras-chave ou expressões. Mantenha a explicação curta e formatada em tópicos com Markdown (Markdown bullet points). ${themeContext} ATENÇÃO: O campo "explanation" e todas as notas explicativas devem ser escritas INTEGRALMENTE EM PORTUGUÊS. Nunca use inglês para as explicações. Retorne APENAS um objeto JSON válido no seguinte formato: {\n  "originalText": "a frase em inglês extraída",\n  "translation": "tradução em português",\n  "explanation": "explicação curta da frase/palavras novas em português"\n}`;
         images = [{ mimeType, data: base64Data }];
       } else if (item.source === 'voice' && item.voiceUrl) {
         const base64Data = item.voiceUrl.split(',')[1];
         const mimeType = item.voiceUrl.split(';')[0].split(':')[1] || 'audio/ogg';
         
-        systemPrompt = "You are an assistant that transcribes and analyzes spoken English audio.";
-        userPrompt = `Listen to the English audio. Transcribe the main English sentence spoken, translate it to Portuguese, and write a brief grammatical/contextual explanation of key words or expressions in Portuguese. Keep the explanation short and formatted in Markdown bullet points. ${themeContext} Return ONLY a valid JSON object in the following format: {\n  "originalText": "the transcribed english sentence",\n  "translation": "tradução em português",\n  "explanation": "explicação curta da frase/palavras novas"\n}`;
+        systemPrompt = "Você é um assistente que transcreve e analisa áudios falados em inglês.";
+        userPrompt = `Ouça o áudio em inglês. Transcreva a frase principal em inglês que foi falada, traduza-a para o português e escreva uma breve explicação gramatical/contextual em português sobre as palavras-chave ou expressões. Mantenha a explicação curta e formatada em tópicos com Markdown (Markdown bullet points). ${themeContext} ATENÇÃO: O campo "explanation" e todas as notas explicativas devem ser escritas INTEGRALMENTE EM PORTUGUÊS. Nunca use inglês para as explicações. Retorne APENAS um objeto JSON válido no seguinte formato: {\n  "originalText": "a frase em inglês transcrita",\n  "translation": "tradução em português",\n  "explanation": "explicação curta da frase/palavras novas em português"\n}`;
         audio = { mimeType, data: base64Data };
       } else {
         const textToAnalyze = item.originalText || '';
-        systemPrompt = "You are an assistant that translates and explains English sentences.";
-        userPrompt = `Analyze the following English sentence. Translate it to Portuguese, and write a brief grammatical/contextual explanation of key words or expressions in Portuguese. Keep the explanation short and formatted in Markdown bullet points. ${themeContext} Return ONLY a valid JSON object in the following format: {\n  "originalText": "the sentence",\n  "translation": "tradução em português",\n  "explanation": "explicação curta da frase/palavras novas"\n}. The sentence is: "${textToAnalyze}"`;
+        systemPrompt = "Você é um assistente que traduz e explica frases em inglês.";
+        userPrompt = `Analise a seguinte frase em inglês. Traduza-a para o português e escreva uma breve explicação gramatical/contextual em português sobre as palavras-chave ou expressões. Mantenha a explicação curta e formatada em tópicos com Markdown (Markdown bullet points). ${themeContext} ATENÇÃO: O campo "explanation" e todas as notas explicativas devem ser escritas INTEGRALMENTE EM PORTUGUÊS. Nunca use inglês para as explicações. Retorne APENAS um objeto JSON válido no seguinte formato: {\n  "originalText": "a frase em inglês",\n  "translation": "tradução em português",\n  "explanation": "explicação curta da frase/palavras novas em português"\n}. A frase é: "${textToAnalyze}"`;
       }
 
       const modelOverride = aiProvider === 'ollama'
