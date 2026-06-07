@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Eye, AlertCircle, Volume2, Mic, Lock, Languages, RefreshCw, Pause } from 'lucide-react';
+import { ArrowLeft, Eye, AlertCircle, Volume2, Mic, Lock, Languages, RefreshCw, Pause, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import confetti from 'canvas-confetti';
 import type { Card, DeckPreset } from '../types';
@@ -107,6 +107,12 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
   useEffect(() => {
     setTranslationResult(null); // Reset when selection changes
   }, [selectedText]);
+
+  const [showTip, setShowTip] = useState(false);
+
+  useEffect(() => {
+    setShowTip(false);
+  }, [currentIndex]);
 
   const handleTranslateSelection = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1335,9 +1341,28 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
               )}
               
               {currentCard.context && (
-                <div className="text-sm text-foreground font-medium italic p-3 bg-muted/30 border-l-2 border-primary rounded w-full text-left leading-relaxed">
-                  <strong className="text-primary text-xs uppercase not-italic block mb-1">Exemplo:</strong>
-                  <span dangerouslySetInnerHTML={{ __html: currentCard.context }} />
+                <div className="w-full flex flex-col gap-2" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center justify-start">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowTip(prev => !prev);
+                      }}
+                      className="text-[10px] font-bold text-amber-500 hover:text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 px-2.5 py-1 rounded-xl border border-amber-500/20 flex items-center gap-1 transition-all cursor-pointer select-none"
+                      title="Ver dica gramatical / explicação do card"
+                    >
+                      <Sparkles size={11} className="animate-pulse" />
+                      <span>{showTip ? 'Ocultar Explicação/Dica' : 'Ver Explicação/Dica'}</span>
+                    </button>
+                  </div>
+                  {showTip && (
+                    <div className="text-xs text-amber-400/90 bg-amber-500/5 p-3 rounded-xl border border-amber-500/10 font-mono leading-relaxed text-left animate-fadeIn whitespace-pre-wrap max-h-[120px] overflow-y-auto w-full shadow-inner">
+                      <span className="font-bold text-amber-500 mr-1 select-none block mb-1.5 flex items-center gap-1">
+                        💡 Dica IA / Explicação:
+                      </span>
+                      <span dangerouslySetInnerHTML={{ __html: currentCard.context }} />
+                    </div>
+                  )}
                 </div>
               )}
               {currentCard.tags && currentCard.tags.length > 0 && (
