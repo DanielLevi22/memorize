@@ -611,12 +611,23 @@ export function MiningInboxPage({
 
   const handleBulkAnalyzeWithAI = async () => {
     const selectedIds = Object.keys(selectedItemIds).filter(id => selectedItemIds[id]);
+    
+    // Filtra apenas os itens selecionados que NÃO possuem tradução preenchida
     const itemsToProcess = pendingItems?.filter(item => 
-      selectedIds.includes(item.id) && !processingItemIds[item.id]
+      selectedIds.includes(item.id) && !processingItemIds[item.id] && !item.translation
     ) || [];
 
+    const skippedCount = pendingItems?.filter(item =>
+      selectedIds.includes(item.id) && !!item.translation
+    ).length || 0;
+
     if (itemsToProcess.length === 0) {
-      toast.info('Nenhum item selecionado pendente de análise.');
+      if (skippedCount > 0) {
+        toast.info('Os itens selecionados já possuem tradução e foram desconsiderados.');
+        setSelectedItemIds({});
+      } else {
+        toast.info('Nenhum item selecionado pendente de análise.');
+      }
       return;
     }
 
@@ -641,7 +652,11 @@ export function MiningInboxPage({
 
     setIsBulkProcessing(false);
     setSelectedItemIds({});
-    toast.success(`Processamento em lote concluído! Sucessos: ${successCount}. Falhas: ${failCount}.`);
+    
+    const skippedMsg = skippedCount > 0 
+      ? ` (${skippedCount} item(ns) já processado(s) foi/foram ignorado(s))` 
+      : '';
+    toast.success(`Processamento em lote concluído! Sucessos: ${successCount}. Falhas: ${failCount}.${skippedMsg}`);
   };
 
   // --- OPEN EXPORT DIALOG ---
@@ -727,23 +742,47 @@ export function MiningInboxPage({
 
     if (selectedList.length === 0) return;
 
+    // Validações iniciais
+    let targetTextName = '';
+    if (exportActionType === 'create') {
+      if (!newTextTitle.trim()) {
+        toast.error('Insira o título do texto.');
+        return;
+      }
+      targetTextName = newTextTitle.trim();
+
+      if (selectedCollectionId === 'new_collection' && !newCollectionName.trim()) {
+        toast.error('Insira o nome da nova pasta para o texto.');
+        return;
+      }
+      if (selectedCollectionId !== 'new_collection' && !selectedCollectionId) {
+        toast.error('Selecione uma pasta para salvar o texto.');
+        return;
+      }
+    } else {
+      if (!selectedTextId) {
+        toast.error('Selecione o texto de destino.');
+        return;
+      }
+      const targetText = existingTexts.find(t => t.id === selectedTextId);
+      if (!targetText) {
+        toast.error('Texto de destino não encontrado.');
+        return;
+      }
+      targetTextName = targetText.title;
+    }
+
+    const isConfirmed = confirm(`Você tem certeza de que deseja mover estas ${selectedList.length} frase(s) para o texto "${targetTextName}"?`);
+    if (!isConfirmed) return;
+
     try {
       let finalCollectionId = selectedCollectionId;
       
       if (exportActionType === 'create') {
         if (selectedCollectionId === 'new_collection') {
-          if (!newCollectionName.trim()) {
-            toast.error('Insira o nome da nova pasta para o texto.');
-            return;
-          }
           const id = await handleCreateCollection();
           if (!id) return;
           finalCollectionId = id;
-        } else {
-          if (!finalCollectionId) {
-            toast.error('Selecione uma pasta para salvar o texto.');
-            return;
-          }
         }
       }
 
