@@ -643,6 +643,19 @@ function MainApp() {
       // 1. Editar Nota e Sincronizar Cartões
       const note = await db.notes.get(cardToEdit.noteId);
       if (note) {
+        // Impedir duplicados no mesmo baralho ao editar
+        const frontText = fields[0]?.trim().toLowerCase();
+        const existingNotes = await db.notes.where('deckId').equals(note.deckId).toArray();
+        const existingCards = await db.cards.where('deckId').equals(note.deckId).toArray();
+        
+        const isDuplicate = existingNotes.some(n => n.id !== note.id && n.fields[0]?.trim().toLowerCase() === frontText) ||
+                            existingCards.some(c => c.noteId !== note.id && c.front?.trim().toLowerCase() === frontText);
+
+        if (isDuplicate) {
+          toast.error('Esta frase já existe neste baralho!');
+          return;
+        }
+
         const updatedNote: Note = {
           ...note,
           type,
@@ -654,8 +667,8 @@ function MainApp() {
         };
         await db.notes.put(updatedNote);
 
-        const existingCards = await db.cards.where('noteId').equals(note.id).toArray();
-        const { toAdd, toUpdate, toDelete } = syncNoteCards(updatedNote, existingCards);
+        const existingCardsList = await db.cards.where('noteId').equals(note.id).toArray();
+        const { toAdd, toUpdate, toDelete } = syncNoteCards(updatedNote, existingCardsList);
 
         if (toAdd.length > 0) {
           for (const card of toAdd) {
@@ -686,6 +699,19 @@ function MainApp() {
     } else {
       // 2. Criar Nova Nota e Gerar Cartões
       if (!deckForNewCard) return;
+
+      // Impedir duplicados no mesmo baralho ao criar
+      const frontText = fields[0]?.trim().toLowerCase();
+      const existingNotes = await db.notes.where('deckId').equals(deckForNewCard.id).toArray();
+      const existingCards = await db.cards.where('deckId').equals(deckForNewCard.id).toArray();
+      
+      const isDuplicate = existingNotes.some(n => n.fields[0]?.trim().toLowerCase() === frontText) ||
+                          existingCards.some(c => c.front?.trim().toLowerCase() === frontText);
+
+      if (isDuplicate) {
+        toast.error('Esta frase já existe neste baralho!');
+        return;
+      }
 
       const noteId = crypto.randomUUID();
       const newNote: Note = {
@@ -928,12 +954,43 @@ function MainApp() {
       });
     }
 
-    const newCards: Card[] = cardsList.map((c) => ({
+    // Obter duplicados se estiver adicionando a um baralho existente
+    let filteredCardsList = cardsList;
+    let skippedCount = 0;
+
+    if (!isNewDeck) {
+      const existingNotes = await db.notes.where('deckId').equals(deckId).toArray();
+      const existingCards = await db.cards.where('deckId').equals(deckId).toArray();
+      const existingFronts = new Set([
+        ...existingNotes.map(n => n.fields[0]?.trim().toLowerCase()),
+        ...existingCards.map(c => c.front?.trim().toLowerCase())
+      ].filter(Boolean));
+
+      filteredCardsList = cardsList.filter((c) => {
+        const normalizedFront = c.front?.trim().toLowerCase();
+        if (existingFronts.has(normalizedFront)) {
+          skippedCount++;
+          return false;
+        }
+        return true;
+      });
+    }
+
+    if (filteredCardsList.length === 0) {
+      if (skippedCount > 0) {
+        toast.warning('Todos os cards gerados já existem neste baralho!');
+      } else {
+        toast.error('Nenhum card válido para importar.');
+      }
+      return;
+    }
+
+    const newCards: Card[] = filteredCardsList.map((c) => ({
       id: crypto.randomUUID(),
       deckId,
-      front: c.front,
-      back: c.back,
-      context: c.context,
+      front: c.front.trim(),
+      back: c.back.trim(),
+      context: c.context ? c.context.trim() : '',
       cefrLevel: classifyLocal(c.front) || undefined,
       interval: 0,
       ease: 2.5,
@@ -945,7 +1002,11 @@ function MainApp() {
     }));
 
     await db.cards.bulkAdd(newCards);
-    toast.success('Cards importados com sucesso!');
+    if (skippedCount > 0) {
+      toast.success(`${newCards.length} cards importados! ${skippedCount} duplicados foram ignorados.`);
+    } else {
+      toast.success('Cards importados com sucesso!');
+    }
   };
 
   // --- SINCRONIZAÇÃO GOOGLE DRIVE REAL ---

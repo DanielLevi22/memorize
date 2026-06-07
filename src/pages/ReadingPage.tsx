@@ -1543,12 +1543,28 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
     if (!selectedText || !addToDeckId || selectedLineIdxs.size === 0) return;
     setIsAddingToDeck(true);
     try {
+      // 1. Obter todos os cartões e notas do baralho de destino para detecção de duplicidade
+      const existingNotes = await db.notes.where('deckId').equals(addToDeckId).toArray();
+      const existingCards = await db.cards.where('deckId').equals(addToDeckId).toArray();
+      const existingFronts = new Set([
+        ...existingNotes.map(n => n.fields[0]?.trim().toLowerCase()),
+        ...existingCards.map(c => c.front?.trim().toLowerCase())
+      ].filter(Boolean));
+
       const newNotes: Note[] = [];
       const newCards: Card[] = [];
+      let skippedCount = 0;
 
       for (const idx of selectedLineIdxs) {
         const draft = draftCards[idx];
         if (!draft) continue;
+
+        // Verificar se a frase já existe no baralho
+        const normalizedFrontText = draft.field0?.trim().toLowerCase();
+        if (existingFronts.has(normalizedFrontText)) {
+          skippedCount++;
+          continue;
+        }
 
         const noteId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
         
@@ -1570,16 +1586,29 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
         newCards.push(...toAdd);
       }
 
-      await db.notes.bulkAdd(newNotes);
-      await db.cards.bulkAdd(newCards);
+      if (newNotes.length === 0 && skippedCount > 0) {
+        toast.warning('Todas as frases selecionadas já existem neste baralho!');
+        setIsAddToDeckOpen(false);
+        return;
+      }
 
-      setAddToDeckSuccess(`${newCards.length} card${newCards.length !== 1 ? 's' : ''} adicionado${newCards.length !== 1 ? 's' : ''} ao baralho!`);
+      if (newNotes.length > 0) {
+        await db.notes.bulkAdd(newNotes);
+        await db.cards.bulkAdd(newCards);
+      }
+
+      if (skippedCount > 0) {
+        setAddToDeckSuccess(`${newNotes.length} card${newNotes.length !== 1 ? 's' : ''} adicionado${newNotes.length !== 1 ? 's' : ''}! ${skippedCount} duplicado${skippedCount !== 1 ? 's foram' : ' foi'} ignorado${skippedCount !== 1 ? 's' : ''}.`);
+      } else {
+        setAddToDeckSuccess(`${newCards.length} card${newCards.length !== 1 ? 's' : ''} adicionado${newCards.length !== 1 ? 's' : ''} ao baralho!`);
+      }
       setTimeout(() => {
         setIsAddToDeckOpen(false);
         setAddToDeckSuccess('');
       }, 1800);
     } catch (err: any) {
       console.error(err);
+      toast.error('Erro ao adicionar frases ao baralho: ' + err.message);
     } finally {
       setIsAddingToDeck(false);
     }

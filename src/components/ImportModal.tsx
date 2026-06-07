@@ -375,8 +375,17 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         targetDeckId = selectedDeckId;
       }
 
+      // 1. Obter todas as frases existentes no baralho de destino para detecção de duplicidade
+      const existingNotes = await db.notes.where('deckId').equals(targetDeckId).toArray();
+      const existingCards = await db.cards.where('deckId').equals(targetDeckId).toArray();
+      const existingFronts = new Set([
+        ...existingNotes.map(n => n.fields[0]?.trim().toLowerCase()),
+        ...existingCards.map(c => c.front?.trim().toLowerCase())
+      ].filter(Boolean));
+
       const startIndex = isApkg ? 0 : (skipHeader ? 1 : 0);
       const cardsToInsert: Card[] = [];
+      let skippedCount = 0;
 
       for (let i = startIndex; i < parsedData.length; i++) {
         const row = parsedData[i];
@@ -385,6 +394,13 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         const frontVal = row[colMappings.front];
         const backVal = row[colMappings.back];
         if (!frontVal || !backVal) continue;
+
+        // Verificar se a frase já existe no baralho
+        const normalizedFront = frontVal.trim().toLowerCase();
+        if (existingFronts.has(normalizedFront)) {
+          skippedCount++;
+          continue;
+        }
 
         // Mapeia os campos SRS se as colunas estiverem definidas, caso contrário usa padrões do Anki/SM-2
         const srsInterval = colMappings.interval !== -1 && row[colMappings.interval] ? parseInt(row[colMappings.interval], 10) : 0;
@@ -438,9 +454,17 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
       if (cardsToInsert.length > 0) {
         await db.cards.bulkAdd(cardsToInsert);
-        toast.success(`Sucesso: ${cardsToInsert.length} cartões importados!`);
+        if (skippedCount > 0) {
+          toast.success(`Sucesso: ${cardsToInsert.length} cartões importados! ${skippedCount} duplicados foram ignorados.`);
+        } else {
+          toast.success(`Sucesso: ${cardsToInsert.length} cartões importados!`);
+        }
       } else {
-        toast.error('Nenhum cartão válido encontrado para importar.');
+        if (skippedCount > 0) {
+          toast.warning('Todos os cartões da planilha já existem neste baralho!');
+        } else {
+          toast.error('Nenhum cartão válido encontrado para importar.');
+        }
       }
       onClose();
     } catch (err: any) {

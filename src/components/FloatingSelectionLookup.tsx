@@ -182,6 +182,19 @@ Sua resposta DEVE ser estritamente no formato JSON com as chaves:
 
     setCardCreating(true);
     try {
+      // Impedir duplicados no mesmo baralho
+      const cleanFrontText = text.trim().toLowerCase();
+      const existingNotes = await db.notes.where('deckId').equals(selectedDeckId).toArray();
+      const existingCards = await db.cards.where('deckId').equals(selectedDeckId).toArray();
+      const isDuplicate = existingNotes.some(n => n.fields[0]?.trim().toLowerCase() === cleanFrontText) ||
+                          existingCards.some(c => c.front?.trim().toLowerCase() === cleanFrontText);
+
+      if (isDuplicate) {
+        toast.error('Esta frase/palavra já existe neste baralho!');
+        setCardCreating(false);
+        return;
+      }
+
       const noteId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
       
       const translationVal = figuredData?.translation || 'Sem tradução';
