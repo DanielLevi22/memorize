@@ -69,6 +69,13 @@ export function MiningInboxPage({
   const [zoomedImageUrl, setZoomedImageUrl] = useState<string | null>(null);
   const [editingCardIds, setEditingCardIds] = useState<Record<string, boolean>>({});
   
+  // Confirmação de Exportação Customizada
+  const [isConfirmExportOpen, setIsConfirmExportOpen] = useState(false);
+  const [confirmExportData, setConfirmExportData] = useState<{
+    targetTextName: string;
+    action: () => void;
+  } | null>(null);
+  
   const toggleEditCard = (itemId: string) => {
     setEditingCardIds(prev => ({
       ...prev,
@@ -772,147 +779,141 @@ export function MiningInboxPage({
       targetTextName = targetText.title;
     }
 
-    const isConfirmed = confirm(`Você tem certeza de que deseja mover estas ${selectedList.length} frase(s) para o texto "${targetTextName}"?`);
-    if (!isConfirmed) return;
+    setConfirmExportData({
+      targetTextName,
+      action: async () => {
+        setIsConfirmExportOpen(false);
+        setIsExportModalOpen(false);
+        
+        try {
+          let finalCollectionId = selectedCollectionId;
+          
+          if (exportActionType === 'create') {
+            if (selectedCollectionId === 'new_collection') {
+              const id = await handleCreateCollection();
+              if (!id) return;
+              finalCollectionId = id;
+            }
+          }
 
-    try {
-      let finalCollectionId = selectedCollectionId;
-      
-      if (exportActionType === 'create') {
-        if (selectedCollectionId === 'new_collection') {
-          const id = await handleCreateCollection();
-          if (!id) return;
-          finalCollectionId = id;
+          // Compile lines
+          const textLines: TextLine[] = selectedList.map(item => {
+            const editing = editingFields[item.id] || {};
+            const finalOriginalText = String(editing.originalText !== undefined ? editing.originalText : item.originalText || '');
+            const finalTranslation = String(editing.translation !== undefined ? editing.translation : item.translation || '');
+            const finalExplanation = String(editing.explanation !== undefined ? editing.explanation : item.explanation || '');
+            
+            // Context contains both explanation and theme information if available
+            let context = finalExplanation;
+            if (item.theme) {
+              context = `[Tema: ${item.theme}]\n${context}`;
+            }
+
+            return {
+              id: crypto.randomUUID(),
+              original: finalOriginalText.trim(),
+              translated: finalTranslation.trim(),
+              highlights: [],
+              mastered: false,
+              context: context.trim()
+            } as any;
+          });
+
+          if (exportActionType === 'create') {
+            const newTextId = crypto.randomUUID();
+            const fullOriginal = selectedList.map(item => {
+              const editing = editingFields[item.id] || {};
+              const val = editing.originalText !== undefined ? editing.originalText : item.originalText || '';
+              return String(val);
+            }).join('\n');
+            
+            const fullTranslated = selectedList.map(item => {
+              const editing = editingFields[item.id] || {};
+              const val = editing.translation !== undefined ? editing.translation : item.translation || '';
+              return String(val);
+            }).join('\n');
+
+            const newTextResource: TextResource = {
+              id: newTextId,
+              title: newTextTitle.trim(),
+              description: `Texto importado da Fila de Mineração em ${new Date().toLocaleDateString('pt-BR')}`,
+              type: 'reading',
+              showInReadings: true,
+              fullTextOriginal: fullOriginal,
+              fullTextTranslated: fullTranslated,
+              lines: textLines,
+              collectionId: finalCollectionId ? finalCollectionId : undefined,
+              category: exportCategory,
+              theme: exportTheme.trim() ? exportTheme.trim() : undefined,
+              createdAt: Date.now(),
+              updatedAt: Date.now()
+            };
+
+            await db.texts.add(newTextResource);
+            toast.success('Novo texto de leitura criado com sucesso!');
+          } else {
+            // APPEND to existing text
+            const targetText = await db.texts.get(selectedTextId);
+            if (!targetText) {
+              toast.error('Texto de destino não encontrado.');
+              return;
+            }
+
+            const appendedLines = [...(targetText.lines || []), ...textLines];
+            const newOriginals = selectedList.map(item => {
+              const editing = editingFields[item.id] || {};
+              const val = editing.originalText !== undefined ? editing.originalText : item.originalText || '';
+              return String(val);
+            }).join('\n');
+            const newTranslations = selectedList.map(item => {
+              const editing = editingFields[item.id] || {};
+              const val = editing.translation !== undefined ? editing.translation : item.translation || '';
+              return String(val);
+            }).join('\n');
+
+            const updatedText: TextResource = {
+              ...targetText,
+              lines: appendedLines,
+              fullTextOriginal: ((targetText.fullTextOriginal || '') + '\n' + newOriginals).trim(),
+              fullTextTranslated: ((targetText.fullTextTranslated || '') + '\n' + newTranslations).trim(),
+              updatedAt: Date.now()
+            };
+
+            await db.texts.put(updatedText);
+            toast.success(`Frases anexadas ao texto "${targetText.title}"!`);
+          }
+
+          // Delete from mining queue, log to history in main db, and record tombstone
+          await Promise.all(selectedList.map(async item => {
+            if (db.minedSentences) {
+              const editing = editingFields[item.id] || {};
+              const textVal = editing.originalText !== undefined ? editing.originalText : item.originalText;
+              const transVal = editing.translation !== undefined ? editing.translation : item.translation;
+
+              await db.minedSentences.add({
+                id: crypto.randomUUID(),
+                originalText: textVal,
+                translation: transVal,
+                category: item.category,
+                theme: item.theme,
+                source: item.source,
+                timestamp: Date.now()
+              }).catch(err => console.warn('Failed to log mined sentence:', err));
+            }
+
+            await miningDb.miningItems.delete(item.id);
+            await miningDb.miningDeletions.put({ id: item.id, deletedAt: Date.now() });
+          }));
+
+          // Reset states
+          setSelectedItemIds({});
+        } catch (err) {
+          console.error('Export failed:', err);
+          toast.error('Erro ao realizar a exportação das frases.');
         }
       }
-
-      // Compile lines
-      const textLines: TextLine[] = selectedList.map(item => {
-        const editing = editingFields[item.id] || {};
-        const finalOriginalText = String(editing.originalText !== undefined ? editing.originalText : item.originalText || '');
-        const finalTranslation = String(editing.translation !== undefined ? editing.translation : item.translation || '');
-        const finalExplanation = String(editing.explanation !== undefined ? editing.explanation : item.explanation || '');
-        
-        // Context contains both explanation and theme information if available
-        let context = finalExplanation;
-        if (item.theme) {
-          context = `[Tema: ${item.theme}]\n${context}`;
-        }
-
-        return {
-          id: crypto.randomUUID(),
-          original: finalOriginalText.trim(),
-          translated: finalTranslation.trim(),
-          highlights: [],
-          mastered: false,
-          // Storing rich grammar notes directly inside the line context for later lookup
-          context: context.trim()
-        } as any;
-      });
-
-      if (exportActionType === 'create') {
-        if (!newTextTitle.trim()) {
-          toast.error('Insira o título do texto.');
-          return;
-        }
-
-        const newTextId = crypto.randomUUID();
-        const fullOriginal = selectedList.map(item => {
-          const editing = editingFields[item.id] || {};
-          const val = editing.originalText !== undefined ? editing.originalText : item.originalText || '';
-          return String(val);
-        }).join('\n');
-        
-        const fullTranslated = selectedList.map(item => {
-          const editing = editingFields[item.id] || {};
-          const val = editing.translation !== undefined ? editing.translation : item.translation || '';
-          return String(val);
-        }).join('\n');
-
-        const newTextResource: TextResource = {
-          id: newTextId,
-          title: newTextTitle.trim(),
-          description: `Texto importado da Fila de Mineração em ${new Date().toLocaleDateString('pt-BR')}`,
-          type: 'reading',
-          showInReadings: true,
-          fullTextOriginal: fullOriginal,
-          fullTextTranslated: fullTranslated,
-          lines: textLines,
-          collectionId: finalCollectionId ? finalCollectionId : undefined,
-          category: exportCategory,
-          theme: exportTheme.trim() ? exportTheme.trim() : undefined,
-          createdAt: Date.now(),
-          updatedAt: Date.now()
-        };
-
-        await db.texts.add(newTextResource);
-        toast.success('Novo texto de leitura criado com sucesso!');
-      } else {
-        // APPEND to existing text
-        if (!selectedTextId) {
-          toast.error('Selecione o texto de destino.');
-          return;
-        }
-
-        const targetText = await db.texts.get(selectedTextId);
-        if (!targetText) {
-          toast.error('Texto de destino não encontrado.');
-          return;
-        }
-
-        const appendedLines = [...(targetText.lines || []), ...textLines];
-        const newOriginals = selectedList.map(item => {
-          const editing = editingFields[item.id] || {};
-          const val = editing.originalText !== undefined ? editing.originalText : item.originalText || '';
-          return String(val);
-        }).join('\n');
-        const newTranslations = selectedList.map(item => {
-          const editing = editingFields[item.id] || {};
-          const val = editing.translation !== undefined ? editing.translation : item.translation || '';
-          return String(val);
-        }).join('\n');
-
-        const updatedText: TextResource = {
-          ...targetText,
-          lines: appendedLines,
-          fullTextOriginal: ((targetText.fullTextOriginal || '') + '\n' + newOriginals).trim(),
-          fullTextTranslated: ((targetText.fullTextTranslated || '') + '\n' + newTranslations).trim(),
-          updatedAt: Date.now()
-        };
-
-        await db.texts.put(updatedText);
-        toast.success(`Frases anexadas ao texto "${targetText.title}"!`);
-      }
-
-      // Delete from mining queue, log to history in main db, and record tombstone
-      await Promise.all(selectedList.map(async item => {
-        if (db.minedSentences) {
-          const editing = editingFields[item.id] || {};
-          const textVal = editing.originalText !== undefined ? editing.originalText : item.originalText;
-          const transVal = editing.translation !== undefined ? editing.translation : item.translation;
-
-          await db.minedSentences.add({
-            id: crypto.randomUUID(),
-            originalText: textVal,
-            translation: transVal,
-            category: item.category,
-            theme: item.theme,
-            source: item.source,
-            timestamp: Date.now()
-          }).catch(err => console.warn('Failed to log mined sentence:', err));
-        }
-
-        await miningDb.miningItems.delete(item.id);
-        await miningDb.miningDeletions.put({ id: item.id, deletedAt: Date.now() });
-      }));
-
-      // Reset states
-      setSelectedItemIds({});
-      setIsExportModalOpen(false);
-    } catch (err) {
-      console.error('Export failed:', err);
-      toast.error('Erro ao realizar a exportação das frases.');
-    }
+    });
+    setIsConfirmExportOpen(true);
   };
 
   return (
@@ -1805,6 +1806,48 @@ export function MiningInboxPage({
           </div>
         </div>
       )}
+      {/* --- CONFIRM EXPORT MODAL --- */}
+      {isConfirmExportOpen && confirmExportData && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
+          <div className="bg-zinc-900 border border-zinc-800 w-full max-w-sm rounded-2xl shadow-2xl p-6 relative overflow-hidden space-y-5 animate-in zoom-in-95 duration-200">
+            {/* Design header */}
+            <div className="flex flex-col items-center text-center space-y-3">
+              <div className="w-12 h-12 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-500 animate-bounce">
+                <Sparkles size={22} className="fill-current text-amber-400" />
+              </div>
+              <h3 className="text-base font-black text-foreground uppercase tracking-wide">
+                Confirmar Exportação
+              </h3>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Você está prestes a mover <span className="font-extrabold text-foreground">{selectedCount} frase(s)</span> para o texto:
+              </p>
+              <div className="bg-zinc-950/50 border border-zinc-800/60 rounded-xl px-4 py-3 w-full text-xs font-black text-violet-400 text-center shadow-inner">
+                "{confirmExportData.targetTextName}"
+              </div>
+              <p className="text-[10px] text-zinc-500 italic">
+                Elas serão removidas da fila e salvas no histórico de mineração.
+              </p>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                onClick={() => setIsConfirmExportOpen(false)}
+                className="flex-1 py-2 bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 rounded-xl text-xs font-bold text-muted-foreground hover:text-foreground transition-all cursor-pointer text-center"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmExportData.action}
+                className="flex-1 py-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white rounded-xl text-xs font-extrabold shadow-lg shadow-indigo-950/30 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer border-none text-center"
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Zoomed Image Modal */}
       {zoomedImageUrl && (
         <div 
