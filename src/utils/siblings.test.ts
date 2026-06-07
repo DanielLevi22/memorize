@@ -183,4 +183,38 @@ describe('Note to Cards Synchronization (syncNoteCards)', () => {
     expect(updatedCard.interval).toBe(5); // preservado
     expect(updatedCard.dueDate).toBe('2026-05-30'); // preservado
   });
+
+  it('syncNoteCards deve propagar o campo explanation da nota para o card ao adicionar ou atualizar', () => {
+    const note = createMockNote({
+      explanation: 'Esta é uma dica explicativa de teste.',
+    });
+    
+    // Teste para adicionar
+    const addResult = syncNoteCards(note, []);
+    expect(addResult.toAdd).toHaveLength(1);
+    expect(addResult.toAdd[0].explanation).toBe('Esta é uma dica explicativa de teste.');
+
+    // Teste para atualizar
+    const existingCard: Card = {
+      id: 'card-1',
+      deckId: 'deck-1',
+      noteId: 'note-1',
+      front: 'Frente original',
+      back: 'Verso original',
+      context: 'Contexto original',
+      explanation: 'Dica antiga',
+      cardType: 'forward',
+      interval: 0,
+      ease: 2.5,
+      repetitions: 0,
+      lapses: 0,
+      dueDate: '2026-06-07',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    const updateResult = syncNoteCards(note, [existingCard]);
+    expect(updateResult.toUpdate).toHaveLength(1);
+    expect(updateResult.toUpdate[0].explanation).toBe('Esta é uma dica explicativa de teste.');
+  });
 });

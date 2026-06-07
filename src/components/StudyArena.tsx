@@ -1340,31 +1340,37 @@ export const StudyArena: React.FC<StudyArenaProps> = ({
                 </div>
               )}
               
-              {currentCard.context && (
-                <div className="w-full flex flex-col gap-2" onClick={(e) => e.stopPropagation()}>
-                  <div className="flex items-center justify-start">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShowTip(prev => !prev);
-                      }}
-                      className="text-[10px] font-bold text-amber-500 hover:text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 px-2.5 py-1 rounded-xl border border-amber-500/20 flex items-center gap-1 transition-all cursor-pointer select-none"
-                      title="Ver dica gramatical / explicação do card"
-                    >
-                      <Sparkles size={11} className="animate-pulse" />
-                      <span>{showTip ? 'Ocultar Explicação/Dica' : 'Ver Explicação/Dica'}</span>
-                    </button>
-                  </div>
-                  {showTip && (
-                    <div className="text-xs text-amber-400/90 bg-amber-500/5 p-3 rounded-xl border border-amber-500/10 font-mono leading-relaxed text-left animate-fadeIn whitespace-pre-wrap max-h-[120px] overflow-y-auto w-full shadow-inner">
-                      <span className="font-bold text-amber-500 mr-1 select-none block mb-1.5 flex items-center gap-1">
-                        💡 Dica IA / Explicação:
-                      </span>
-                      <span dangerouslySetInnerHTML={{ __html: currentCard.context }} />
+              {(() => {
+                const finalTip = currentCard.explanation?.trim() || (
+                  currentCard.context?.trim() && currentCard.context.trim() !== deckName.trim() ? currentCard.context.trim() : ''
+                );
+                if (!finalTip) return null;
+                return (
+                  <div className="w-full flex flex-col gap-2" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-start">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowTip(prev => !prev);
+                        }}
+                        className="text-[10px] font-bold text-amber-500 hover:text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 px-2.5 py-1 rounded-xl border border-amber-500/20 flex items-center gap-1 transition-all cursor-pointer select-none"
+                        title="Ver dica gramatical / explicação do card"
+                      >
+                        <Sparkles size={11} className="animate-pulse" />
+                        <span>{showTip ? 'Ocultar Explicação/Dica' : 'Ver Explicação/Dica'}</span>
+                      </button>
                     </div>
-                  )}
-                </div>
-              )}
+                    {showTip && (
+                      <div className="text-xs text-amber-400/90 bg-amber-500/5 p-3 rounded-xl border border-amber-500/10 font-mono leading-relaxed text-left animate-fadeIn whitespace-pre-wrap max-h-[120px] overflow-y-auto w-full shadow-inner">
+                        <span className="font-bold text-amber-500 mr-1 select-none block mb-1.5 flex items-center gap-1">
+                          💡 Dica IA / Explicação:
+                        </span>
+                        <span dangerouslySetInnerHTML={{ __html: finalTip }} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               {currentCard.tags && currentCard.tags.length > 0 && (
                 <div className="flex flex-wrap justify-center gap-1 mt-1">
                   {currentCard.tags.map((tag, tIdx) => {

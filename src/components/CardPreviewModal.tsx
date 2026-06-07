@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import type { Card } from '../types';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { Button } from './ui/button';
-import { Volume2, Eye } from 'lucide-react';
+import { Volume2, Eye, Sparkles } from 'lucide-react';
 import { getTagColors } from '../utils/tagColors';
 
 const stripHtmlTags = (str: string) => {
@@ -38,6 +38,7 @@ export const CardPreviewModal: React.FC<CardPreviewModalProps> = ({
   const [isAudioTextRevealed, setIsAudioTextRevealed] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [showTip, setShowTip] = useState(false);
   const activeAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const speakText = (text: string, lang: 'en' | 'pt') => {
@@ -68,6 +69,7 @@ export const CardPreviewModal: React.FC<CardPreviewModalProps> = ({
     setIsFlipped(false);
     setIsAudioTextRevealed(false);
     setIsPlaying(false);
+    setShowTip(false);
 
     let url: string | null = null;
     if (card && card.audio && isOpen) {
@@ -271,12 +273,48 @@ export const CardPreviewModal: React.FC<CardPreviewModalProps> = ({
                   dangerouslySetInnerHTML={{ __html: card.back }}
                 />
                 
-                {card.context && (
-                  <div className="text-xs text-foreground font-medium italic p-2.5 bg-muted/30 border-l-2 border-primary rounded w-full text-left leading-relaxed">
-                    <strong className="text-primary text-[10px] uppercase not-italic block mb-0.5">Exemplo:</strong>
-                    <span dangerouslySetInnerHTML={{ __html: card.context }} />
-                  </div>
-                )}
+                {(() => {
+                  const finalTip = card.explanation?.trim() || (
+                    card.context?.trim() && card.context.trim() !== deckName.trim() ? card.context.trim() : ''
+                  );
+                  const showExample = card.context && card.context.trim() !== '' && card.context !== finalTip;
+                  return (
+                    <>
+                      {showExample && (
+                        <div className="text-xs text-foreground font-medium italic p-2.5 bg-muted/30 border-l-2 border-primary rounded w-full text-left leading-relaxed">
+                          <strong className="text-primary text-[10px] uppercase not-italic block mb-0.5">Exemplo:</strong>
+                          <span dangerouslySetInnerHTML={{ __html: card.context }} />
+                        </div>
+                      )}
+                      
+                      {finalTip && (
+                        <div className="w-full flex flex-col gap-1.5 mt-1" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-start">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setShowTip(prev => !prev);
+                              }}
+                              className="text-[10px] font-bold text-amber-500 hover:text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/20 flex items-center gap-0.5 transition-all cursor-pointer select-none"
+                              title="Ver dica gramatical / explicação do card"
+                            >
+                              <Sparkles size={11} className="animate-pulse" />
+                              <span>{showTip ? 'Ocultar Explicação/Dica' : 'Ver Explicação/Dica'}</span>
+                            </button>
+                          </div>
+                          {showTip && (
+                            <div className="text-[10px] text-amber-400/90 bg-amber-500/5 p-2 rounded border border-amber-500/10 font-mono leading-relaxed text-left animate-fadeIn whitespace-pre-wrap max-h-[80px] overflow-y-auto w-full shadow-inner">
+                              <span className="font-bold text-amber-500 mr-1 select-none block mb-1">
+                                💡 Dica IA / Explicação:
+                              </span>
+                              <span dangerouslySetInnerHTML={{ __html: finalTip }} />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
                 {card.tags && card.tags.length > 0 && (
                   <div className="flex flex-wrap justify-center gap-1 mt-1">
                     {card.tags.map((tag, tIdx) => {

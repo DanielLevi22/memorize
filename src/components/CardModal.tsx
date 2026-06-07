@@ -19,7 +19,8 @@ interface CardModalProps {
     fields: string[],
     context: string,
     audioBlob: Blob | null,
-    tags: string[]
+    tags: string[],
+    explanation?: string
   ) => void;
   cardToEdit?: Card | null;
   deckName: string;
@@ -36,6 +37,7 @@ export const CardModal: React.FC<CardModalProps> = ({
   const [noteType, setNoteType] = useState<'basic' | 'reversed' | 'optional_reversed' | 'typing' | 'cloze' | 'listening'>('basic');
   const [fields, setFields] = useState<string[]>(['', '', '']);
   const [context, setContext] = useState('');
+  const [explanation, setExplanation] = useState('');
   const [tagList, setTagList] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [availableTags, setAvailableTags] = useState<string[]>([]);
@@ -93,6 +95,7 @@ export const CardModal: React.FC<CardModalProps> = ({
           while (f.length < 3) f.push('');
           setFields(f);
           setContext(note.context || '');
+          setExplanation(note.explanation || '');
           setAudioBlob(note.audio || null);
           setAudioFileName(note.audio ? 'Áudio gravado' : '');
           setTagList(note.tags || []);
@@ -101,6 +104,7 @@ export const CardModal: React.FC<CardModalProps> = ({
           setNoteType('basic');
           setFields([cardToEdit.front || '', cardToEdit.back || '', '']);
           setContext(cardToEdit.context || '');
+          setExplanation(cardToEdit.explanation || '');
           setAudioBlob(cardToEdit.audio || null);
           setAudioFileName(cardToEdit.audio ? 'Áudio gravado' : '');
           setTagList(cardToEdit.tags || []);
@@ -109,6 +113,7 @@ export const CardModal: React.FC<CardModalProps> = ({
         setNoteType('basic');
         setFields(['', '', '']);
         setContext('');
+        setExplanation('');
         setAudioBlob(null);
         setAudioFileName('');
         setTagList([]);
@@ -445,7 +450,7 @@ export const CardModal: React.FC<CardModalProps> = ({
       .map(t => t.trim().toLowerCase())
       .filter(t => t.length > 0);
 
-    onSave(noteType, fields, context.trim(), audioBlob, cleanTags);
+    onSave(noteType, fields, context.trim(), audioBlob, cleanTags, explanation.trim());
     onClose();
   };
 
@@ -667,6 +672,19 @@ export const CardModal: React.FC<CardModalProps> = ({
                 <Mic size={16} />
               </Button>
             </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground/80 tracking-wide" htmlFor="card-explanation">
+              Dica / Explicação Gramatical (Verso)
+            </label>
+            <Textarea
+              id="card-explanation"
+              className="bg-muted/30 border-transparent hover:border-border text-foreground focus-visible:bg-background focus-visible:ring-primary/20 focus-visible:border-primary min-h-[80px] w-full transition-all duration-200 rounded-xl"
+              placeholder="Ex: Notas explicativas, gramática ou vocabulário que aparecerão ao clicar em 'Ver Explicação/Dica' no verso."
+              value={explanation}
+              onChange={(e) => setExplanation(e.target.value)}
+            />
           </div>
 
           <div className="flex flex-col gap-1.5 relative">

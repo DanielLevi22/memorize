@@ -19,6 +19,7 @@ interface DraftCard {
   field0: string; // Frente ou Cloze
   field1: string; // Verso ou Extra
   field2: string; // Gatilho Inverso (para optional_reversed)
+  explanation?: string; // Dica gramatical
 }
 import { ReadingImportModal } from '../components/ReadingImportModal';
 import { KeyboardShortcutCheatsheet } from '../components/KeyboardShortcutCheatsheet';
@@ -1522,7 +1523,8 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
         originalLineIdx: idx,
         field0: line.original,
         field1: line.translated,
-        field2: ''
+        field2: '',
+        explanation: line.context || ''
       };
     });
     setDraftCards(initialDrafts);
@@ -1577,6 +1579,7 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
             ? ['reading', `tema-${selectedText.theme.toLowerCase().trim().replace(/\s+/g, '-').normalize('NFD').replace(/[\u0300-\u036f]/g, '')}`] 
             : ['reading'],
           context: selectedText.title,
+          explanation: draft.explanation?.trim() || '',
           createdAt: Date.now(),
           updatedAt: Date.now()
         };
@@ -3275,6 +3278,19 @@ export const ReadingPage: React.FC<ReadingPageProps> = ({
                                   />
                                 </div>
                               )}
+
+                              {/* Dica / Explicação Gramatical (Opcional) */}
+                              <div className="space-y-1 col-span-1 md:col-span-2">
+                                <label className="text-[10px] font-bold text-amber-500 uppercase tracking-wider">
+                                  Dica / Explicação Gramatical (Verso)
+                                </label>
+                                <textarea
+                                  className="w-full bg-background border border-border text-foreground px-3 py-2 rounded-lg text-xs outline-none focus:border-amber-500/50 resize-y min-h-[50px]"
+                                  value={draft.explanation || ''}
+                                  onChange={(e) => setDraftCards(prev => ({ ...prev, [idx]: { ...prev[idx], explanation: e.target.value } }))}
+                                  placeholder="Notas explicativas sobre a frase..."
+                                />
+                              </div>
                             </div>
                           )}
                         </div>

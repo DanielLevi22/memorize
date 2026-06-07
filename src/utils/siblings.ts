@@ -159,6 +159,7 @@ export function syncNoteCards(
         front: def.front,
         back: def.back,
         context: note.context,
+        explanation: note.explanation,
         audio: note.audio,
         tags: note.tags,
         cefrLevel: foundCard.front !== def.front
@@ -179,6 +180,7 @@ export function syncNoteCards(
         front: def.front,
         back: def.back,
         context: note.context,
+        explanation: note.explanation,
         audio: note.audio,
         tags: note.tags,
         clozeIndex: def.clozeIndex,

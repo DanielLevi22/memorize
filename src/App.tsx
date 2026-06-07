@@ -621,7 +621,8 @@ function MainApp() {
     fields: string[],
     context: string,
     audioBlob: Blob | null,
-    tags: string[]
+    tags: string[],
+    explanation?: string
   ) => {
     // Helper function to classify and save card level asynchronously in the background
     const classifyCardAsync = async (card: Card) => {
@@ -661,6 +662,7 @@ function MainApp() {
           type,
           fields,
           context,
+          explanation: explanation || '',
           audio: audioBlob || undefined,
           tags,
           updatedAt: Date.now()
@@ -721,6 +723,7 @@ function MainApp() {
         fields,
         tags,
         context,
+        explanation: explanation || '',
         audio: audioBlob || undefined,
         createdAt: Date.now(),
         updatedAt: Date.now()

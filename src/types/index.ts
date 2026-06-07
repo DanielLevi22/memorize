@@ -34,6 +34,7 @@ export interface Note {
   tags: string[];
   audio?: Blob; // Áudio de pronúncia opcional da nota
   context: string; // Exemplo em contexto
+  explanation?: string; // Dica ou explicação gramatical do card
   createdAt: number;
   updatedAt: number;
 }
@@ -44,6 +45,7 @@ export interface Card {
   front: string; // Termo/Pergunta em inglês
   back: string; // Tradução/Resposta
   context: string; // Exemplo em contexto
+  explanation?: string; // Dica ou explicação gramatical do card
   audio?: Blob; // Áudio de pronúncia opcional
   // SRS (Spaced Repetition System) Fields
   interval: number; // Intervalo atual em dias (0 = novo/não estudado)
