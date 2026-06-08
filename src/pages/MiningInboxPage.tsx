@@ -454,10 +454,25 @@ export function MiningInboxPage({
       const cleanJson = responseText.replace(/```json/gi, '').replace(/```/gi, '').trim();
       const parsedResult = JSON.parse(cleanJson);
 
+      const finalOriginalText = parsedResult.originalText || item.originalText || 'Transcription failed';
+      let finalTranslation = parsedResult.translation || '';
+
+      // Consult the translation API instead of using the AI model's translation
+      if (finalOriginalText && finalOriginalText !== 'Transcription failed') {
+        try {
+          const apiTranslation = await translateWithMyMemory(finalOriginalText);
+          if (apiTranslation && apiTranslation.trim()) {
+            finalTranslation = apiTranslation.trim();
+          }
+        } catch (translateErr) {
+          console.warn('Free Translation API failed, falling back to AI translation:', translateErr);
+        }
+      }
+
       const updatedItem = {
         ...item,
-        originalText: parsedResult.originalText || item.originalText || 'Transcription failed',
-        translation: parsedResult.translation || '',
+        originalText: finalOriginalText,
+        translation: finalTranslation,
         explanation: parsedResult.explanation || '',
         updatedAt: Date.now()
       };
