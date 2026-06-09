@@ -416,16 +416,66 @@ export function MiningInboxPage({
         : '';
 
       let originalText = '';
-      
-      if (item.source === 'photo' && item.imageUrl) {
-        // --- EXTRAÇÃO VIA MODELO LOCAL (OLLAMA / GEMMA3) ---
-        const base64Data = item.imageUrl.split(',')[1];
-        const mimeType = item.imageUrl.split(';')[0].split(':')[1] || 'image/jpeg';
+      let translation = '';
+      let explanation = '';
+
+      if (aiProvider === 'gemini') {
+        // =========================================================================
+        // PROVEDOR SELECIONADO: GEMINI
+        // Faz todo o processo (extração + tradução + explicação) em uma única chamada.
+        // =========================================================================
+        const geminiService = new GeminiProvider(geminiApiKey);
+        let systemPrompt = '';
+        let userPrompt = '';
+        let images: Array<{ mimeType: string; data: string }> | undefined = undefined;
+        let audio: { mimeType: string; data: string } | undefined = undefined;
+
+        if (item.source === 'photo' && item.imageUrl) {
+          const base64Data = item.imageUrl.split(',')[1];
+          const mimeType = item.imageUrl.split(';')[0].split(':')[1] || 'image/jpeg';
+          systemPrompt = "Você é um assistente que extrai e analisa legendas ou frases em inglês a partir de imagens.";
+          userPrompt = `Abaixo está uma imagem de legenda de um filme/série ou uma foto contendo texto em inglês. Extraia a frase/sentença principal em inglês que está sendo estudada (não inclua traduções em português ou outros elementos de interface, foque apenas no texto em inglês). Traduza essa frase para o português e escreva uma breve explicação gramatical/contextual em português sobre as palavras-chave ou expressões. Mantenha a explicação curta e formatada em tópicos com Markdown (Markdown bullet points). ${themeContext} ATENÇÃO: O campo "explanation" e todas as notas explicativas devem ser escritas INTEGRALMENTE EM PORTUGUÊS. Nunca use inglês para as explicações. Retorne APENAS um objeto JSON válido no seguinte formato: {\n  "originalText": "a frase em inglês extraída",\n  "translation": "tradução em português",\n  "explanation": "explicação curta da frase/palavras novas em português"\n}`;
+          images = [{ mimeType, data: base64Data }];
+        } else if (item.source === 'voice' && item.voiceUrl) {
+          const base64Data = item.voiceUrl.split(',')[1];
+          const mimeType = item.voiceUrl.split(';')[0].split(':')[1] || 'audio/ogg';
+          systemPrompt = "Você é um assistente que transcreve e analisa áudios falados em inglês.";
+          userPrompt = `Ouça o áudio em inglês. Transcreva a frase principal em inglês que foi falada, traduza-a para o português e escreva uma breve explicação gramatical/contextual em português sobre as palavras-chave ou expressões. Mantenha a explicação curta e formatada em tópicos com Markdown (Markdown bullet points). ${themeContext} ATENÇÃO: O campo "explanation" e todas as notas explicativas devem ser escritas INTEGRALMENTE EM PORTUGUÊS. Nunca use inglês para as explicações. Retorne APENAS um objeto JSON válido no seguinte formato: {\n  "originalText": "a frase em inglês transcrita",\n  "translation": "tradução em português",\n  "explanation": "explicação curta da frase/palavras novas em português"\n}`;
+          audio = { mimeType, data: base64Data };
+        } else {
+          const textToAnalyze = item.originalText || '';
+          systemPrompt = "Você é um assistente que traduz e explica frases em inglês.";
+          userPrompt = `Analise a seguinte frase em inglês. Traduza-a para o português e escreva uma breve explicação gramatical/contextual em português sobre as palavras-chave ou expressões. Mantenha a explicação curta e formatada em tópicos com Markdown (Markdown bullet points). ${themeContext} ATENÇÃO: O campo "explanation" e todas as notas explicativas devem ser escritas INTEGRALMENTE EM PORTUGUÊS. Nunca use inglês para as explicações. Retorne APENAS um objeto JSON válido no seguinte formato: {\n  "originalText": "a frase em inglês",\n  "translation": "tradução em português",\n  "explanation": "explicação curta da frase/palavras novas em português"\n}. A frase é: "${textToAnalyze}"`;
+        }
+
+        const responseText = await geminiService.generateContent({
+          systemPrompt,
+          messages: [{ role: 'user', content: userPrompt }],
+          responseMimeType: 'application/json',
+          images,
+          audio
+        });
+
+        const cleanJson = responseText.replace(/```json/gi, '').replace(/```/gi, '').trim();
+        const parsedResult = JSON.parse(cleanJson);
+        originalText = parsedResult.originalText || item.originalText || 'Transcription failed';
+        translation = parsedResult.translation || '';
+        explanation = parsedResult.explanation || '';
+
+      } else {
+        // =========================================================================
+        // PROVEDOR SELECIONADO: OLLAMA (LOCAL)
+        // Usa o modelo local APENAS para extrair/transcrever. A tradução e análise
+        // são enviadas ao Gemini se disponível (ou API de Tradução MyMemory).
+        // =========================================================================
         
-        const localSystemPrompt = "Você é um assistente especialista em extrair texto de imagens em inglês.";
-        const localUserPrompt = `Abaixo está uma imagem de legenda ou foto contendo texto em inglês. Extraia a frase ou sentença principal em inglês contida na imagem. Retorne APENAS um objeto JSON válido no seguinte formato: {\n  "originalText": "a frase em inglês extraída"\n}`;
-        
-        try {
+        // --- 1. Extração do Texto Original usando o Modelo Local ---
+        if (item.source === 'photo' && item.imageUrl) {
+          const base64Data = item.imageUrl.split(',')[1];
+          const mimeType = item.imageUrl.split(';')[0].split(':')[1] || 'image/jpeg';
+          const localSystemPrompt = "Você é um assistente especialista em extrair texto de imagens em inglês.";
+          const localUserPrompt = `Abaixo está uma imagem de legenda ou foto contendo texto em inglês. Extraia a frase ou sentença principal em inglês contida na imagem. Retorne APENAS um objeto JSON válido no seguinte formato: {\n  "originalText": "a frase em inglês extraída"\n}`;
+          
           const localService = new OllamaProvider(ollamaApiUrl, 'gemma3');
           const resText = await localService.generateContent({
             systemPrompt: localSystemPrompt,
@@ -436,47 +486,16 @@ export function MiningInboxPage({
           const clean = resText.replace(/```json/gi, '').replace(/```/gi, '').trim();
           const parsed = JSON.parse(clean);
           originalText = parsed.originalText || '';
-        } catch (localErr) {
-          console.warn("Local model extraction failed, trying Gemini if key is available:", localErr);
-          if (geminiApiKey.trim()) {
-            const geminiService = new GeminiProvider(geminiApiKey);
-            const resText = await geminiService.generateContent({
-              systemPrompt: localSystemPrompt,
-              messages: [{ role: 'user', content: localUserPrompt }],
-              responseMimeType: 'application/json',
-              images: [{ mimeType, data: base64Data }]
-            });
-            const clean = resText.replace(/```json/gi, '').replace(/```/gi, '').trim();
-            const parsed = JSON.parse(clean);
-            originalText = parsed.originalText || '';
-          } else {
-            throw new Error("Modelo local falhou na extração da imagem e a chave de API do Gemini não está disponível.");
-          }
-        }
-      } else if (item.source === 'voice' && item.voiceUrl) {
-        // --- TRANSCRIÇÃO DE ÁUDIO ---
-        const base64Data = item.voiceUrl.split(',')[1];
-        const mimeType = item.voiceUrl.split(';')[0].split(':')[1] || 'audio/ogg';
-        
-        const voiceSystemPrompt = "Você é um assistente especialista em transcrever áudios falados em inglês.";
-        const voiceUserPrompt = `Ouça o áudio em inglês. Transcreva a frase principal em inglês que foi falada. Retorne APENAS um objeto JSON válido no seguinte formato: {\n  "originalText": "a frase em inglês transcrita"\n}`;
-        
-        if (geminiApiKey.trim()) {
-          const geminiService = new GeminiProvider(geminiApiKey);
-          const resText = await geminiService.generateContent({
-            systemPrompt: voiceSystemPrompt,
-            messages: [{ role: 'user', content: voiceUserPrompt }],
-            responseMimeType: 'application/json',
-            audio: { mimeType, data: base64Data }
-          });
-          const clean = resText.replace(/```json/gi, '').replace(/```/gi, '').trim();
-          const parsed = JSON.parse(clean);
-          originalText = parsed.originalText || '';
-        } else if (aiProvider === 'ollama') {
+        } else if (item.source === 'voice' && item.voiceUrl) {
+          const base64Data = item.voiceUrl.split(',')[1];
+          const mimeType = item.voiceUrl.split(';')[0].split(':')[1] || 'audio/ogg';
+          const localSystemPrompt = "Você é um assistente especialista em transcrever áudios falados em inglês.";
+          const localUserPrompt = `Ouça o áudio em inglês. Transcreva a frase principal em inglês que foi falada. Retorne APENAS um objeto JSON válido no seguinte formato: {\n  "originalText": "a frase em inglês transcrita"\n}`;
+          
           const localService = new OllamaProvider(ollamaApiUrl, 'llama3.2');
           const resText = await localService.generateContent({
-            systemPrompt: voiceSystemPrompt,
-            messages: [{ role: 'user', content: voiceUserPrompt }],
+            systemPrompt: localSystemPrompt,
+            messages: [{ role: 'user', content: localUserPrompt }],
             responseMimeType: 'application/json',
             audio: { mimeType, data: base64Data }
           });
@@ -484,46 +503,51 @@ export function MiningInboxPage({
           const parsed = JSON.parse(clean);
           originalText = parsed.originalText || '';
         } else {
-          throw new Error("Transcrição de áudio requer a chave de API do Gemini.");
+          originalText = item.originalText || '';
         }
-      } else {
-        // --- ANÁLISE DE TEXTO DIRETO ---
-        originalText = item.originalText || '';
-      }
 
-      if (!originalText || originalText.trim() === 'Transcription failed') {
-        throw new Error('Falha ao obter o texto original.');
-      }
+        if (!originalText || originalText.trim() === 'Transcription failed') {
+          throw new Error('Falha ao obter o texto original.');
+        }
 
-      // --- TRADUÇÃO E EXPLICAÇÃO (SEMPRE VIA GEMINI, COM FALLBACK DE API DE TRADUÇÃO SE GEMINI INDISPONÍVEL) ---
-      let translation = '';
-      let explanation = '';
-
-      if (geminiApiKey.trim()) {
-        try {
-          const geminiService = new GeminiProvider(geminiApiKey);
-          const geminiSystemPrompt = "Você é um assistente especialista em traduzir e explicar frases em inglês.";
-          const geminiUserPrompt = `Analise a seguinte frase em inglês. Traduza-a para o português do Brasil e escreva uma breve explicação gramatical/contextual em português sobre as palavras-chave ou expressões. Mantenha a explicação curta e formatada em tópicos com Markdown (Markdown bullet points). ${themeContext} ATENÇÃO: O campo "explanation" e todas as notas explicativas devem ser escritas INTEGRALMENTE EM PORTUGUÊS. Nunca use inglês para as explicações. Retorne APENAS um objeto JSON válido no seguinte formato: {\n  "translation": "tradução em português",\n  "explanation": "explicação curta da frase/palavras novas em português"\n}. A frase é: "${originalText}"`;
-          
-          const resText = await geminiService.generateContent({
-            systemPrompt: geminiSystemPrompt,
-            messages: [{ role: 'user', content: geminiUserPrompt }],
-            responseMimeType: 'application/json'
-          });
-          const clean = resText.replace(/```json/gi, '').replace(/```/gi, '').trim();
-          const parsed = JSON.parse(clean);
-          translation = parsed.translation || '';
-          explanation = parsed.explanation || '';
-        } catch (geminiErr) {
-          console.error("Gemini translation/explanation failed, falling back to free API:", geminiErr);
-          // Fallback to free API if Gemini fails
+        // --- 2. Tradução e Análise (Gemini se disponível, senão API de Tradução Gratuita) ---
+        if (geminiApiKey.trim()) {
+          try {
+            const geminiService = new GeminiProvider(geminiApiKey);
+            const geminiSystemPrompt = "Você é um assistente especialista em traduzir e explicar frases em inglês.";
+            const geminiUserPrompt = `Analise a seguinte frase em inglês. Traduza-a para o português do Brasil e escreva uma breve explicação gramatical/contextual em português sobre as palavras-chave ou expressões. Mantenha a explicação curta e formatada em tópicos com Markdown (Markdown bullet points). ${themeContext} ATENÇÃO: O campo "explanation" e todas as notas explicativas devem ser escritas INTEGRALMENTE EM PORTUGUÊS. Nunca use inglês para as explicações. Retorne APENAS um objeto JSON válido no seguinte formato: {\n  "translation": "tradução em português",\n  "explanation": "explicação curta da frase/palavras novas em português"\n}. A frase é: "${originalText}"`;
+            
+            const resText = await geminiService.generateContent({
+              systemPrompt: geminiSystemPrompt,
+              messages: [{ role: 'user', content: geminiUserPrompt }],
+              responseMimeType: 'application/json'
+            });
+            const clean = resText.replace(/```json/gi, '').replace(/```/gi, '').trim();
+            const parsed = JSON.parse(clean);
+            translation = parsed.translation || '';
+            explanation = parsed.explanation || '';
+          } catch (geminiErr) {
+            console.error("Gemini analysis of extracted text failed, falling back to free API:", geminiErr);
+            translation = await translateWithMyMemory(originalText);
+            explanation = '';
+          }
+        } else {
+          // Gemini is not available, use MyMemory free API for translation
           translation = await translateWithMyMemory(originalText);
           explanation = '';
         }
-      } else {
-        // Gemini is not available, use MyMemory free API for translation
-        translation = await translateWithMyMemory(originalText);
-        explanation = '';
+      }
+
+      // Consult the translation API if we got no translation yet
+      if (originalText && originalText !== 'Transcription failed' && (!translation || !translation.trim())) {
+        try {
+          const apiTranslation = await translateWithMyMemory(originalText);
+          if (apiTranslation && apiTranslation.trim()) {
+            translation = apiTranslation.trim();
+          }
+        } catch (translateErr) {
+          console.warn('Free Translation API failed during post-processing:', translateErr);
+        }
       }
 
       const updatedItem = {
