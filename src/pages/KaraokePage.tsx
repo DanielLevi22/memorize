@@ -12,7 +12,8 @@ import type { Playlist, AudioTrack, TranscriptionLine, ReadingCollection, WordTi
 import { Card as ShadcnCard } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
-import { getWordLevenshteinDistance, diffWords, type DiffWord, getLevenshteinDistance } from '../utils/srs';
+import { diffWords, type DiffWord, getLevenshteinDistance } from '../utils/srs';
+import { pronunciationSimilarity } from '../utils/phoneticScoring';
 import { separateVocalsCloud } from '../utils/vocalSeparationCloud';
 import { decodeAudioFile, adjustTimestampsSafeguard, bufferToMono16kWav, resampleToMono16k } from '../utils/audioChunker';
 import { translateWithMyMemory } from '../utils/readingProcessor';
@@ -1345,16 +1346,11 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
           const spokenWords = cleanSpoken.split(/\s+/).filter(Boolean);
           const expectedWords = cleanExpected.split(/\s+/).filter(Boolean);
 
-          let similarity = 0;
-          if (spokenWords.length > 0 && expectedWords.length > 0) {
-            const wordDist = getWordLevenshteinDistance(spokenWords, expectedWords);
-            const maxWords = Math.max(spokenWords.length, expectedWords.length);
-            similarity = Math.max(0, 1 - wordDist / maxWords) * 100;
-          } else {
-            similarity = cleanSpoken === cleanExpected ? 100 : 0;
-          }
-
-          const roundedSimilarity = Math.round(similarity);
+          // Pontuação com tolerância fonética: trocar "think" por "sink" é sotaque e
+          // custa pouco; trocar por "elephant" é erro de conteúdo e custa integral.
+          const roundedSimilarity = (spokenWords.length > 0 && expectedWords.length > 0)
+            ? pronunciationSimilarity(spokenWords, expectedWords)
+            : (cleanSpoken === cleanExpected ? 100 : 0);
           setSpeechSimilarity(roundedSimilarity);
 
           const diffResult = diffWords(spokenText, expectedText);
