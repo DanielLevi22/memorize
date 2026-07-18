@@ -200,6 +200,7 @@ export interface TextLine {
   startTime?: number;           // Tempo de início em segundos (opcional para áudio)
   endTime?: number;             // Tempo de término em segundos (opcional para áudio)
   context?: string;             // Explicação gramatical / contexto opcional
+  words?: WordTiming[];         // Tempos por palavra para o destaque do karaokê
 }
 
 export type ReadingLine = TextLine;
@@ -246,6 +247,19 @@ export interface Playlist {
   updatedAt: number;
 }
 
+/**
+ * Tempo de uma palavra individual dentro de uma linha.
+ *
+ * Sem isso o karaokê precisa estimar quando cada palavra acende dividindo a duração da
+ * linha proporcionalmente à contagem de caracteres — o que assume ritmo uniforme e erra
+ * bastante em canto (notas longas, melismas, pausas).
+ */
+export interface WordTiming {
+  text: string;
+  startTime: number;
+  endTime: number;
+}
+
 /** Uma faixa de áudio completa enviada pelo usuário para um álbum */
 export interface TranscriptionLine {
   id: string;
@@ -254,6 +268,7 @@ export interface TranscriptionLine {
   startTime: number;    // Tempo de início em segundos (ex: 12.5)
   endTime?: number;     // Tempo de término em segundos (opcional)
   difficulty?: 'none' | 'easy' | 'hard'; // Nível de dificuldade para foco visual
+  words?: WordTiming[]; // Tempos por palavra, quando o motor de transcrição os fornece
 }
 
 export interface AiTranscriptionProgress {
@@ -269,6 +284,7 @@ export interface AudioTrack {
   description?: string; // Descrição opcional (ex: Aula 1, Podcast, etc.)
   audioFile: Blob; // Arquivo de áudio (MP3/WAV/etc.)
   instrumentalFile?: Blob; // Arquivo de áudio sem a voz do cantor (gerado por IA)
+  vocalFile?: Blob; // Vocal isolado (gerado por IA), usado para transcrever com mais precisão
   repeatTimes?: number; // Quantidade de repetições: 0 = infinito, 1 = 1x (padrão), 2+ = N vezes
   transcriptionLines?: TranscriptionLine[]; // Legado: Linhas sincronizadas de texto/transcrição
   textId?: string; // ID do recurso de texto correspondente na tabela 'texts'

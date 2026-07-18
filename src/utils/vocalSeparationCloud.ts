@@ -7,10 +7,11 @@
  * Docs: docs/estudo_extracao_vocal.md
  */
 
-import { Client } from '@gradio/client';
+import { Client, handle_file } from '@gradio/client';
 
 export interface CloudSeparationResult {
-  instrumentalBlob: Blob;
+  /** Faixa retornada — vocal isolado ou instrumental, conforme o `outputType` solicitado */
+  outputBlob: Blob;
   source: string;
 }
 
@@ -57,7 +58,7 @@ export async function separateVocalsCloud(
         onProgress
       );
 
-      return { instrumentalBlob: resultBlob, source: space.name };
+      return { outputBlob: resultBlob, source: space.name };
     } catch (err: unknown) {
       const msg = toMessage(err);
       console.error(`[VocalCloud] FALHA em ${space.name}:`, err);
@@ -65,8 +66,10 @@ export async function separateVocalsCloud(
     }
   }
 
+  // A causa concreta vai na PRIMEIRA linha: quem exibe a mensagem costuma mostrar só ela,
+  // e o texto genérico anterior escondia o motivo real algumas linhas abaixo.
   throw new Error(
-    `Todos os servidores estão indisponíveis.\n\n${errors.join('\n')}\n\nAbra o Console (F12) para mais detalhes.`
+    `Separação indisponível — ${errors.join(' | ')}`
   );
 }
 
@@ -79,15 +82,28 @@ async function callSpace(
 ): Promise<Blob> {
   // 1. Conectar
   onProgress(15, 'Conectando ao Space HuggingFace...');
-  const client = await Client.connect(spaceName);
+  let client: Awaited<ReturnType<typeof Client.connect>>;
+  try {
+    client = await Client.connect(spaceName);
+  } catch (err: unknown) {
+    throw new Error(`falha ao conectar: ${toMessage(err)}`);
+  }
 
-  // 2. Ver API disponível para debug
-  const apiInfo = await client.view_api();
-  console.log('[VocalCloud] API disponível:', JSON.stringify(apiInfo, null, 2));
+  // 2. Inspeção da API apenas para diagnóstico — nunca deve derrubar a separação.
+  //    Antes era uma chamada obrigatória cujo único uso era um console.log gigante:
+  //    se ela falhasse, a separação inteira falhava junto sem motivo real.
+  try {
+    const apiInfo: any = await client.view_api();
+    console.log('[VocalCloud] Endpoints disponíveis:', Object.keys(apiInfo?.named_endpoints ?? {}));
+  } catch (err: unknown) {
+    console.warn('[VocalCloud] view_api() indisponível (seguindo mesmo assim):', toMessage(err));
+  }
 
   onProgress(25, 'Enviando arquivo de áudio...');
 
-  // 3. Montar o arquivo — sem handle_file, passando Blob diretamente
+  // 3. Montar o arquivo. O endpoint declara o parâmetro como FileData (path/url), não como
+  //    File cru — `handle_file` faz o upload e devolve a referência no formato esperado.
+  //    Passar o Blob direto faz o servidor Gradio rejeitar o payload.
   const audioFile = new File([audioBlob], 'audio.wav', {
     type: audioBlob.type || 'audio/wav',
   });
@@ -99,12 +115,16 @@ async function callSpace(
 
   let result: Awaited<ReturnType<typeof client.predict>>;
   try {
-    // Usa endpoint nomeado (/inference) e parâmetro nomeado {audio: File}
-    // Confirmado via view_api(): endpoint='/inference', param='audio'
-    result = await client.predict(endpoint, { audio: audioFile });
+    // Usa endpoint nomeado (/inference) e parâmetro nomeado {audio}
+    // Confirmado via /gradio_api/info: endpoint='/inference', param='audio', tipo FileData
+    result = await client.predict(endpoint, { audio: handle_file(audioFile) });
   } catch (err: unknown) {
     console.error('[VocalCloud] predict() falhou:', err);
     throw new Error(`predict() falhou: ${toMessage(err)}`);
+  }
+
+  if ((result as any)?.type === 'status' && (result as any)?.stage === 'error') {
+    throw new Error(`o Space retornou erro: ${toMessage((result as any).message)}`);
   }
 
   console.log('[VocalCloud] Resultado bruto:', result);
