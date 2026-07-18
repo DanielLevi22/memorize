@@ -1,4 +1,84 @@
-import type { TranscriptionLine } from '../types';
+import type { TranscriptionLine, WordTiming } from '../types';
+
+export interface GroupWordsOptions {
+  /** Pausa (em segundos) a partir da qual se considera fim de frase */
+  maxGapSeconds?: number;
+  /** Teto de palavras por linha, para não gerar linhas gigantes em trechos sem pausa */
+  maxWordsPerLine?: number;
+  /** Teto de duração da linha em segundos */
+  maxLineDuration?: number;
+}
+
+/**
+ * Agrupa palavras datadas (word-level timestamps) em linhas de letra.
+ *
+ * Com `return_timestamps: 'word'` o Whisper devolve uma palavra por chunk, o que é a
+ * granularidade certa para o destaque do karaokê mas inútil para exibir como letra.
+ * Aqui as palavras voltam a virar frases, quebrando em pausa longa, pontuação forte ou
+ * nos tetos de tamanho — e cada linha carrega os tempos originais em `words`.
+ */
+export const groupWordsIntoLines = (
+  words: WordTiming[],
+  options: GroupWordsOptions = {}
+): TranscriptionLine[] => {
+  const {
+    maxGapSeconds = 0.6,
+    maxWordsPerLine = 10,
+    maxLineDuration = 8
+  } = options;
+
+  const newId = () =>
+    (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : Math.random().toString(36).substring(2, 15);
+
+  const validWords = words.filter(w => w && typeof w.text === 'string' && w.text.trim().length > 0);
+  if (validWords.length === 0) return [];
+
+  const lines: TranscriptionLine[] = [];
+  let current: WordTiming[] = [];
+
+  const flush = () => {
+    if (current.length === 0) return;
+    lines.push({
+      id: newId(),
+      text: current.map(w => w.text.trim()).join(' '),
+      startTime: parseFloat(current[0].startTime.toFixed(2)),
+      endTime: parseFloat(current[current.length - 1].endTime.toFixed(2)),
+      words: current.map(w => ({
+        text: w.text.trim(),
+        startTime: parseFloat(w.startTime.toFixed(2)),
+        endTime: parseFloat(w.endTime.toFixed(2))
+      }))
+    });
+    current = [];
+  };
+
+  for (let i = 0; i < validWords.length; i++) {
+    const word = validWords[i];
+    current.push(word);
+
+    const next = validWords[i + 1];
+    if (!next) break;
+
+    const gap = next.startTime - word.endTime;
+    const lineDuration = next.endTime - current[0].startTime;
+    // Pontuação forte encerra a frase mesmo sem pausa perceptível
+    const endsSentence = /[.!?…]["')\]]?$/.test(word.text.trim());
+
+    if (
+      gap >= maxGapSeconds ||
+      endsSentence ||
+      current.length >= maxWordsPerLine ||
+      lineDuration >= maxLineDuration
+    ) {
+      flush();
+    }
+  }
+
+  flush();
+  return lines;
+};
 
 /**
  * Decodifica um arquivo de áudio (Blob/File) para um AudioBuffer usando a Web Audio API.
@@ -161,10 +241,15 @@ export const adjustTimestampsSafeguard = (
   // Ordena pelo tempo de início inicial
   const sorted = [...lines].sort((a, b) => a.startTime - b.startTime);
 
+  // Quando as linhas trazem tempos por palavra medidos no áudio, as heurísticas abaixo
+  // (que estimam início por WPM e empurram frases para espaçá-las) só afastam os tempos
+  // da realidade. Elas existem para consertar timestamps grosseiros de nível de frase.
+  const hasMeasuredWordTimings = sorted.every(l => l.words && l.words.length > 0);
+
   // Heurística de Introdução Instrumental: se a primeira linha começar antes de 1.0s,
   // mas tiver uma duração muito longa para o número de palavras, empurra o início
   // para evitar soletrar antes de o cantor começar a cantar.
-  if (sorted.length > 0 && sorted[0].startTime < 1.0) {
+  if (!hasMeasuredWordTimings && sorted.length > 0 && sorted[0].startTime < 1.0) {
     const firstLine = sorted[0];
     const words = firstLine.text.split(/\s+/).filter(Boolean).length;
     const end = firstLine.endTime ?? (firstLine.startTime + 3.0);
@@ -180,15 +265,19 @@ export const adjustTimestampsSafeguard = (
   }
   
   // 1. Ajusta os tempos de início garantindo o distanciamento mínimo
-  for (let i = 1; i < sorted.length; i++) {
-    const prevTime = sorted[i - 1].startTime;
-    const currTime = sorted[i].startTime;
-    
-    if (currTime < prevTime + minSpacing) {
-      sorted[i] = {
-        ...sorted[i],
-        startTime: parseFloat((prevTime + minSpacing).toFixed(2))
-      };
+  //    (pulado com tempos medidos: eles já são monotônicos e deslocá-los dessincronizaria
+  //     o início da linha em relação aos tempos das palavras que ela contém)
+  if (!hasMeasuredWordTimings) {
+    for (let i = 1; i < sorted.length; i++) {
+      const prevTime = sorted[i - 1].startTime;
+      const currTime = sorted[i].startTime;
+
+      if (currTime < prevTime + minSpacing) {
+        sorted[i] = {
+          ...sorted[i],
+          startTime: parseFloat((prevTime + minSpacing).toFixed(2))
+        };
+      }
     }
   }
 
@@ -229,15 +318,14 @@ export const adjustTimestampsSafeguard = (
 };
 
 /**
- * Converte um AudioBuffer completo para um Blob no formato WAV Mono a 16000Hz (16kHz).
- * Ideal para enviar arquivos comprimidos e leves para APIs de transcrição e alinhamento forçado.
+ * Mescla todos os canais para Mono e reamostra para a taxa alvo por interpolação linear.
+ * Usado como caminho síncrono e como fallback quando o OfflineAudioContext não está disponível.
  */
-export const bufferToMono16kWav = (buffer: AudioBuffer): Blob => {
-  const targetSampleRate = 16000;
+const mixToMonoAndResampleLinear = (buffer: AudioBuffer, targetSampleRate: number): Float32Array => {
   const numChannels = buffer.numberOfChannels;
   const originalSampleRate = buffer.sampleRate;
   const numSamples = buffer.length;
-  
+
   // 1. Mescla para Mono se tiver múltiplos canais
   const monoData = new Float32Array(numSamples);
   if (numChannels === 1) {
@@ -255,28 +343,74 @@ export const bufferToMono16kWav = (buffer: AudioBuffer): Blob => {
       monoData[i] = sum / numChannels;
     }
   }
-  
-  // 2. Reamostra para 16kHz usando interpolação linear
-  let resampledData: Float32Array;
+
+  // 2. Reamostra para a taxa alvo usando interpolação linear
   if (originalSampleRate === targetSampleRate) {
-    resampledData = monoData;
-  } else {
-    const ratio = originalSampleRate / targetSampleRate;
-    const newLength = Math.round(numSamples / ratio);
-    resampledData = new Float32Array(newLength);
-    for (let i = 0; i < newLength; i++) {
-      const position = i * ratio;
-      const index = Math.floor(position);
-      const fraction = position - index;
-      const indexNext = Math.min(numSamples - 1, index + 1);
-      
-      const sample = monoData[index];
-      const sampleNext = monoData[indexNext];
-      resampledData[i] = sample + fraction * (sampleNext - sample);
+    return monoData;
+  }
+
+  const ratio = originalSampleRate / targetSampleRate;
+  const newLength = Math.round(numSamples / ratio);
+  const resampledData = new Float32Array(newLength);
+  for (let i = 0; i < newLength; i++) {
+    const position = i * ratio;
+    const index = Math.floor(position);
+    const fraction = position - index;
+    const indexNext = Math.min(numSamples - 1, index + 1);
+
+    const sample = monoData[index];
+    const sampleNext = monoData[indexNext];
+    resampledData[i] = sample + fraction * (sampleNext - sample);
+  }
+  return resampledData;
+};
+
+/**
+ * Converte um AudioBuffer para Float32Array Mono a 16kHz (formato exigido pelo Whisper).
+ *
+ * Usa OfflineAudioContext, que aplica o filtro anti-aliasing adequado durante a reamostragem.
+ * A interpolação/decimação manual introduz aliasing audível em 44.1kHz -> 16kHz e degrada
+ * sensivelmente a acurácia do reconhecimento. Faz fallback para o caminho manual caso o
+ * navegador não aceite 16kHz em OfflineAudioContext.
+ */
+export const resampleToMono16k = async (buffer: AudioBuffer): Promise<Float32Array> => {
+  const targetSampleRate = 16000;
+
+  if (buffer.sampleRate === targetSampleRate && buffer.numberOfChannels === 1) {
+    return buffer.getChannelData(0);
+  }
+
+  const OfflineCtxClass =
+    (typeof window !== 'undefined' && (window.OfflineAudioContext || (window as any).webkitOfflineAudioContext)) || null;
+
+  if (OfflineCtxClass) {
+    try {
+      // numberOfChannels = 1 faz o downmix para mono seguindo as regras da Web Audio API
+      const frameCount = Math.ceil(buffer.duration * targetSampleRate);
+      const offlineCtx = new OfflineCtxClass(1, frameCount, targetSampleRate);
+      const source = offlineCtx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(offlineCtx.destination);
+      source.start();
+      const rendered = await offlineCtx.startRendering();
+      return rendered.getChannelData(0);
+    } catch (err) {
+      console.warn('[audioChunker] OfflineAudioContext falhou em 16kHz, usando reamostragem manual.', err);
     }
   }
-  
-  // 3. Monta cabeçalho WAV (PCM 16-bit, Mono, 16000Hz)
+
+  return mixToMonoAndResampleLinear(buffer, targetSampleRate);
+};
+
+/**
+ * Converte um AudioBuffer completo para um Blob no formato WAV Mono a 16000Hz (16kHz).
+ * Ideal para enviar arquivos comprimidos e leves para APIs de transcrição e alinhamento forçado.
+ */
+export const bufferToMono16kWav = (buffer: AudioBuffer): Blob => {
+  const targetSampleRate = 16000;
+  const resampledData = mixToMonoAndResampleLinear(buffer, targetSampleRate);
+
+  // Monta cabeçalho WAV (PCM 16-bit, Mono, 16000Hz)
   const bufferLength = resampledData.length * 2;
   const wavBuffer = new ArrayBuffer(44 + bufferLength);
   const view = new DataView(wavBuffer);

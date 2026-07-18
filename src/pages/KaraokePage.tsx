@@ -8,15 +8,16 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../components/ui/dialog';
 import { db } from '../db/db';
 import { useLiveQuery } from 'dexie-react-hooks';
-import type { Playlist, AudioTrack, TranscriptionLine, ReadingCollection } from '../types';
+import type { Playlist, AudioTrack, TranscriptionLine, ReadingCollection, WordTiming } from '../types';
 import { Card as ShadcnCard } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
 import { getWordLevenshteinDistance, diffWords, type DiffWord, getLevenshteinDistance } from '../utils/srs';
 import { separateVocalsCloud } from '../utils/vocalSeparationCloud';
-import { decodeAudioFile, adjustTimestampsSafeguard, bufferToMono16kWav } from '../utils/audioChunker';
+import { decodeAudioFile, adjustTimestampsSafeguard, bufferToMono16kWav, resampleToMono16k } from '../utils/audioChunker';
 import { translateWithMyMemory } from '../utils/readingProcessor';
 import { useAI } from '../services/ai/AIContext';
+import { searchLyrics, parseLrcToLines, parsePlainLyricsToLines, type LyricsSearchResult } from '../utils/lyricsProvider';
 
 const cleanString = (str: string) => {
   if (!str) return '';
@@ -28,6 +29,74 @@ const cleanString = (str: string) => {
     .replace(/\s+/g, " ")
     .trim();
 };
+
+/**
+ * Idiomas oferecidos para o reconhecimento do ÁUDIO (o que está sendo cantado).
+ * Não confundir com o idioma da tradução, que segue sempre em português do Brasil.
+ *
+ * `value` usa ISO-639-1, aceito tanto pelo Whisper (local, OpenAI e Groq) quanto pelo
+ * parâmetro `language`. `promptName` é usado no prompt do Gemini, que recebe texto livre.
+ */
+const AUDIO_LANGUAGES: { value: string; label: string; promptName: string }[] = [
+  { value: 'en', label: 'Inglês', promptName: 'inglês' },
+  { value: 'es', label: 'Espanhol', promptName: 'espanhol' },
+  { value: 'pt', label: 'Português', promptName: 'português' },
+  { value: 'fr', label: 'Francês', promptName: 'francês' },
+  { value: 'it', label: 'Italiano', promptName: 'italiano' },
+  { value: 'de', label: 'Alemão', promptName: 'alemão' },
+  { value: 'ja', label: 'Japonês', promptName: 'japonês' },
+  { value: 'ko', label: 'Coreano', promptName: 'coreano' },
+  { value: 'zh', label: 'Chinês (Mandarim)', promptName: 'chinês mandarim' },
+  { value: 'ru', label: 'Russo', promptName: 'russo' },
+  { value: 'auto', label: 'Detectar automaticamente', promptName: '' }
+];
+
+/**
+ * Modelos Whisper locais.
+ *
+ * Todos são variantes `_timestamped`: são as únicas exportadas com `output_attentions=True`,
+ * e sem as cross-attentions o `return_timestamps: 'word'` falha com
+ * "Model outputs must contain cross attentions to extract timestamps".
+ */
+const LOCAL_WHISPER_MODELS: { value: string; label: string }[] = [
+  { value: 'onnx-community/whisper-tiny_timestamped', label: 'Tiny (~75MB - Mais Rápido)' },
+  { value: 'onnx-community/whisper-base_timestamped', label: 'Base (~140MB - Melhor Precisão)' },
+  { value: 'onnx-community/whisper-small_timestamped', label: 'Small (~460MB - Alta Precisão)' },
+  { value: 'onnx-community/whisper-medium_timestamped', label: 'Medium (~1.5GB - Altíssima Precisão)' },
+  { value: 'onnx-community/whisper-large-v3-turbo_timestamped', label: 'Large v3 Turbo (~1.6GB - Extrema Precisão)' }
+];
+
+/** IDs antigos (sem cross-attentions) já gravados no localStorage → variante equivalente */
+const LEGACY_WHISPER_MODEL_MAP: Record<string, string> = {
+  'onnx-community/whisper-tiny': 'onnx-community/whisper-tiny_timestamped',
+  'onnx-community/whisper-base': 'onnx-community/whisper-base_timestamped',
+  'onnx-community/whisper-small': 'onnx-community/whisper-small_timestamped',
+  'onnx-community/whisper-medium-ONNX': 'onnx-community/whisper-medium_timestamped',
+  'onnx-community/whisper-large-v3-turbo': 'onnx-community/whisper-large-v3-turbo_timestamped'
+};
+
+const normalizeWhisperModel = (modelId: string): string => {
+  if (LEGACY_WHISPER_MODEL_MAP[modelId]) return LEGACY_WHISPER_MODEL_MAP[modelId];
+  // Valor desconhecido (ou já migrado) só é aceito se existir na lista atual
+  return LOCAL_WHISPER_MODELS.some(m => m.value === modelId)
+    ? modelId
+    : LOCAL_WHISPER_MODELS[0].value;
+};
+
+/**
+ * Formas de obter a letra, apresentadas em abas.
+ *
+ * A ordem reflete a cascata recomendada: letra já sincronizada por pessoas primeiro,
+ * transcrição automática depois, e trabalho manual por último. Antes os três blocos
+ * ficavam empilhados na mesma tela, competindo por atenção.
+ */
+const LYRICS_SOURCE_TABS = [
+  { value: 'buscar', label: 'Buscar Letra', icon: 'music' },
+  { value: 'transcrever', label: 'Transcrever', icon: 'sparkles' },
+  { value: 'manual', label: 'Manual & LRC', icon: 'settings' }
+] as const;
+
+type LyricsSourceTab = typeof LYRICS_SOURCE_TABS[number]['value'];
 
 interface FeedbackBalloon {
   id: string;
@@ -56,6 +125,9 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   // DB States
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [playlistCoverUrls, setPlaylistCoverUrls] = useState<Record<string, string>>({});
+  // Espelho em ref: o cleanup do effect de montagem captura o valor do primeiro render
+  // (sempre {}) e por isso nunca revogava as objectURLs das capas.
+  const playlistCoverUrlsRef = useRef<Record<string, string>>({});
   const [allTracks, setAllTracks] = useState<AudioTrack[]>([]);
 
   // Selection state
@@ -97,15 +169,23 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   const [syncingLineIdx, setSyncingLineIdx] = useState(0);
   const [isTranscribingAi, setIsTranscribingAi] = useState(false);
   const [transcribingProgress, setTranscribingProgress] = useState('');
+  // Espelho em ref: os loops de retry precisam do texto atual, e o valor capturado no
+  // closure de `fetchWithRetry` ficaria congelado no render em que a requisição começou.
+  const transcribingProgressRef = useRef('');
+  useEffect(() => {
+    transcribingProgressRef.current = transcribingProgress;
+  }, [transcribingProgress]);
   const [transcribingPercent, setTranscribingPercent] = useState(0);
   const isTranscribeCancelledRef = useRef(false);
+  const whisperWorkerRef = useRef<Worker | null>(null);
   const [isConfirmRestartModalOpen, setIsConfirmRestartModalOpen] = useState(false);
   const [transcriptionProvider, setTranscriptionProvider] = useState<'gemini' | 'openai' | 'groq' | 'local'>(() => {
     return (localStorage.getItem('memorize_transcription_provider') as any) || 'local';
   });
 
-  const [localModelSize, setLocalModelSize] = useState<'onnx-community/whisper-tiny' | 'onnx-community/whisper-base' | 'onnx-community/whisper-small' | 'onnx-community/whisper-medium-ONNX' | 'onnx-community/whisper-large-v3-turbo'>(() => {
-    return (localStorage.getItem('memorize_local_whisper_model_size') as any) || 'onnx-community/whisper-tiny';
+  const [localModelSize, setLocalModelSize] = useState<string>(() => {
+    // Migra automaticamente quem já tinha um modelo sem cross-attentions salvo
+    return normalizeWhisperModel(localStorage.getItem('memorize_local_whisper_model_size') || '');
   });
 
   useEffect(() => {
@@ -115,6 +195,37 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   useEffect(() => {
     localStorage.setItem('memorize_local_whisper_model_size', localModelSize);
   }, [localModelSize]);
+
+  // Idioma do áudio a transcrever. Inglês por padrão: o auto-detect do Whisper troca de
+  // idioma no meio da música e produz linhas em idiomas diferentes na mesma faixa.
+  const [audioLanguage, setAudioLanguage] = useState<string>(() => {
+    return localStorage.getItem('memorize_transcription_audio_language') || 'en';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('memorize_transcription_audio_language', audioLanguage);
+  }, [audioLanguage]);
+
+  // Isolar o vocal antes de transcrever. Desligado por padrão: depende de fila pública
+  // gratuita e acrescenta alguns minutos. Uma vez gerado, o stem fica salvo na faixa.
+  const [useVocalStemForAsr, setUseVocalStemForAsr] = useState<boolean>(() => {
+    return localStorage.getItem('memorize_transcription_use_vocal_stem') === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('memorize_transcription_use_vocal_stem', String(useVocalStemForAsr));
+  }, [useVocalStemForAsr]);
+
+  // Aba ativa entre as formas de obter a letra
+  const [lyricsSourceTab, setLyricsSourceTab] = useState<LyricsSourceTab>('buscar');
+
+  // Busca de letra sincronizada (LRCLIB)
+  const [isLyricsSearchOpen, setIsLyricsSearchOpen] = useState(false);
+  const [lyricsQuery, setLyricsQuery] = useState('');
+  const [lyricsResults, setLyricsResults] = useState<LyricsSearchResult[]>([]);
+  const [isSearchingLyrics, setIsSearchingLyrics] = useState(false);
+  const [lyricsSearchError, setLyricsSearchError] = useState('');
+  const [hasSearchedLyrics, setHasSearchedLyrics] = useState(false);
 
   // Alignment & Custom Translation Modal States
   const [isAdjustmentModalOpen, setIsAdjustmentModalOpen] = useState(false);
@@ -126,8 +237,12 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   const [speechTranscript, setSpeechTranscript] = useState('');
   const [speechSimilarity, setSpeechSimilarity] = useState<number | null>(null);
   const [speechWordDiffs, setSpeechWordDiffs] = useState<DiffWord[]>([]);
+  // Notas definitivas por linha (somente resultados finais do reconhecedor) — alimentam a média
   const [lineScores, setLineScores] = useState<Record<number, number>>({});
   const lineScoresRef = useRef<Record<number, number>>({});
+  // Melhor nota observada em resultados interinos — usada apenas como fallback do balão,
+  // nunca na média, porque um trecho parcial pode casar por acaso e inflar a pontuação.
+  const provisionalScoresRef = useRef<Record<number, number>>({});
   useEffect(() => {
     lineScoresRef.current = lineScores;
   }, [lineScores]);
@@ -145,6 +260,11 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   const vocalReductionInverterRef = useRef<GainNode | null>(null);
   const vocalReductionSumRef = useRef<GainNode | null>(null);
   const [isVocalReductionActive, setIsVocalReductionActive] = useState(false);
+
+  // Um elemento <audio> só aceita UMA MediaElementAudioSourceNode durante toda a sua vida.
+  // Guardamos a source criada e o elemento correspondente para reconstruir apenas o grafo.
+  const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const mediaSourceElementRef = useRef<HTMLAudioElement | null>(null);
 
   // AI Separation states
   const [isIaInstrumentalActive, setIsIaInstrumentalActive] = useState(false);
@@ -217,17 +337,32 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     activeLineIdxRef.current = activeLineIdx;
   }, [activeLineIdx]);
 
-  // Clear triggered balloons set when song changes or restarts
-  useEffect(() => {
+  /**
+   * Zera a sessão de pontuação (notas, balões já disparados e linha anterior).
+   *
+   * Precisa rodar tanto na troca de faixa quanto quando a MESMA faixa recomeça (loop ou
+   * `repeatTimes`): sem isso a segunda passada não dispara balão nenhum, porque todos os
+   * índices já constam em `triggeredBalloonsRef`, e a média continua presa à primeira tentativa.
+   */
+  const resetPronunciationSession = () => {
     triggeredBalloonsRef.current = new Set();
+    provisionalScoresRef.current = {};
     prevActiveLineIdxRef.current = -1;
+    setLineScores({});
+  };
+
+  // Clear scoring session when song changes
+  useEffect(() => {
+    resetPronunciationSession();
   }, [activeTrack?.id]);
 
   // Trigger feedback balloons on line transition using highest score reached
   useEffect(() => {
     const prevIdx = prevActiveLineIdxRef.current;
     if (prevIdx >= 0 && prevIdx !== activeLineIdx) {
-      const score = lineScores[prevIdx];
+      // Usa a nota final da linha; se o navegador não fechou nenhuma frase durante ela,
+      // cai para a melhor nota provisória observada para não engolir o feedback.
+      const score = lineScores[prevIdx] ?? provisionalScoresRef.current[prevIdx];
       if (score !== undefined && !triggeredBalloonsRef.current.has(prevIdx)) {
         triggeredBalloonsRef.current.add(prevIdx);
         triggerFeedbackBalloon(score);
@@ -261,7 +396,8 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
         translation: l.translated || '',
         startTime: l.startTime ?? 0,
         endTime: l.endTime,
-        difficulty: l.difficulty || 'none'
+        difficulty: l.difficulty || 'none',
+        words: l.words
       }));
     }
     return activeTrack?.transcriptionLines || [];
@@ -270,6 +406,17 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   useEffect(() => {
     activeLinesRef.current = displayedLines;
   }, [displayedLines]);
+
+  /**
+   * Há alguma letra associada à faixa — salva no banco, herdada do formato legado ou
+   * ainda apenas no editor. Governa a exibição dos controles de exclusão.
+   */
+  const hasAnyTranscription = React.useMemo(() => {
+    return !!activeTrack?.textId
+      || displayedLines.length > 0
+      || tempLines.length > 0
+      || transcriptionText.trim().length > 0;
+  }, [activeTrack?.textId, displayedLines, tempLines, transcriptionText]);
 
   // Load playlists and all tracks on mount
   useEffect(() => {
@@ -284,6 +431,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
             urls[pl.id] = URL.createObjectURL(pl.coverImage);
           }
         });
+        playlistCoverUrlsRef.current = urls;
         setPlaylistCoverUrls(urls);
 
         const tracks = await db.audioTracks.toArray();
@@ -305,7 +453,8 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
 
     return () => {
       cleanupAudio();
-      Object.values(playlistCoverUrls).forEach(url => URL.revokeObjectURL(url));
+      Object.values(playlistCoverUrlsRef.current).forEach(url => URL.revokeObjectURL(url));
+      playlistCoverUrlsRef.current = {};
     };
   }, [initialTrackId]);
 
@@ -391,7 +540,9 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
           // Caso comum: edição simples de digitação ou correção ortográfica, mantendo a estrutura de frases.
           updated = tempLines.map((line, idx) => ({
             ...line,
-            text: rawLines[idx]
+            text: rawLines[idx],
+            // Editar o texto invalida os tempos por palavra medidos no áudio
+            words: line.text.trim() === rawLines[idx] ? line.words : undefined
           }));
         } else {
           // Caso estrutural: frases foram adicionadas ou removidas.
@@ -525,6 +676,9 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
       if (progress >= endOfLine) {
         audioRef.current.currentTime = currentLine.startTime;
         setProgress(currentLine.startTime);
+        // Cada repetição da linha é uma nova tentativa: libera o balão de feedback de novo
+        triggeredBalloonsRef.current.delete(activeLineIdx);
+        delete provisionalScoresRef.current[activeLineIdx];
       }
     }
   }, [progress, isLoopingLine, activeLineIdx, displayedLines, duration]);
@@ -565,24 +719,64 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     }
   };
 
-  const setupVisualizer = (audioElement: HTMLAudioElement) => {
+  // Desconecta e descarta os nós da redução de voz (soma estéreo fora de fase)
+  const disconnectVocalReductionNodes = () => {
+    [vocalReductionSplitterRef, vocalReductionInverterRef, vocalReductionSumRef].forEach(ref => {
+      try {
+        ref.current?.disconnect();
+      } catch (e) {
+        // Nó já desconectado
+      }
+      ref.current = null;
+    });
+  };
+
+  /**
+   * (Re)monta o grafo de áudio: source -> analyser -> [redução de voz] -> destino.
+   *
+   * `vocalReductionEnabled` é recebido por parâmetro porque `toggleVocalReduction` precisa
+   * aplicar o valor novo imediatamente — ler `isVocalReductionActive` aqui pegaria o estado
+   * do render anterior e o toggle aplicaria sempre o valor defasado.
+   */
+  const setupVisualizer = (audioElement: HTMLAudioElement, vocalReductionEnabled = isVocalReductionActive) => {
     cleanupVisualizer();
     try {
       if (!audioContextRef.current) {
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
       }
       const audioContext = audioContextRef.current;
-      
+
       if (!analyserRef.current) {
         analyserRef.current = audioContext.createAnalyser();
         analyserRef.current.fftSize = 128;
       }
       const analyser = analyserRef.current;
 
-      const source = audioContext.createMediaElementSource(audioElement);
+      // Só cria a source quando o elemento realmente mudou. Chamar createMediaElementSource
+      // duas vezes no mesmo elemento lança InvalidStateError e deixava o grafo inconsistente.
+      if (mediaSourceElementRef.current !== audioElement || !mediaSourceRef.current) {
+        try {
+          mediaSourceRef.current?.disconnect();
+        } catch (e) {
+          // Nó já desconectado
+        }
+        mediaSourceRef.current = audioContext.createMediaElementSource(audioElement);
+        mediaSourceElementRef.current = audioElement;
+      }
+      const source = mediaSourceRef.current;
+
+      // Reconstrói o grafo do zero para não acumular conexões duplicadas a cada toggle
+      try {
+        source.disconnect();
+        analyser.disconnect();
+      } catch (e) {
+        // Nós já desconectados
+      }
+      disconnectVocalReductionNodes();
+
       source.connect(analyser);
-      
-      if (isVocalReductionActive) {
+
+      if (vocalReductionEnabled) {
         const splitter = audioContext.createChannelSplitter(2);
         const inverter = audioContext.createGain();
         inverter.gain.value = -1;
@@ -664,7 +858,52 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
   const toggleVocalReduction = (active: boolean) => {
     setIsVocalReductionActive(active);
     if (!audioRef.current) return;
-    setupVisualizer(audioRef.current);
+    // Passa `active` explicitamente: o estado só reflete o novo valor no próximo render
+    setupVisualizer(audioRef.current, active);
+  };
+
+  /**
+   * Instala os handlers de ciclo de vida do áudio (metadados, fim de faixa e polling de
+   * progresso). Centralizado porque `handlePlayTrack` e `toggleIaInstrumental` montavam
+   * blocos idênticos e divergiam com facilidade.
+   */
+  const attachPlaybackHandlers = (audio: HTMLAudioElement, track: AudioTrack) => {
+    audio.onloadedmetadata = () => {
+      setDuration(audio.duration);
+    };
+
+    audio.onended = () => {
+      // Recomeçar a faixa é uma nova tentativa de canto: notas e balões voltam do zero
+      resetPronunciationSession();
+
+      if (isLoopingRef.current) {
+        audio.currentTime = 0;
+        audio.play().catch(e => console.warn(e));
+        return;
+      }
+
+      const trackRepeat = track.repeatTimes ?? 1;
+      setPlayCount(prev => {
+        const next = prev + 1;
+        if (trackRepeat === 0 || next <= trackRepeat) {
+          audio.currentTime = 0;
+          audio.play().catch(e => console.warn(e));
+          return next;
+        } else {
+          handleNextTrack();
+          return 1;
+        }
+      });
+    };
+
+    if (progressIntervalRef.current) {
+      window.clearInterval(progressIntervalRef.current);
+    }
+    progressIntervalRef.current = window.setInterval(() => {
+      if (audioRef.current) {
+        setProgress(audioRef.current.currentTime);
+      }
+    }, 100);
   };
 
   // Toggle AI separated voice
@@ -696,35 +935,7 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
         setIsPlaying(false);
       }
 
-      audio.onloadedmetadata = () => {
-        setDuration(audio.duration);
-      };
-
-      audio.onended = () => {
-        if (isLoopingRef.current) {
-          audio.currentTime = 0;
-          audio.play().catch(e => console.warn(e));
-          return;
-        }
-        const trackRepeat = activeTrack.repeatTimes ?? 1;
-        setPlayCount(prev => {
-          const next = prev + 1;
-          if (trackRepeat === 0 || next <= trackRepeat) {
-            audio.currentTime = 0;
-            audio.play().catch(e => console.warn(e));
-            return next;
-          } else {
-            handleNextTrack();
-            return 1;
-          }
-        });
-      };
-
-      progressIntervalRef.current = window.setInterval(() => {
-        if (audioRef.current) {
-          setProgress(audioRef.current.currentTime);
-        }
-      }, 100);
+      attachPlaybackHandlers(audio, activeTrack);
     } catch (e) {
       console.error(e);
       toast.error('Erro ao alternar canal de voz por IA.');
@@ -749,12 +960,12 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
 
       // Save to IndexedDB
       await db.audioTracks.update(activeTrack.id, {
-        instrumentalFile: result.instrumentalBlob,
+        instrumentalFile: result.outputBlob,
         updatedAt: Date.now()
       });
 
       // Update local track state
-      const updatedTrack = { ...activeTrack, instrumentalFile: result.instrumentalBlob };
+      const updatedTrack = { ...activeTrack, instrumentalFile: result.outputBlob };
       setActiveTrack(updatedTrack);
       setAllTracks(prev => prev.map(t => t.id === activeTrack.id ? updatedTrack : t));
 
@@ -962,9 +1173,16 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
       audioRef.current.pause();
       audioRef.current = null;
     }
-    vocalReductionSplitterRef.current = null;
-    vocalReductionInverterRef.current = null;
-    vocalReductionSumRef.current = null;
+    // A source acompanha o elemento descartado; sem soltá-la os nós antigos ficariam
+    // pendurados no AudioContext a cada troca de faixa.
+    try {
+      mediaSourceRef.current?.disconnect();
+    } catch (e) {
+      // Nó já desconectado
+    }
+    mediaSourceRef.current = null;
+    mediaSourceElementRef.current = null;
+    disconnectVocalReductionNodes();
     if (progressIntervalRef.current) {
       window.clearInterval(progressIntervalRef.current);
       progressIntervalRef.current = null;
@@ -997,41 +1215,15 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
         setIsPlaying(false);
       });
 
-      audio.onloadedmetadata = () => {
-        setDuration(audio.duration);
-      };
-
       setPlayCount(1);
 
-      audio.onended = () => {
-        if (isLoopingRef.current) {
-          audio.currentTime = 0;
-          audio.play().catch(e => console.warn(e));
-          return;
-        }
-        const trackRepeat = track.repeatTimes ?? 1;
-        setPlayCount(prev => {
-          const next = prev + 1;
-          if (trackRepeat === 0 || next <= trackRepeat) {
-            audio.currentTime = 0;
-            audio.play().catch(e => console.warn(e));
-            return next;
-          } else {
-            handleNextTrack();
-            return 1;
-          }
-        });
-      };
-
-      progressIntervalRef.current = window.setInterval(() => {
-        if (audioRef.current) {
-          setProgress(audioRef.current.currentTime);
-        }
-      }, 100);
+      attachPlaybackHandlers(audio, track);
 
       // Media Session API integration
       if (typeof window !== 'undefined' && 'mediaSession' in navigator) {
-        const coverSrc = playlistCoverUrls[track.playlistId] || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 24 24" fill="none" stroke="%238b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>';
+        // Lê do ref: na inicialização da página o play dispara no mesmo tick do setState,
+        // quando o objeto de estado ainda está vazio e a capa não apareceria.
+        const coverSrc = playlistCoverUrlsRef.current[track.playlistId] || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 24 24" fill="none" stroke="%238b5cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>';
         navigator.mediaSession.metadata = new MediaMetadata({
           title: track.title,
           artist: track.description || 'Karaokê Studio',
@@ -1168,19 +1360,25 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
           const diffResult = diffWords(spokenText, expectedText);
           setSpeechWordDiffs(diffResult);
 
-          // Update the line's score to be the maximum achieved during this line's singing window
-          setLineScores(prev => {
-            const currentScore = prev[currentIdx] || 0;
-            if (roundedSimilarity > currentScore) {
-              return {
-                ...prev,
-                [currentIdx]: roundedSimilarity
-              };
+          if (!finalTranscript) {
+            // Interino: guarda apenas como provisório para o fallback do balão
+            const currentProvisional = provisionalScoresRef.current[currentIdx] || 0;
+            if (roundedSimilarity > currentProvisional) {
+              provisionalScoresRef.current[currentIdx] = roundedSimilarity;
             }
-            return prev;
-          });
+          } else {
+            // Só resultados finais viram nota oficial da linha (mantendo o melhor da janela)
+            setLineScores(prev => {
+              const currentScore = prev[currentIdx] || 0;
+              if (roundedSimilarity > currentScore) {
+                return {
+                  ...prev,
+                  [currentIdx]: roundedSimilarity
+                };
+              }
+              return prev;
+            });
 
-          if (finalTranscript) {
             const finalScore = Math.max(roundedSimilarity, lineScoresRef.current[currentIdx] || 0);
             if (!triggeredBalloonsRef.current.has(currentIdx)) {
               triggeredBalloonsRef.current.add(currentIdx);
@@ -1279,7 +1477,8 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
             text: l.original,
             translation: l.translated || '',
             startTime: l.startTime ?? 0,
-            endTime: l.endTime
+            endTime: l.endTime,
+            words: l.words
           }));
         }
       } catch (err) {
@@ -1297,9 +1496,17 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     handlePlayTrack(track);
   };
 
-  const handleSaveTranscription = async () => {
+  /**
+   * Persiste a letra da faixa.
+   *
+   * `linesOverride` permite salvar linhas recém-produzidas (busca no LRCLIB, importação de
+   * LRC) sem depender do estado do React, que ainda não refletiu o `setTempLines` do mesmo
+   * handler — antes disso, quem buscava a letra precisava passar pela aba de ajuste e salvar
+   * na mão para não perder o resultado.
+   */
+  const handleSaveTranscription = async (linesOverride?: TranscriptionLine[]) => {
     if (!activeTrack) return;
-    const linesToSave = handleLoadTextToTempLines();
+    const linesToSave = linesOverride ?? handleLoadTextToTempLines();
     const sortedLines = [...linesToSave].sort((a, b) => a.startTime - b.startTime);
 
     try {
@@ -1324,7 +1531,8 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
             highlights: [],
             mastered: false,
             startTime: l.startTime,
-            endTime: l.endTime
+            endTime: l.endTime,
+            words: l.words
           })),
           createdAt: Date.now(),
           updatedAt: Date.now()
@@ -1351,7 +1559,8 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
               highlights: existingLine?.highlights || [],
               mastered: existingLine?.mastered || false,
               startTime: l.startTime,
-              endTime: l.endTime
+              endTime: l.endTime,
+              words: l.words
             };
           }),
           updatedAt: Date.now()
@@ -1372,34 +1581,48 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
 
   const [isConfirmDeleteLyricsModalOpen, setIsConfirmDeleteLyricsModalOpen] = useState(false);
 
+  /**
+   * Descarta a letra da faixa: o registro salvo no banco, a versão legada embutida na
+   * faixa e o que ainda está só no editor.
+   *
+   * Exigir `textId` aqui deixava o usuário preso: uma transcrição recém-gerada vive apenas
+   * em `tempLines` até ser salva, então não havia como descartá-la e recomeçar.
+   */
   const handleDeleteLyrics = async () => {
-    if (!activeTrack || !activeTrack.textId) return;
-    
+    if (!activeTrack) return;
+
     try {
       const textId = activeTrack.textId;
-      
-      // Exclui do banco de dados na tabela texts
-      await db.texts.delete(textId);
-      
-      // Remove a referência na tabela audioTracks
-      await db.audioTracks.update(activeTrack.id, {
-        textId: undefined,
-        updatedAt: Date.now()
-      });
-      
+
+      if (textId) {
+        await db.texts.delete(textId);
+      }
+
+      // `transcriptionLines` é o formato legado; se sobrar, `displayedLines` faz fallback
+      // para ele e a letra "excluída" reaparece no player.
+      if (textId || activeTrack.transcriptionLines?.length) {
+        await db.audioTracks.update(activeTrack.id, {
+          textId: undefined,
+          transcriptionLines: undefined,
+          updatedAt: Date.now()
+        });
+      }
+
       // Limpa os estados locais do player/lyrics
       setTempLines([]);
       setTranscriptionText('');
+      setTranscribedLinesTemp([]);
+      setPastedOriginalLyrics('');
       setSyncingLineIdx(0);
-      
+
       // Atualiza o objeto do track ativo
-      const updatedTrack = { ...activeTrack, textId: undefined };
+      const updatedTrack = { ...activeTrack, textId: undefined, transcriptionLines: undefined };
       setActiveTrack(updatedTrack);
       setAllTracks(prev => prev.map(t => t.id === activeTrack.id ? updatedTrack : t));
-      
+
       setIsConfirmDeleteLyricsModalOpen(false);
       setIsEditingLyrics(false); // fecha o editor para que ele veja a tela vazia
-      
+
       toast.success('Letra e sincronia excluídas com sucesso.');
     } catch (err) {
       console.error("[DeleteLyricsError]", err);
@@ -1486,7 +1709,8 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
             highlights: [],
             mastered: false,
             startTime: l.startTime,
-            endTime: l.endTime
+            endTime: l.endTime,
+            words: l.words
           })),
           collectionId: finalCollectionId,
           createdAt: Date.now(),
@@ -1514,6 +1738,138 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     } catch (err) {
       console.error(err);
       toast.error('Erro ao salvar pasta e visibilidade.');
+    }
+  };
+
+  /**
+   * Decide qual áudio alimenta a transcrição: o vocal isolado quando disponível, senão a mixagem.
+   *
+   * O stem já salvo é usado sempre (custo zero). A separação nova só roda se o usuário
+   * tiver marcado a opção, porque depende de fila pública e leva alguns minutos.
+   */
+  const resolveTranscriptionSourceAudio = async (): Promise<Blob> => {
+    if (!activeTrack) throw new Error('Nenhuma faixa ativa.');
+
+    if (activeTrack.vocalFile) {
+      setTranscribingProgress('Usando o vocal isolado já salvo desta faixa...');
+      return activeTrack.vocalFile;
+    }
+
+    if (!useVocalStemForAsr) {
+      return activeTrack.audioFile;
+    }
+
+    try {
+      setTranscribingProgress('Isolando o vocal da faixa (Demucs)...');
+      const result = await separateVocalsCloud(
+        activeTrack.audioFile,
+        (progress: number, msg: string) => {
+          // A separação ocupa a primeira metade da barra; a transcrição usa a segunda
+          setTranscribingPercent(Math.round(progress / 2));
+          setTranscribingProgress(msg);
+        },
+        'vocals'
+      );
+
+      // Cacheia: as próximas transcrições desta faixa não pagam a fila de novo
+      await db.audioTracks.update(activeTrack.id, {
+        vocalFile: result.outputBlob,
+        updatedAt: Date.now()
+      });
+      const updatedTrack = { ...activeTrack, vocalFile: result.outputBlob };
+      setActiveTrack(updatedTrack);
+      setAllTracks(prev => prev.map(t => t.id === activeTrack.id ? updatedTrack : t));
+
+      return result.outputBlob;
+    } catch (err: any) {
+      // Separação é uma otimização, não um requisito: seguir com a mixagem é melhor que abortar.
+      // A causa vai junto na mensagem — o toast genérico anterior tornava o problema impossível
+      // de diagnosticar sem abrir o console.
+      console.warn('[Transcription] Falha ao isolar vocal, seguindo com o áudio original.', err);
+      const detail = (err?.message || '').replace(/\s+/g, ' ').trim().slice(0, 220);
+      toast.warning(
+        detail
+          ? `Não foi possível isolar o vocal (${detail}). Transcrevendo o áudio original.`
+          : 'Não foi possível isolar o vocal. Transcrevendo o áudio original.',
+        { duration: 8000 }
+      );
+      return activeTrack.audioFile;
+    }
+  };
+
+  /**
+   * Abre a busca de letra já sincronizada, pré-preenchendo com o título da faixa.
+   * É o caminho preferencial: quando a música está catalogada, a letra vem sincronizada
+   * por pessoas — melhor em texto e em tempo do que qualquer transcrição automática.
+   */
+  const handleOpenLyricsSearch = () => {
+    if (!activeTrack) return;
+    const suggestion = [activeTrack.title, activeTrack.description]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+    setLyricsQuery(suggestion || activeTrack.title);
+    setLyricsResults([]);
+    setLyricsSearchError('');
+    setHasSearchedLyrics(false);
+    setIsLyricsSearchOpen(true);
+  };
+
+  const handleSearchLyrics = async () => {
+    if (!lyricsQuery.trim()) {
+      setLyricsSearchError('Digite o nome da música (e do artista, se souber).');
+      return;
+    }
+
+    setIsSearchingLyrics(true);
+    setLyricsSearchError('');
+    try {
+      const results = await searchLyrics(lyricsQuery);
+      setLyricsResults(results);
+      setHasSearchedLyrics(true);
+    } catch (err: any) {
+      console.error('[LyricsSearch]', err);
+      setLyricsSearchError(
+        err?.message
+          ? `Não foi possível buscar: ${err.message}`
+          : 'Não foi possível buscar as letras agora.'
+      );
+    } finally {
+      setIsSearchingLyrics(false);
+    }
+  };
+
+  /**
+   * Aplica um resultado ao editor. Prefere a versão sincronizada; se só houver letra
+   * simples, carrega o texto com tempos zerados para o usuário sincronizar na aba Sincronia.
+   */
+  const handleApplyLyricsResult = async (result: LyricsSearchResult) => {
+    const trackDuration = audioRef.current?.duration || duration || undefined;
+
+    const isSynced = !!result.syncedLyrics;
+    const lines = isSynced
+      ? parseLrcToLines(result.syncedLyrics!, trackDuration)
+      : result.plainLyrics
+        ? parsePlainLyricsToLines(result.plainLyrics)
+        : [];
+
+    if (lines.length === 0) {
+      toast.error('Este resultado não tem letra utilizável. Tente outro.');
+      return;
+    }
+
+    setTempLines(lines);
+    setTranscriptionText(lines.map(l => l.text).join('\n'));
+    setSyncingLineIdx(isSynced ? lines.length : 0);
+    setTranscriptionTab('view');
+    setIsLyricsSearchOpen(false);
+
+    // Salva na hora: aplicar a letra e ainda exigir uma visita à aba de ajuste só para
+    // clicar em salvar era um passo sem propósito, e perdia o resultado se o usuário saísse.
+    await handleSaveTranscription(lines);
+
+    if (!isSynced) {
+      toast.info('Esta letra não tem marcações de tempo. Use a aba Sincronia para marcá-las.');
     }
   };
 
@@ -1546,23 +1902,47 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
       isTranscribeCancelledRef.current = false;
       setTranscribingPercent(0);
 
+      // Whisper foi treinado em fala: base instrumental é ruído fora da distribuição dele.
+      // Transcrever o vocal isolado reduz muito o erro de reconhecimento em música.
+      const sourceAudio = await resolveTranscriptionSourceAudio();
+
       setTranscribingProgress('Decodificando áudio...');
-      const audioBuffer = await decodeAudioFile(activeTrack.audioFile);
+      const audioBuffer = await decodeAudioFile(sourceAudio);
       let finalLines: TranscriptionLine[] = [];
 
       // --- FLUXO DE TRANSCRIÇÃO DIRETA ---
       setTranscribingProgress('Preparando áudio para transcrição...');
 
       if (transcriptionProvider === 'local') {
-        // Whisper Local: executa no navegador via Web Worker sem fatiamento
+        // Whisper Local: executa no navegador via Web Worker sem fatiamento.
+        // A conversão para mono 16kHz acontece aqui (OfflineAudioContext, com anti-aliasing)
+        // porque a Web Audio API não está disponível dentro de Workers.
+        setTranscribingProgress('Preparando áudio (mono 16kHz)...');
+        const monoAudio16k = await resampleToMono16k(audioBuffer);
+
+        if (isTranscribeCancelledRef.current) throw new Error('CanceledByUser');
+
         setTranscribingProgress('Inicializando Whisper local no navegador...');
-        finalLines = await requestLocalWhisperTranscription(audioBuffer);
+        finalLines = await requestLocalWhisperTranscription(monoAudio16k);
       } else {
         // Motores em Nuvem (Gemini, OpenAI, Groq): processamento do áudio completo em uma chamada única
-        setTranscribingProgress('Comprimindo áudio para envio...');
+        setTranscribingProgress('Convertendo áudio para mono 16kHz...');
         const wavBlob = bufferToMono16kWav(audioBuffer);
 
         if (isTranscribeCancelledRef.current) throw new Error('CanceledByUser');
+
+        // WAV PCM mono 16kHz ≈ 1,9 MB por minuto. Sem esta checagem, faixas longas só
+        // falhavam lá no servidor com um erro genérico depois de todo o upload.
+        const sizeMb = wavBlob.size / (1024 * 1024);
+        const minutes = Math.floor(audioBuffer.duration / 60);
+        // Gemini: o áudio vai embutido em base64 (+33%) e o request inteiro precisa caber em ~20MB
+        const maxMb = transcriptionProvider === 'gemini' ? 14 : 24;
+        if (sizeMb > maxMb) {
+          throw new Error(
+            `Áudio muito longo para o motor selecionado (${minutes} min ≈ ${sizeMb.toFixed(1)} MB, limite ≈ ${maxMb} MB). ` +
+            `Use o Whisper local, que não tem limite de tamanho, ou divida a faixa em partes menores.`
+          );
+        }
 
         if (transcriptionProvider === 'gemini') {
           const geminiApiKey = localStorage.getItem('memorize_gemini_api_key') || '';
@@ -1587,12 +1967,13 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
       setTranscriptionText(postProcessedLines.map(l => l.text).join('\n'));
       setSyncingLineIdx(postProcessedLines.length);
 
-      // Prepara e abre o modal de ajuste e tradução
       setTranscribedLinesTemp(postProcessedLines);
       setPastedOriginalLyrics('');
-      setIsAdjustmentModalOpen(true);
+      // TEMPORÁRIO: o modal de colar a letra oficial não abre mais automaticamente, para
+      // avaliar a transcrição crua do modelo sem a correção por cima. O modal em si segue
+      // implementado — basta voltar a chamar setIsAdjustmentModalOpen(true) aqui.
 
-      toast.success('Transcrição concluída! Configure a tradução ou ajuste a letra original.');
+      toast.success('Transcrição concluída! Revise a letra na aba de edição.');
       setTranscriptionTab('view');
     } catch (err: any) {
       if (err.message === 'CanceledByUser') {
@@ -1614,13 +1995,55 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     maxRetries = 4
   ): Promise<Response> => {
     let attempt = 0;
+
+    // Espera interrompível: aborta na hora se o usuário cancelar a transcrição
+    const waitInterruptible = async (waitMs: number, buildMessage: (remainingSecs: number) => string) => {
+      const startTime = Date.now();
+      const originalProgress = transcribingProgressRef.current || 'Aguardando API...';
+      while (Date.now() - startTime < waitMs) {
+        if (isTranscribeCancelledRef.current) {
+          throw new Error('CanceledByUser');
+        }
+        const remainingSecs = Math.max(0, Math.ceil((waitMs - (Date.now() - startTime)) / 1000));
+        setTranscribingProgress(buildMessage(remainingSecs));
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+      setTranscribingProgress(originalProgress);
+    };
+
     while (true) {
       attempt++;
       if (isTranscribeCancelledRef.current) {
         throw new Error('CanceledByUser');
       }
 
-      const response = await fetch(url, options);
+      let response: Response;
+      try {
+        response = await fetch(url, options);
+      } catch (networkErr) {
+        // Falha de rede (offline, DNS, CORS): tenta de novo com backoff exponencial
+        if (attempt > maxRetries) {
+          throw new Error(
+            `Falha de conexão com ${providerName} após ${maxRetries} tentativas. Verifique sua internet.`
+          );
+        }
+        const backoffMs = Math.min(30000, 1000 * Math.pow(2, attempt - 1));
+        await waitInterruptible(
+          backoffMs,
+          secs => `Falha de conexão com ${providerName}. Nova tentativa em ${secs}s (Tentativa ${attempt} de ${maxRetries})...`
+        );
+        continue;
+      }
+
+      // Erros transitórios do servidor também merecem retry
+      if (response.status >= 500 && attempt <= maxRetries) {
+        const backoffMs = Math.min(30000, 1000 * Math.pow(2, attempt - 1));
+        await waitInterruptible(
+          backoffMs,
+          secs => `${providerName} indisponível (HTTP ${response.status}). Nova tentativa em ${secs}s (Tentativa ${attempt} de ${maxRetries})...`
+        );
+        continue;
+      }
 
       if (response.status === 429 && attempt <= maxRetries) {
         let retryAfterMs = 3000; // default 3s
@@ -1663,22 +2086,10 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
         // Add 500ms safety buffer
         retryAfterMs += 500;
 
-        const startTime = Date.now();
-        const originalProgress = transcribingProgress || 'Aguardando API...';
-        
-        while (Date.now() - startTime < retryAfterMs) {
-          if (isTranscribeCancelledRef.current) {
-            throw new Error('CanceledByUser');
-          }
-          const remainingSecs = Math.max(0, Math.ceil((retryAfterMs - (Date.now() - startTime)) / 1000));
-          setTranscribingProgress(
-            `Limite de requisições excedido (${providerName}). Aguardando ${remainingSecs}s para tentar novamente (Tentativa ${attempt} de ${maxRetries})...`
-          );
-          await new Promise(resolve => setTimeout(resolve, 200));
-        }
-
-        // Restore progress message
-        setTranscribingProgress(originalProgress);
+        await waitInterruptible(
+          retryAfterMs,
+          secs => `Limite de requisições excedido (${providerName}). Aguardando ${secs}s para tentar novamente (Tentativa ${attempt} de ${maxRetries})...`
+        );
         continue;
       }
 
@@ -1697,10 +2108,15 @@ export const KaraokePage: React.FC<KaraokePageProps> = ({
     });
     const base64Data = await base64Promise;
 
+    const selectedLanguage = AUDIO_LANGUAGES.find(l => l.value === audioLanguage);
+    const languageInstruction = selectedLanguage && selectedLanguage.value !== 'auto'
+      ? `\nO áudio está em ${selectedLanguage.promptName}. Transcreva obrigatoriamente nesse idioma, sem traduzir o campo "text".\n`
+      : '';
+
     const promptText = `
 Você é uma IA especializada em transcrição de áudio e tradução pedagógica de idiomas.
 Sua tarefa é transcrever o áudio fornecido e gerar a tradução de cada frase para fins de estudo de idiomas.
-
+${languageInstruction}
 ATENÇÃO REGRAS CRÍTICAS DE SEGURANÇA:
 1. Se o áudio contiver apenas silêncio, ruídos ou música instrumental sem vocais falados/cantados, você deve retornar OBRIGATORIAMENTE o JSON com a lista vazia: {"lines": []}. Não invente palavras se não houver ninguém cantando ou falando.
 2. NUNCA coloque exemplos deste prompt (como a frase "Hello, how are you?") no resultado, a menos que a pessoa no áudio esteja literalmente falando/cantando essa frase específica.
@@ -1721,10 +2137,15 @@ O JSON deve seguir exatamente este formato:
 Não adicione markdown fora do bloco JSON.
 `;
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    // A chave vai no cabeçalho, não na query string: query params vazam em logs de
+    // servidor, histórico e cabeçalho Referer.
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`;
     const response = await fetchWithRetry(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey
+      },
       body: JSON.stringify({
         contents: [{
           parts: [
@@ -1759,22 +2180,34 @@ Não adicione markdown fora do bloco JSON.
     return parsed.lines || [];
   };
 
-  const requestOpenaiWhisperTranscription = async (audioBlob: Blob, apiKey: string): Promise<TranscriptionLine[]> => {
+  /**
+   * Transcrição via API compatível com o endpoint de áudio da OpenAI (OpenAI e Groq).
+   * As duas usam o mesmo contrato: multipart + `verbose_json` com `segments`.
+   */
+  const requestWhisperCompatibleTranscription = async (
+    audioBlob: Blob,
+    apiKey: string,
+    config: { url: string; model: string; providerName: string }
+  ): Promise<TranscriptionLine[]> => {
     const formData = new FormData();
     formData.append('file', audioBlob, 'audio.wav');
-    formData.append('model', 'whisper-1');
+    formData.append('model', config.model);
     formData.append('response_format', 'verbose_json');
+    // Omitido em 'auto' para deixar a API detectar sozinha
+    if (audioLanguage !== 'auto') {
+      formData.append('language', audioLanguage);
+    }
 
-    const response = await fetchWithRetry('https://api.openai.com/v1/audio/transcriptions', {
+    const response = await fetchWithRetry(config.url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`
       },
       body: formData
-    }, 'OpenAI Whisper');
+    }, config.providerName);
 
     if (!response.ok) {
-      let errMsg = `OpenAI Whisper retornou status ${response.status}`;
+      let errMsg = `${config.providerName} retornou status ${response.status}`;
       try {
         const errJson = await response.json();
         if (errJson.error?.message) {
@@ -1797,55 +2230,58 @@ Não adicione markdown fora do bloco JSON.
     });
   };
 
-  const requestGroqWhisperTranscription = async (audioBlob: Blob, apiKey: string): Promise<TranscriptionLine[]> => {
-    const formData = new FormData();
-    formData.append('file', audioBlob, 'audio.wav');
-    formData.append('model', 'whisper-large-v3');
-    formData.append('response_format', 'verbose_json');
-
-    const response = await fetchWithRetry('https://api.groq.com/openai/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: formData
-    }, 'Groq Whisper');
-
-    if (!response.ok) {
-      let errMsg = `Groq Whisper retornou status ${response.status}`;
-      try {
-        const errJson = await response.json();
-        if (errJson.error?.message) {
-          errMsg += `: ${errJson.error.message}`;
-        }
-      } catch (e) {}
-      throw new Error(errMsg);
-    }
-
-    const data = await response.json();
-    return (data.segments || []).map((seg: any) => {
-      const rawStart = (seg.start !== null && seg.start !== undefined) ? seg.start : 0;
-      const rawEnd = (seg.end !== null && seg.end !== undefined) ? seg.end : rawStart + 3.0;
-      return {
-        id: crypto.randomUUID(),
-        text: seg.text.trim(),
-        startTime: parseFloat(Number(rawStart).toFixed(2)),
-        endTime: parseFloat(Number(rawEnd).toFixed(2))
-      };
+  const requestOpenaiWhisperTranscription = (audioBlob: Blob, apiKey: string): Promise<TranscriptionLine[]> =>
+    requestWhisperCompatibleTranscription(audioBlob, apiKey, {
+      url: 'https://api.openai.com/v1/audio/transcriptions',
+      model: 'whisper-1',
+      providerName: 'OpenAI Whisper'
     });
-  };
 
-  const requestLocalWhisperTranscription = (audioBuffer: AudioBuffer): Promise<TranscriptionLine[]> => {
-    return new Promise((resolve, reject) => {
-      const worker = new Worker(
+  const requestGroqWhisperTranscription = (audioBlob: Blob, apiKey: string): Promise<TranscriptionLine[]> =>
+    requestWhisperCompatibleTranscription(audioBlob, apiKey, {
+      url: 'https://api.groq.com/openai/v1/audio/transcriptions',
+      model: 'whisper-large-v3',
+      providerName: 'Groq Whisper'
+    });
+
+  /**
+   * Mantém um único Worker vivo entre transcrições: recriá-lo a cada execução descartava
+   * o modelo Whisper já carregado em memória e forçava a reinicialização completa do pipeline.
+   */
+  const getWhisperWorker = (): Worker => {
+    if (!whisperWorkerRef.current) {
+      whisperWorkerRef.current = new Worker(
         new URL('../workers/whisper.worker.ts', import.meta.url),
         { type: 'module' }
       );
+    }
+    return whisperWorkerRef.current;
+  };
+
+  const terminateWhisperWorker = () => {
+    if (whisperWorkerRef.current) {
+      whisperWorkerRef.current.terminate();
+      whisperWorkerRef.current = null;
+    }
+  };
+
+  // Libera o worker (e o modelo carregado) ao sair da página
+  useEffect(() => {
+    return () => {
+      terminateWhisperWorker();
+    };
+  }, []);
+
+  const requestLocalWhisperTranscription = (monoAudio16k: Float32Array): Promise<TranscriptionLine[]> => {
+    return new Promise((resolve, reject) => {
+      const worker = getWhisperWorker();
 
       const checkCancellation = setInterval(() => {
         if (isTranscribeCancelledRef.current) {
           clearInterval(checkCancellation);
-          worker.terminate();
+          // Cancelamento no meio da inferência deixa o worker em estado indefinido:
+          // descartamos para a próxima execução começar limpa.
+          terminateWhisperWorker();
           reject(new Error('CanceledByUser'));
         }
       }, 200);
@@ -1875,11 +2311,14 @@ Não adicione markdown fora do bloco JSON.
           setTranscribingProgress(`Baixando inteligência local${fileInfo}... ${pct}%${sizeInfo}`);
         } else if (type === 'success') {
           clearInterval(checkCancellation);
-          worker.terminate();
+          if (e.data.hasWordTimestamps === false) {
+            toast.warning('Este modelo não fornece tempo por palavra. O destaque da letra será aproximado.');
+          }
+          // Worker preservado de propósito: mantém o modelo quente para a próxima faixa
           resolve(lines);
         } else if (type === 'error') {
           clearInterval(checkCancellation);
-          worker.terminate();
+          terminateWhisperWorker();
           reject(new Error(error));
         }
       };
@@ -1887,16 +2326,18 @@ Não adicione markdown fora do bloco JSON.
       worker.onerror = (err) => {
         console.error("Web Worker error:", err);
         clearInterval(checkCancellation);
-        worker.terminate();
+        terminateWhisperWorker();
         reject(new Error("Erro no processador local (Web Worker). Detalhes: " + (err.message || 'Erro de inicialização')));
       };
 
-      const audioData = audioBuffer.getChannelData(0);
+      // Áudio já chega mono e reamostrado para 16kHz pela thread principal
       worker.postMessage({
         type: 'start',
-        audioData,
-        sampleRate: audioBuffer.sampleRate,
-        modelName: localModelSize
+        audioData: monoAudio16k,
+        sampleRate: 16000,
+        modelName: localModelSize,
+        // 'auto' vira null no worker, que é como o Whisper pede o auto-detect
+        language: audioLanguage === 'auto' ? null : audioLanguage
       });
     });
   };
@@ -2362,7 +2803,7 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
     };
   }, [isEditingLyrics, transcriptionTab, syncingLineIdx, progress, tempLines]);
 
-  const renderHighlightedText = (text: string, startTime: number, endTime: number) => {
+  const renderHighlightedText = (text: string, startTime: number, endTime: number, words?: WordTiming[]) => {
     const durationOfLine = endTime - startTime;
     if (durationOfLine <= 0) return <span>{text}</span>;
     const progressOfLine = progress - startTime;
@@ -2376,20 +2817,33 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
       return <span>{text}</span>;
     }
 
-    // Calcula o total de caracteres de palavras para distribuir a duração de forma proporcional
-    const totalWordChars = wordTokens.reduce((sum, w) => sum + w.length, 0);
+    // Caminho preferido: tempos reais medidos no áudio, palavra a palavra.
+    // Só é usado se a contagem bate com o texto exibido — o usuário pode ter editado a
+    // letra depois da transcrição, e aí os tempos salvos não correspondem mais às palavras.
+    const hasUsableWordTimings = !!words && words.length === wordTokens.length;
 
-    let currentWordCharCount = 0;
-    const wordTimeRanges = wordTokens.map(w => {
-      const startRatio = currentWordCharCount / totalWordChars;
-      currentWordCharCount += w.length;
-      const endRatio = currentWordCharCount / totalWordChars;
-      return {
-        word: w,
-        startTimeOfWord: startTime + startRatio * durationOfLine,
-        endTimeOfWord: startTime + endRatio * durationOfLine
-      };
-    });
+    const wordTimeRanges = hasUsableWordTimings
+      ? wordTokens.map((w, idx) => ({
+          word: w,
+          startTimeOfWord: words![idx].startTime,
+          endTimeOfWord: words![idx].endTime
+        }))
+      : (() => {
+          // Fallback: distribui a duração da linha proporcional à contagem de caracteres.
+          // Assume ritmo uniforme, o que erra em canto — mas é o melhor possível sem tempos reais.
+          const totalWordChars = wordTokens.reduce((sum, w) => sum + w.length, 0);
+          let currentWordCharCount = 0;
+          return wordTokens.map(w => {
+            const startRatio = currentWordCharCount / totalWordChars;
+            currentWordCharCount += w.length;
+            const endRatio = currentWordCharCount / totalWordChars;
+            return {
+              word: w,
+              startTimeOfWord: startTime + startRatio * durationOfLine,
+              endTimeOfWord: startTime + endRatio * durationOfLine
+            };
+          });
+        })();
 
     const renderedTokens: { text: string; highlight: 'full' | 'none' | 'partial'; highlightLength?: number }[] = [];
     let wordIndex = 0;
@@ -2538,10 +2992,31 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
               />
             </div>
 
-            {/* Ações de Letras */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 shrink-0 items-stretch">
-              {/* Card 1: Sincronização Manual */}
-              <div className="bg-muted/30 border border-border/30 rounded-2xl p-4 flex flex-col justify-between space-y-3">
+            {/* Ações de Letras — uma aba por forma de obter a letra */}
+            <div className="shrink-0 space-y-3">
+              <div className="flex flex-wrap items-center gap-1.5 bg-muted/40 border border-border/30 rounded-xl p-1">
+                {LYRICS_SOURCE_TABS.map(tab => (
+                  <button
+                    key={tab.value}
+                    type="button"
+                    onClick={() => setLyricsSourceTab(tab.value)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                      lyricsSourceTab === tab.value
+                        ? 'bg-primary text-primary-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                    }`}
+                  >
+                    {tab.icon === 'music' && <Music size={12} />}
+                    {tab.icon === 'sparkles' && <Sparkles size={12} />}
+                    {tab.icon === 'settings' && <Settings2 size={12} />}
+                    <span>{tab.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Card: Sincronização Manual */}
+              {lyricsSourceTab === 'manual' && (
+              <div className="bg-muted/30 border border-border/30 rounded-2xl p-4 flex flex-col justify-between space-y-3 animate-fadeIn">
                 <div className="space-y-1">
                   <h4 className="text-[10px] font-black text-foreground uppercase tracking-widest flex items-center gap-1.5">
                     <Settings2 size={11} className="text-primary" />
@@ -2593,9 +3068,33 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
                   </div>
                 </div>
               </div>
+              )}
 
-              {/* Card 2: Transcrição por IA */}
-              <div className="bg-muted/30 border border-border/30 rounded-2xl p-4 flex flex-col justify-between space-y-3">
+              {/* Card: Buscar letra já sincronizada (caminho preferencial) */}
+              {lyricsSourceTab === 'buscar' && (
+              <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-2xl p-4 flex flex-col justify-between space-y-3 animate-fadeIn">
+                <div className="space-y-1">
+                  <h4 className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest flex items-center gap-1.5">
+                    <Music size={11} />
+                    Buscar Letra Sincronizada
+                  </h4>
+                  <p className="text-[9px] text-muted-foreground leading-normal font-semibold">
+                    Procura a letra já pronta e sincronizada por outras pessoas no LRCLIB. Quando a música está catalogada, o resultado é melhor que qualquer transcrição automática — e instantâneo.
+                  </p>
+                </div>
+                <Button
+                  onClick={handleOpenLyricsSearch}
+                  className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold text-xs h-10 rounded-xl shadow-md shadow-emerald-500/25 flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-[0.98]"
+                >
+                  <Music size={13} />
+                  Procurar Letra
+                </Button>
+              </div>
+              )}
+
+              {/* Card: Transcrição por IA */}
+              {lyricsSourceTab === 'transcrever' && (
+              <div className="bg-muted/30 border border-border/30 rounded-2xl p-4 flex flex-col justify-between space-y-3 animate-fadeIn">
                 <div className="space-y-1">
                   <h4 className="text-[10px] font-black text-foreground uppercase tracking-widest flex items-center gap-1.5">
                     <Sparkles size={11} className="text-primary animate-pulse" />
@@ -2625,6 +3124,47 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
 
                 <div className="space-y-1.5 w-full">
                   <label className="text-[8px] font-black text-muted-foreground uppercase tracking-wider block">
+                    Idioma do Áudio
+                  </label>
+                  <select
+                    value={audioLanguage}
+                    onChange={(e) => setAudioLanguage(e.target.value)}
+                    disabled={isTranscribingAi}
+                    className="w-full bg-background border border-border text-foreground px-3 py-1.5 rounded-xl text-xs font-bold outline-none focus:border-violet-500/50 cursor-pointer"
+                  >
+                    {AUDIO_LANGUAGES.map(lang => (
+                      <option key={lang.value} value={lang.value}>{lang.label}</option>
+                    ))}
+                  </select>
+                  <p className="text-[9px] text-muted-foreground leading-normal font-semibold mt-1">
+                    Idioma cantado na faixa. Fixar o idioma evita que a IA troque de idioma no meio da música. A tradução continua sendo para português.
+                  </p>
+                </div>
+
+                <div className="space-y-1.5 w-full">
+                  <label className="flex items-start gap-2 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={useVocalStemForAsr}
+                      onChange={(e) => setUseVocalStemForAsr(e.target.checked)}
+                      disabled={isTranscribingAi}
+                      className="mt-0.5 accent-violet-600 cursor-pointer"
+                    />
+                    <span className="flex-1">
+                      <span className="text-[8px] font-black text-muted-foreground uppercase tracking-wider block group-hover:text-foreground transition-colors">
+                        Isolar vocal antes de transcrever
+                      </span>
+                      <span className="text-[9px] text-muted-foreground leading-normal font-semibold block mt-0.5">
+                        {activeTrack.vocalFile
+                          ? 'Esta faixa já tem o vocal isolado salvo — será usado automaticamente, sem espera.'
+                          : 'Melhora bastante o reconhecimento em música, mas usa a fila gratuita do Demucs e leva alguns minutos. O resultado fica salvo na faixa.'}
+                      </span>
+                    </span>
+                  </label>
+                </div>
+
+                <div className="space-y-1.5 w-full">
+                  <label className="text-[8px] font-black text-muted-foreground uppercase tracking-wider block">
                     IA para Tradução & Alinhamento
                   </label>
                   <select
@@ -2644,15 +3184,13 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
                     </label>
                     <select
                       value={localModelSize}
-                      onChange={(e) => setLocalModelSize(e.target.value as any)}
+                      onChange={(e) => setLocalModelSize(e.target.value)}
                       disabled={isTranscribingAi}
                       className="w-full bg-background border border-border text-foreground px-3 py-1.5 rounded-xl text-xs font-bold outline-none focus:border-violet-500/50 cursor-pointer"
                     >
-                      <option value="onnx-community/whisper-tiny">Tiny (~75MB - Mais Rápido)</option>
-                      <option value="onnx-community/whisper-base">Base (~140MB - Melhor Precisão)</option>
-                      <option value="onnx-community/whisper-small">Small (~460MB - Alta Precisão)</option>
-                      <option value="onnx-community/whisper-medium-ONNX">Medium (~1.5GB - Altíssima Precisão)</option>
-                      <option value="onnx-community/whisper-large-v3-turbo">Large v3 Turbo (~1.6GB - Extrema Precisão)</option>
+                      {LOCAL_WHISPER_MODELS.map(model => (
+                        <option key={model.value} value={model.value}>{model.label}</option>
+                      ))}
                     </select>
                     <p className="text-[9px] text-muted-foreground leading-normal font-semibold mt-1">
                       Modelos maiores exigem mais processamento. O download inicial é feito apenas uma vez.
@@ -2699,6 +3237,7 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
                   </Button>
                 )}
               </div>
+              )}
             </div>
 
             {tempLines.length > 0 && (
@@ -2726,28 +3265,8 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
               </div>
             )}
 
-            {/* Zona de Perigo para Letras Existentes */}
-            {activeTrack.textId && (
-              <div className="bg-destructive/5 border border-destructive/20 rounded-2xl p-4 flex flex-col justify-between space-y-3 shrink-0">
-                <div className="space-y-1">
-                  <h4 className="text-[10px] font-black text-destructive uppercase tracking-widest flex items-center gap-1.5">
-                    <Trash2 size={11} className="text-destructive" />
-                    Zona de Perigo
-                  </h4>
-                  <p className="text-[9px] text-muted-foreground leading-normal font-semibold">
-                    Exclua permanentemente a letra, tradução e marcações de tempo desta música do banco de dados local.
-                  </p>
-                </div>
-                <Button
-                  onClick={() => setIsConfirmDeleteLyricsModalOpen(true)}
-                  variant="outline"
-                  className="w-full border-destructive/20 bg-destructive/5 hover:bg-destructive/10 text-destructive hover:bg-destructive hover:text-white font-extrabold text-xs h-10 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.98]"
-                >
-                  <Trash2 size={13} />
-                  Excluir Letra e Sincronia
-                </Button>
-              </div>
-            )}
+            {/* A exclusão vive no botão "Excluir Letra" da barra do estúdio — manter um
+                card duplicado aqui só competia por espaço com as fontes de letra. */}
 
             {/* Salvar Botão na aba Texto se houver linhas transcritas */}
             {tempLines.length > 0 && (
@@ -2756,7 +3275,7 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
                   Dica: A letra foi sincronizada com sucesso. Salve para aplicar ao player.
                 </span>
                 <Button
-                  onClick={handleSaveTranscription}
+                  onClick={() => handleSaveTranscription()}
                   disabled={tempLines.length === 0}
                   className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs h-11 rounded-xl shadow-lg flex items-center justify-center gap-1.5 cursor-pointer px-6 shrink-0"
                 >
@@ -2947,7 +3466,7 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
                 Dica: Ordene e ajuste os tempos de cada linha. Ao finalizar, salve as alterações.
               </span>
               <Button
-                onClick={handleSaveTranscription}
+                onClick={() => handleSaveTranscription()}
                 disabled={tempLines.length === 0}
                 className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs h-11 rounded-xl shadow-lg flex items-center justify-center gap-1.5 cursor-pointer px-6"
               >
@@ -3038,7 +3557,7 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
               </Button>
 
               <Button
-                onClick={handleSaveTranscription}
+                onClick={() => handleSaveTranscription()}
                 disabled={syncingLineIdx === 0}
                 className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs h-11 rounded-xl shadow-md flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40"
               >
@@ -3385,6 +3904,19 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
                     <span className="hidden sm:inline text-[10px]">Editar Letra</span>
                   </button>
 
+                  {/* Excluir Transcrição — mantém a música, descarta letra/tradução/tempos */}
+                  {hasAnyTranscription && (
+                    <button
+                      type="button"
+                      onClick={() => setIsConfirmDeleteLyricsModalOpen(true)}
+                      className="p-1.5 rounded-xl border border-border/50 bg-card text-muted-foreground hover:text-destructive hover:bg-destructive/10 hover:border-destructive/35 transition-colors cursor-pointer shadow-sm text-xs font-bold flex items-center gap-1.5"
+                      title="Excluir a transcrição desta música (a faixa de áudio é mantida)"
+                    >
+                      <Trash2 size={14} />
+                      <span className="hidden sm:inline text-[10px]">Excluir Letra</span>
+                    </button>
+                  )}
+
                   {/* Alternar Tela Cheia */}
                   <button
                     onClick={() => setIsFullscreenMode(!isFullscreenMode)}
@@ -3608,7 +4140,7 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
                             const endOfHighlight = (line.endTime !== undefined && line.endTime > line.startTime)
                               ? line.endTime
                               : (nextLine ? nextLine.startTime : duration);
-                            return renderHighlightedText(line.text, line.startTime, endOfHighlight);
+                            return renderHighlightedText(line.text, line.startTime, endOfHighlight, line.words);
                           })()
                         ) : (
                           line.text
@@ -4180,6 +4712,97 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
         </DialogContent>
       </Dialog>
 
+      {/* Modal: Busca de Letra Sincronizada (LRCLIB) */}
+      <Dialog open={isLyricsSearchOpen} onOpenChange={setIsLyricsSearchOpen}>
+        <DialogContent className="sm:max-w-[560px] bg-card border border-border text-foreground p-6 rounded-2xl shadow-2xl flex flex-col justify-start text-left space-y-4">
+          <DialogHeader className="space-y-2">
+            <DialogTitle className="text-base font-black tracking-tight text-foreground flex items-center gap-2">
+              <div className="p-1.5 bg-emerald-500/10 text-emerald-500 rounded-lg">
+                <Music size={16} />
+              </div>
+              <span>Buscar Letra Sincronizada</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground leading-normal font-semibold text-left">
+              Busque por nome da música e artista. Resultados marcados como sincronizados já vêm com as marcações de tempo prontas.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={lyricsQuery}
+              onChange={(e) => setLyricsQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleSearchLyrics();
+                }
+              }}
+              placeholder="Ex: Yellow Coldplay"
+              className="flex-1 bg-background border border-border text-foreground px-3 py-2 rounded-xl text-xs font-bold outline-none focus:border-emerald-500/50"
+            />
+            <Button
+              onClick={handleSearchLyrics}
+              disabled={isSearchingLyrics}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs h-9 px-4 rounded-xl cursor-pointer disabled:opacity-50"
+            >
+              {isSearchingLyrics ? 'Buscando...' : 'Buscar'}
+            </Button>
+          </div>
+
+          {lyricsSearchError && (
+            <p className="text-[10px] font-bold text-destructive bg-destructive/10 border border-destructive/20 px-3 py-2 rounded-xl">
+              {lyricsSearchError}
+            </p>
+          )}
+
+          <div className="max-h-[320px] overflow-y-auto space-y-2 -mx-1 px-1">
+            {lyricsResults.map(result => {
+              const isSynced = !!result.syncedLyrics;
+              return (
+                <button
+                  key={result.id}
+                  type="button"
+                  onClick={() => handleApplyLyricsResult(result)}
+                  disabled={!result.syncedLyrics && !result.plainLyrics}
+                  className="w-full text-left bg-muted/30 hover:bg-muted/60 border border-border/40 rounded-xl p-3 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xs font-black text-foreground truncate">{result.trackName}</p>
+                      <p className="text-[10px] font-semibold text-muted-foreground truncate">
+                        {result.artistName}{result.albumName ? ` · ${result.albumName}` : ''}
+                      </p>
+                    </div>
+                    <span
+                      className={`shrink-0 text-[8px] font-black uppercase tracking-wider px-2 py-1 rounded-lg ${
+                        isSynced
+                          ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                          : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                      }`}
+                    >
+                      {isSynced ? 'Sincronizada' : 'Sem tempo'}
+                    </span>
+                  </div>
+                  {result.duration !== undefined && (
+                    <p className="text-[9px] font-semibold text-muted-foreground mt-1">
+                      Duração catalogada: {formatTime(result.duration)}
+                      {duration > 0 && ` · desta faixa: ${formatTime(duration)}`}
+                    </p>
+                  )}
+                </button>
+              );
+            })}
+
+            {hasSearchedLyrics && !isSearchingLyrics && lyricsResults.length === 0 && !lyricsSearchError && (
+              <p className="text-[10px] font-semibold text-muted-foreground text-center py-6">
+                Nenhuma letra encontrada. Tente outra grafia, ou use a transcrição por IA.
+              </p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Modal: Confirmação de Exclusão de Letra */}
       <Dialog open={isConfirmDeleteLyricsModalOpen} onOpenChange={setIsConfirmDeleteLyricsModalOpen}>
         <DialogContent className="sm:max-w-[420px] bg-card border border-border text-foreground p-6 rounded-2xl shadow-2xl flex flex-col justify-start text-left space-y-4">
@@ -4188,10 +4811,10 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
               <div className="p-1.5 bg-rose-500/10 text-rose-500 rounded-lg">
                 <Trash2 size={16} />
               </div>
-              <span>Excluir Letra e Sincronia?</span>
+              <span>Excluir a transcrição desta música?</span>
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground leading-normal font-semibold text-left">
-              Atenção: Isso excluirá permanentemente a letra original, a tradução em português e todas as marcações de tempo desta música do seu banco de dados local. Você terá que digitar, importar ou transcrever do zero novamente.
+              Serão apagadas a letra original, a tradução e todas as marcações de tempo — inclusive o que ainda não foi salvo. <strong className="text-foreground">A faixa de áudio é mantida</strong>, e a música continua na playlist. Você poderá transcrever, digitar ou importar a letra de novo depois.
             </DialogDescription>
           </DialogHeader>
 

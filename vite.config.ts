@@ -41,10 +41,17 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}']
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+        // O bundle principal passou de 2 MiB (limite padrão do Workbox) e deixaria de ser
+        // precacheado — o app é local-first e precisa abrir offline, então o teto sobe.
+        // O ideal continua sendo dividir o bundle; isto apenas destrava o build.
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024
       },
       devOptions: {
-        enabled: true
+        // Desligado em dev apenas para reduzir ruído: o SW loga "No route found" para toda
+        // requisição que não está no precache, poluindo o console durante a depuração.
+        // Em produção o SW continua ativo normalmente.
+        enabled: false
       }
     })
   ],

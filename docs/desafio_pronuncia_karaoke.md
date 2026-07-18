@@ -60,11 +60,23 @@ Para recompensar o esforço do usuário e gamificar a cantoria, balões de texto
 | **Score $\ge$ 45%** | *Médio! 🙂, Bom começo! 👍, Quase lá! ✨, Vamos lá! 🎙️* | Amber a Laranja (Sombra Laranja) |
 | **Score $<$ 45%** | *Ruim 😢, Tente de novo! 🎙️, Mais uma vez! 🔁, Não desista! ❤️* | Rose a Rosa (Sombra Rosa) |
 
+#### Nota provisória × nota definitiva:
+Só resultados **finais** do reconhecedor (`finalTranscript`) viram nota oficial da linha em `lineScores`, que é o que alimenta a média. Resultados interinos são guardados à parte, em `provisionalScoresRef`, e servem apenas de fallback para o balão.
+
+A separação existe porque a nota era calculada também sobre resultados interinos e mantida como **máximo** da janela: um trecho parcial que casasse por acaso com parte da frase inflava a pontuação, e o valor nunca voltava a cair.
+
 #### Lógica de Gatilho Duplo (Prevenção de Perdas):
 A Web Speech API pode atrasar o encerramento da frase caso o usuário cante linhas muito juntas, o que impedia os balões de aparecerem no fim de frases individuais. Por isso, implementou-se um mecanismo robusto de gatilhos:
 1. **Gatilho de Transcrição Final (Real-time)**: Assim que o motor do navegador fecha uma frase finalizada (`finalTranscript === true`), o balão é disparado imediatamente usando a pontuação calculada.
-2. **Gatilho de Transição de Linha (Linha Anterior)**: Caso a música avance para a próxima linha (`activeLineIdx` mude) e o balão da linha anterior ainda não tenha sido disparado (rastreado por uma referência persistente `triggeredBalloonsRef`), o sistema automaticamente recupera a maior nota alcançada pelo usuário enquanto cantava aquela linha e dispara o balão de feedback correspondente retroativamente.
+2. **Gatilho de Transição de Linha (Linha Anterior)**: Caso a música avance para a próxima linha (`activeLineIdx` mude) e o balão da linha anterior ainda não tenha sido disparado (rastreado por `triggeredBalloonsRef`), o sistema recupera a nota daquela linha — a definitiva, ou a provisória quando o navegador não fechou nenhuma frase durante ela — e dispara o balão retroativamente.
 3. **Prevenção de Cortes por Unmount**: Os balões são renderizados em um container global de overlay absoluto (`absolute inset-0 z-40 overflow-hidden`) na raiz do painel de letras. Isso garante que a animação de flutuação (`float-balloon`, duração de `2.5s`) complete suavemente do início ao fim, mesmo se a linha que gerou o balão seja desmontada da lista devido à paginação das letras.
+
+---
+
+#### Reinício da sessão de pontuação:
+`resetPronunciationSession` zera notas, balões disparados e a referência de linha anterior. É chamado na troca de faixa **e** quando a mesma faixa recomeça (loop ou `repeatTimes`), além de liberar o balão individual a cada repetição no modo de loop de linha.
+
+Sem o reinício no replay, a segunda passada não dispararia balão nenhum — todos os índices já constavam em `triggeredBalloonsRef` — e a média ficaria presa na primeira tentativa.
 
 ---
 

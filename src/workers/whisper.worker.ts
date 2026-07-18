@@ -1,12 +1,21 @@
 import { pipeline, env } from '@huggingface/transformers';
+import { groupWordsIntoLines } from '../utils/audioChunker';
 
 // Configura o cache do transformers para usar caminhos estritamente remotos (downloads serão guardados no Cache Storage do navegador)
 env.allowLocalModels = false;
 
 let transcriber: any = null;
+// Guarda qual modelo está carregado: sem isso, trocar o tamanho do modelo nas configurações
+// continuaria reutilizando silenciosamente o modelo antigo já em memória.
+let loadedModelName: string | null = null;
 
 /**
- * Reamostra um buffer de áudio Float32Array para 16000Hz (frequência exigida pelo Whisper).
+ * Reamostragem defensiva para 16000Hz (frequência exigida pelo Whisper).
+ *
+ * O caminho normal já entrega o áudio mono em 16kHz reamostrado com anti-aliasing pelo
+ * OfflineAudioContext na thread principal (`resampleToMono16k`), então esta função costuma
+ * ser um no-op. Ela permanece apenas como rede de segurança e usa interpolação linear,
+ * que introduz bem menos aliasing do que a decimação por vizinho mais próximo.
  */
 function resampleTo16k(audioBuffer: Float32Array, originalSampleRate: number): Float32Array {
   if (originalSampleRate === 16000) {
@@ -16,18 +25,32 @@ function resampleTo16k(audioBuffer: Float32Array, originalSampleRate: number): F
   const newLength = Math.round(audioBuffer.length / ratio);
   const result = new Float32Array(newLength);
   for (let i = 0; i < newLength; i++) {
-    const nextOffset = Math.round(i * ratio);
-    result[i] = audioBuffer[Math.min(audioBuffer.length - 1, nextOffset)];
+    const position = i * ratio;
+    const index = Math.floor(position);
+    const fraction = position - index;
+    const indexNext = Math.min(audioBuffer.length - 1, index + 1);
+    const sample = audioBuffer[index];
+    const sampleNext = audioBuffer[indexNext];
+    result[i] = sample + fraction * (sampleNext - sample);
   }
   return result;
 }
 
 self.addEventListener('message', async (event: MessageEvent) => {
-  const { type, audioData, sampleRate, modelName = 'onnx-community/whisper-tiny' } = event.data;
+  const {
+    type,
+    audioData,
+    sampleRate,
+    modelName = 'onnx-community/whisper-tiny',
+    // null = auto-detecta (comportamento anterior); um código ISO-639-1 fixa o idioma
+    language = null
+  } = event.data;
 
   if (type === 'start') {
     try {
-      if (!transcriber) {
+      if (!transcriber || loadedModelName !== modelName) {
+        transcriber = null;
+        loadedModelName = null;
         self.postMessage({ type: 'status', message: 'Carregando modelo Whisper local...' });
 
         const progress_callback = (data: any) => {
@@ -85,6 +108,8 @@ self.addEventListener('message', async (event: MessageEvent) => {
             });
           }
         }
+
+        loadedModelName = modelName;
       }
 
       self.postMessage({ type: 'status', message: 'Processando áudio...' });
@@ -94,33 +119,77 @@ self.addEventListener('message', async (event: MessageEvent) => {
 
       self.postMessage({ type: 'status', message: 'Transcrevendo áudio localmente...' });
 
-      // Executa a transcrição com carimbo de tempo e parâmetros anti-alucinação
-      const result = await transcriber(audio16k, {
+      // Parâmetros anti-alucinação compartilhados pelas duas tentativas
+      const baseOptions = {
         chunk_length_s: 30,
         stride_length_s: 5,
-        return_timestamps: true,
-        language: null, // Auto-detecta o idioma falado/cantado
+        language, // Idioma escolhido pelo usuário; null auto-detecta
         task: 'transcribe',
         // Parâmetros passados diretamente no objeto de opções (são espalhados internamente para o model.generate)
         temperature: 0.0,
-        repetition_penalty: 1.1,
-        no_repeat_ngram_size: 8, // Garante a quebra de loops de repetição longos (hallucination loops) mantendo repetições curtas de músicas
+        // ATENÇÃO: `repetition_penalty` e `no_repeat_ngram_size` são truques anti-alucinação
+        // pensados para FALA, e em música fazem o oposto do pretendido. Letra é repetitiva
+        // por natureza — refrão, hook, verso que volta. Ao proibir a repetição de qualquer
+        // sequência de 8 tokens, o modelo fica impedido de transcrever o refrão de novo e é
+        // empurrado a inventar palavras diferentes para escapar da restrição.
+        // É a causa mais provável de "palavras que não existem" na transcrição de músicas.
         max_initial_timestamp_index: null, // Permite que a transcrição comece após o silêncio/instrumental inicial sem forçar timestamp em 1.0s
-      });
+      };
 
-      // Mapeia chunks do Whisper para o formato esperado pelo app
-      const lines = (result.chunks || []).map((c: any) => {
-        const rawStart = (c.timestamp && c.timestamp[0] !== null && c.timestamp[0] !== undefined) ? c.timestamp[0] : 0;
-        const rawEnd = (c.timestamp && c.timestamp[1] !== null && c.timestamp[1] !== undefined) ? c.timestamp[1] : rawStart + 3.0;
-        return {
-          id: Math.random().toString(36).substring(2, 15),
-          text: c.text.trim(),
-          startTime: parseFloat(Number(rawStart).toFixed(2)),
-          endTime: parseFloat(Number(rawEnd).toFixed(2))
-        };
-      });
+      // 'word' devolve uma palavra por chunk (via cross-attention/DTW interno) em vez de um
+      // timestamp por frase — resolução necessária para o destaque do karaokê. Exige que o
+      // modelo tenha sido exportado com `output_attentions=True` (variantes `_timestamped`).
+      let result: any;
+      let hasWordTimestamps = true;
+      try {
+        result = await transcriber(audio16k, { ...baseOptions, return_timestamps: 'word' });
+      } catch (wordErr: any) {
+        console.warn('[WhisperWorker] Modelo sem cross-attentions; caindo para timestamps por frase.', wordErr);
+        self.postMessage({
+          type: 'status',
+          message: 'Modelo sem suporte a tempo por palavra. Transcrevendo com tempo por frase...'
+        });
+        hasWordTimestamps = false;
+        result = await transcriber(audio16k, { ...baseOptions, return_timestamps: true });
+      }
 
-      self.postMessage({ type: 'success', lines });
+      const readTimestamps = (c: any, fallbackDuration: number) => {
+        const rawStart = (c.timestamp && c.timestamp[0] !== null && c.timestamp[0] !== undefined) ? c.timestamp[0] : null;
+        const rawEnd = (c.timestamp && c.timestamp[1] !== null && c.timestamp[1] !== undefined) ? c.timestamp[1] : null;
+        if (rawStart === null) return null;
+        // Whisper às vezes deixa o fim do último trecho em aberto
+        return { start: Number(rawStart), end: Number(rawEnd ?? rawStart + fallbackDuration) };
+      };
+
+      let lines;
+      if (hasWordTimestamps) {
+        // Cada chunk é uma palavra: normaliza e reagrupa em frases
+        const words = (result.chunks || [])
+          .map((c: any) => {
+            const t = readTimestamps(c, 0.3);
+            if (!t) return null;
+            return { text: String(c.text ?? '').trim(), startTime: t.start, endTime: t.end };
+          })
+          .filter((w: any) => w && w.text.length > 0);
+
+        lines = groupWordsIntoLines(words);
+      } else {
+        // Cada chunk já é uma frase; sem `words`, o destaque cai para o modo estimado
+        lines = (result.chunks || [])
+          .map((c: any) => {
+            const t = readTimestamps(c, 3.0);
+            if (!t) return null;
+            return {
+              id: Math.random().toString(36).substring(2, 15),
+              text: String(c.text ?? '').trim(),
+              startTime: parseFloat(t.start.toFixed(2)),
+              endTime: parseFloat(t.end.toFixed(2))
+            };
+          })
+          .filter((l: any) => l && l.text.length > 0);
+      }
+
+      self.postMessage({ type: 'success', lines, hasWordTimestamps });
     } catch (err: any) {
       console.error('[WhisperWorkerError]', err);
       self.postMessage({ type: 'error', error: err.message || 'Erro desconhecido na transcrição local.' });
