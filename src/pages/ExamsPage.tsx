@@ -7,6 +7,7 @@ import { db, createA1VocabularyDeck } from '../db/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import type { CefrExam, CefrExamAttempt, Card as AppCard } from '../types';
 import { buildGeneratedExam } from '../utils/cefrExamGenerator';
+import { getLevelContentProgress, type CefrLevel } from '../utils/cefrLevelContent';
 
 interface ExamsPageProps {
   cards: AppCard[] | undefined;
@@ -133,6 +134,12 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({
     onStartExam(exam);
   };
 
+  // Progresso de leitura do nível selecionado (textos estudados rumo à meta do nível)
+  const levelContentProgress = getLevelContentProgress(
+    levelReadings || [],
+    selectedDetailLevel as CefrLevel
+  );
+
   const selectedLevelDetails = levelDetailsData[selectedDetailLevel as keyof typeof levelDetailsData];
   const activeLevelLearned = cefrCounts[selectedDetailLevel] || 0;
   const isSelectedLevelLocked = levelsKeys.indexOf(selectedDetailLevel) > levelsKeys.indexOf(unlockedLevel);
@@ -254,9 +261,12 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({
                   {selectedLevelDetails.name} • {levelDetailsData[selectedDetailLevel as keyof typeof levelDetailsData].title}
                 </h4>
               </div>
-              <div className="text-right shrink-0">
+              <div className="text-right shrink-0 space-y-1.5">
                 <span className="text-xs font-black text-foreground bg-muted border border-border px-3 py-1 rounded-xl shadow-sm block">
                   {activeLevelLearned} / {selectedLevelDetails.vocabGoal} <span className="text-muted-foreground font-semibold">cards</span>
+                </span>
+                <span className="text-xs font-black text-foreground bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-xl shadow-sm block">
+                  {levelContentProgress.studied} / {levelContentProgress.target} <span className="text-muted-foreground font-semibold">textos</span>
                 </span>
               </div>
             </div>
