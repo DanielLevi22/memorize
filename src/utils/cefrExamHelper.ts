@@ -62,3 +62,65 @@ export function calculateExamScore(
     passed
   };
 }
+
+export interface WrongAnswer {
+  questionId: string;
+  section: 'reading' | 'listening';
+  questionText: string;
+  yourAnswer: string;   // vazio se a questão ficou em branco
+  correctAnswer: string;
+  sourceTerm?: string;  // termo a revisar, quando a questão foi gerada do material do aluno
+}
+
+export interface ExamDiagnostic {
+  wrong: WrongAnswer[];
+  /** Termos únicos de vocabulário ligados aos erros, para virar uma revisão focada. */
+  termsToReview: string[];
+  wrongReadingCount: number;
+  wrongListeningCount: number;
+}
+
+/**
+ * Diagnóstico pós-prova: lista o que foi errado e — o ponto central — quais termos de
+ * vocabulário revisar.
+ *
+ * Como as questões geradas carregam o termo de origem (`sourceTerm`), cada erro aponta para
+ * um card específico. É o que transforma um "68%, reprovado" num plano de estudo acionável e
+ * fecha o ciclo estudo → prova → estudo.
+ */
+export function buildExamDiagnostic(
+  answers: Record<string, string>,
+  exam: CefrExam
+): ExamDiagnostic {
+  const wrong: WrongAnswer[] = [];
+
+  for (const q of exam.questions) {
+    if (q.section !== 'reading' && q.section !== 'listening') continue;
+    const given = answers[q.id] ?? '';
+    if (given === q.correctAnswer) continue;
+
+    wrong.push({
+      questionId: q.id,
+      section: q.section,
+      questionText: q.questionText,
+      yourAnswer: given,
+      correctAnswer: q.correctAnswer,
+      sourceTerm: q.sourceTerm
+    });
+  }
+
+  const termsToReview = Array.from(
+    new Set(
+      wrong
+        .map(w => w.sourceTerm?.trim())
+        .filter((t): t is string => !!t)
+    )
+  );
+
+  return {
+    wrong,
+    termsToReview,
+    wrongReadingCount: wrong.filter(w => w.section === 'reading').length,
+    wrongListeningCount: wrong.filter(w => w.section === 'listening').length
+  };
+}

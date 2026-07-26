@@ -59,6 +59,23 @@ Para avançar para o próximo nível (ex: avançar de B1 para B2), o usuário de
 2. Ser aprovado no **Exame Simulado** do nível atual.
 * *Usuários Avançados:* Um novo usuário pode prestar o exame do nível em que se julga apto (ex: B2) logo de início. Se aprovado, ele pula os níveis anteriores e destrava seu progresso a partir deste ponto.
 
+### Geração da Prova a partir do Material do Aluno
+As questões objetivas **não são um seed fixo**. A cada tentativa, `buildGeneratedExam`
+(`src/utils/cefrExamGenerator.ts`) monta uma prova nova a partir do vocabulário e das leituras
+que o próprio aluno estudou no nível selecionado:
+
+- **Reading por cloze**: quando o card tem frase de exemplo contendo o termo, o termo é apagado.
+- **Reading por vocabulário**: senão, pergunta-se o significado do termo.
+- **Listening**: uma frase real (leitura ou contexto do card) é narrada por TTS e o aluno escolhe
+  o significado correto.
+- Os distratores saem do próprio material do aluno; sem quatro alternativas distintas, a questão
+  é descartada.
+
+Motivação: o exame é o portão para subir de nível, e um seed fixo permitia decorar o gabarito na
+segunda tentativa — o exame deixava de medir proficiência. Geração por semente aleatória garante
+prova diferente a cada vez. Sem material suficiente (`< 4` questões), o seed fixo original é usado
+como fallback. É 100% local e gratuito; apenas a redação continua indo ao Gemini.
+
 ### Estrutura da Prova
 Cada exame é dividido em três seções:
 

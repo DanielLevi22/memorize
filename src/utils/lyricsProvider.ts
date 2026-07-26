@@ -135,6 +135,25 @@ export const parseLrcToLines = (
   });
 };
 
+/**
+ * Serializa linhas com tempo de volta para o formato LRC (exportação).
+ * Inverte `parseLrcToLines` para os casos simples (uma marcação por linha).
+ */
+export const formatLrc = (
+  lines: { text: string; startTime: number }[],
+  title: string
+): string => {
+  const stamp = (seconds: number): string => {
+    const min = Math.floor(seconds / 60);
+    const sec = (seconds % 60).toFixed(2);
+    return `[${String(min).padStart(2, '0')}:${sec.padStart(5, '0')}]`;
+  };
+
+  const header = `[ti:${title}]\n`;
+  const body = lines.map(l => `${stamp(l.startTime)} ${l.text}`).join('\n');
+  return `${header}${body}\n`;
+};
+
 /** Converte letra simples (sem tempo) em linhas, para alinhar ou sincronizar depois. */
 export const parsePlainLyricsToLines = (plainText: string): TranscriptionLine[] => {
   const newId = () =>

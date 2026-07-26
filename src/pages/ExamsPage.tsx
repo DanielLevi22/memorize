@@ -6,6 +6,7 @@ import { Progress } from '../components/ui/progress';
 import { db, createA1VocabularyDeck } from '../db/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import type { CefrExam, CefrExamAttempt, Card as AppCard } from '../types';
+import { buildGeneratedExam } from '../utils/cefrExamGenerator';
 
 interface ExamsPageProps {
   cards: AppCard[] | undefined;
@@ -108,6 +109,29 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({
     };
     loadExam();
   }, [selectedDetailLevel]);
+
+  /**
+   * Inicia o exame gerando uma prova a partir do vocabulário e das leituras do próprio aluno
+   * para o nível selecionado. Sem material suficiente, `buildGeneratedExam` devolve o seed
+   * fixo intacto. A semente aleatória garante uma prova diferente a cada tentativa.
+   */
+  const handleStartExam = () => {
+    if (!selectedExam) return;
+
+    const levelCards = (cards || [])
+      .filter(c => c.cefrLevel === selectedDetailLevel)
+      .map(c => ({ front: c.front, back: c.back, context: c.context }));
+
+    const levelLines = (levelReadings || [])
+      .flatMap(t => t.lines || [])
+      .map(l => ({ original: l.original, translated: l.translated }));
+
+    const exam = buildGeneratedExam(selectedExam, levelCards, levelLines, {
+      seed: Date.now() % 2147483647
+    });
+
+    onStartExam(exam);
+  };
 
   const selectedLevelDetails = levelDetailsData[selectedDetailLevel as keyof typeof levelDetailsData];
   const activeLevelLearned = cefrCounts[selectedDetailLevel] || 0;
@@ -383,9 +407,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({
                         </span>
                         <button
                           type="button"
-                          onClick={() => {
-                            if (selectedExam) onStartExam(selectedExam);
-                          }}
+                          onClick={handleStartExam}
                           className="text-[8px] text-primary hover:text-primary/80 font-black uppercase tracking-wider underline cursor-pointer"
                         >
                           Ignorar Requisitos (Dev Mode)
@@ -394,9 +416,7 @@ export const ExamsPage: React.FC<ExamsPageProps> = ({
                     )}
                     <Button
                       size="sm"
-                      onClick={() => {
-                        if (selectedExam) onStartExam(selectedExam);
-                      }}
+                      onClick={handleStartExam}
                       disabled={isExamDisabled}
                       className={`h-10 text-xs font-black rounded-xl px-5 flex items-center gap-2 cursor-pointer transition-all ${
                         isSelectedLevelLocked

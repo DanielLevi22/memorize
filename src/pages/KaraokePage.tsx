@@ -14,11 +14,12 @@ import { Button } from '../components/ui/button';
 import { toast } from 'sonner';
 import { diffWords, type DiffWord, getLevenshteinDistance } from '../utils/srs';
 import { pronunciationSimilarity } from '../utils/phoneticScoring';
+import { computeWordHighlights } from '../utils/karaokeHighlight';
 import { separateVocalsCloud } from '../utils/vocalSeparationCloud';
 import { decodeAudioFile, adjustTimestampsSafeguard, bufferToMono16kWav, resampleToMono16k } from '../utils/audioChunker';
 import { translateWithMyMemory } from '../utils/readingProcessor';
 import { useAI } from '../services/ai/AIContext';
-import { searchLyrics, parseLrcToLines, parsePlainLyricsToLines, type LyricsSearchResult } from '../utils/lyricsProvider';
+import { searchLyrics, parseLrcToLines, parsePlainLyricsToLines, formatLrc, type LyricsSearchResult } from '../utils/lyricsProvider';
 
 const cleanString = (str: string) => {
   if (!str) return '';
@@ -2697,7 +2698,7 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
     reader.onload = (event) => {
       const content = event.target?.result as string;
       try {
-        const lines = parseLRC(content);
+        const lines = parseLrcToLines(content, audioRef.current?.duration);
         if (lines.length === 0) {
           toast.error('Nenhuma linha de letra encontrada no arquivo LRC.');
           return;
@@ -2720,7 +2721,7 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
       toast.error('Não há letras para exportar.');
       return;
     }
-    const lrcContent = formatLRC(tempLines, activeTrack?.title || 'audio');
+    const lrcContent = formatLrc(tempLines, activeTrack?.title || 'audio');
     const blob = new Blob([lrcContent], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -2731,48 +2732,8 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
     toast.success('Letras exportadas como arquivo LRC com sucesso!');
   };
 
-  const parseLRC = (lrcText: string): TranscriptionLine[] => {
-    const lines = lrcText.split('\n');
-    const result: TranscriptionLine[] = [];
-    const timeRegex = /\[(\d+):(\d+(?:\.\d+)?)\]/;
-
-    for (let line of lines) {
-      line = line.trim();
-      const match = timeRegex.exec(line);
-      if (match) {
-        const min = parseInt(match[1]);
-        const sec = parseFloat(match[2]);
-        const time = min * 60 + sec;
-        const text = line.replace(timeRegex, '').trim();
-        result.push({
-          id: crypto.randomUUID(),
-          text,
-          startTime: time
-        });
-      }
-    }
-
-    for (let i = 0; i < result.length; i++) {
-      if (i + 1 < result.length) {
-        result[i].endTime = result[i + 1].startTime;
-      } else if (audioRef.current) {
-        result[i].endTime = audioRef.current.duration;
-      }
-    }
-
-    return result;
-  };
-
-  const formatLRC = (lines: TranscriptionLine[], title: string): string => {
-    let output = `[ti:${title}]\n`;
-    for (const line of lines) {
-      const min = Math.floor(line.startTime / 60);
-      const sec = (line.startTime % 60).toFixed(2);
-      const timeStr = `[${String(min).padStart(2, '0')}:${sec.padStart(5, '0')}]`;
-      output += `${timeStr} ${line.text}\n`;
-    }
-    return output;
-  };
+  // parseLRC/formatLRC inline foram substituídos por parseLrcToLines/formatLrc
+  // (utils/lyricsProvider.ts), que cobrem múltiplas marcações, offset e metadados, com testes.
 
   // Hotkey listener for manual sync (Space/Enter to stamp, Backspace to undo)
   useEffect(() => {
@@ -2802,84 +2763,12 @@ ${JSON.stringify({ texts: lines.map(l => l.text) })}
   const renderHighlightedText = (text: string, startTime: number, endTime: number, words?: WordTiming[]) => {
     const durationOfLine = endTime - startTime;
     if (durationOfLine <= 0) return <span>{text}</span>;
-    const progressOfLine = progress - startTime;
-    const ratio = Math.min(Math.max(progressOfLine / durationOfLine, 0), 1);
 
-    // Divide o texto em tokens de palavras e espaços em branco
-    const tokens = text.split(/(\s+)/);
-    const wordTokens = tokens.filter(t => !/^\s+$/.test(t) && t.length > 0);
-    
-    if (wordTokens.length === 0) {
+    // Toda a lógica de sincronia vive em computeWordHighlights (pura e testada); aqui fica só o JSX
+    const renderedTokens = computeWordHighlights(text, startTime, endTime, progress, words);
+
+    if (renderedTokens.length === 0) {
       return <span>{text}</span>;
-    }
-
-    // Caminho preferido: tempos reais medidos no áudio, palavra a palavra.
-    // Só é usado se a contagem bate com o texto exibido — o usuário pode ter editado a
-    // letra depois da transcrição, e aí os tempos salvos não correspondem mais às palavras.
-    const hasUsableWordTimings = !!words && words.length === wordTokens.length;
-
-    const wordTimeRanges = hasUsableWordTimings
-      ? wordTokens.map((w, idx) => ({
-          word: w,
-          startTimeOfWord: words![idx].startTime,
-          endTimeOfWord: words![idx].endTime
-        }))
-      : (() => {
-          // Fallback: distribui a duração da linha proporcional à contagem de caracteres.
-          // Assume ritmo uniforme, o que erra em canto — mas é o melhor possível sem tempos reais.
-          const totalWordChars = wordTokens.reduce((sum, w) => sum + w.length, 0);
-          let currentWordCharCount = 0;
-          return wordTokens.map(w => {
-            const startRatio = currentWordCharCount / totalWordChars;
-            currentWordCharCount += w.length;
-            const endRatio = currentWordCharCount / totalWordChars;
-            return {
-              word: w,
-              startTimeOfWord: startTime + startRatio * durationOfLine,
-              endTimeOfWord: startTime + endRatio * durationOfLine
-            };
-          });
-        })();
-
-    const renderedTokens: { text: string; highlight: 'full' | 'none' | 'partial'; highlightLength?: number }[] = [];
-    let wordIndex = 0;
-    let charIndex = 0;
-
-    for (let i = 0; i < tokens.length; i++) {
-      const token = tokens[i];
-      const isWhitespace = /^\s+$/.test(token) || token.length === 0;
-
-      if (isWhitespace) {
-        const tokenRatio = charIndex / text.length;
-        charIndex += token.length;
-        if (ratio >= tokenRatio) {
-          renderedTokens.push({ text: token, highlight: 'full' });
-        } else {
-          renderedTokens.push({ text: token, highlight: 'none' });
-        }
-      } else {
-        const range = wordTimeRanges[wordIndex];
-        wordIndex++;
-        charIndex += token.length;
-
-        if (progress >= range.endTimeOfWord) {
-          renderedTokens.push({ text: token, highlight: 'full' });
-        } else if (progress <= range.startTimeOfWord) {
-          renderedTokens.push({ text: token, highlight: 'none' });
-        } else {
-          // Palavra atual ativa (parcialmente percorrida)
-          const wordDuration = range.endTimeOfWord - range.startTimeOfWord;
-          const wordProgress = progress - range.startTimeOfWord;
-          const wordRatio = Math.min(Math.max(wordProgress / wordDuration, 0), 1);
-          const highlightLength = Math.floor(token.length * wordRatio);
-
-          renderedTokens.push({
-            text: token,
-            highlight: 'partial',
-            highlightLength
-          });
-        }
-      }
     }
 
     return (

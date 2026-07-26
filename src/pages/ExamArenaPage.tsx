@@ -3,7 +3,7 @@ import { Button } from '../components/ui/button';
 import { Volume2, BookOpen, Headphones, PenTool, Award, Sparkles, Loader2, AlertTriangle } from 'lucide-react';
 import type { CefrExam, CefrExamAttempt } from '../types';
 import { toast } from 'sonner';
-import { calculateExamScore, getPassingCut } from '../utils/cefrExamHelper';
+import { calculateExamScore, getPassingCut, buildExamDiagnostic, type ExamDiagnostic } from '../utils/cefrExamHelper';
 import { evaluateWritingWithGemini } from '../utils/cefrWritingEvaluator';
 import { useAI } from '../services/ai/AIContext';
 
@@ -27,12 +27,14 @@ export const ExamArenaPage: React.FC<ExamArenaPageProps> = ({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isTtsPlaying, setIsTtsPlaying] = useState<boolean>(false);
   const [finalAttempt, setFinalAttempt] = useState<Omit<CefrExamAttempt, 'id' | 'timestamp'> | null>(null);
+  const [diagnostic, setDiagnostic] = useState<ExamDiagnostic | null>(null);
 
   useEffect(() => {
     setCurrentStep(0);
     setAnswers({});
     setWritingContent('');
     setFinalAttempt(null);
+    setDiagnostic(null);
     setIsSubmitting(false);
     setIsTtsPlaying(false);
   }, [exam]);
@@ -138,6 +140,7 @@ export const ExamArenaPage: React.FC<ExamArenaPageProps> = ({
 
       await onSubmitAttempt(attempt);
       setFinalAttempt(attempt);
+      setDiagnostic(buildExamDiagnostic(answers, exam));
       setCurrentStep(4); // View result step
     } catch (err) {
       toast.error('Erro ao processar envio do simulado.');
@@ -450,8 +453,55 @@ export const ExamArenaPage: React.FC<ExamArenaPageProps> = ({
               </div>
             )}
 
+            {/* Diagnóstico: o que errar e, principalmente, quais palavras revisar.
+                Cada erro numa questão gerada aponta para um termo do próprio vocabulário do aluno. */}
+            {diagnostic && diagnostic.wrong.length > 0 && (
+              <div className="w-full text-left space-y-3">
+                {diagnostic.termsToReview.length > 0 && (
+                  <div className="p-4 bg-amber-500/10 border border-amber-500/25 rounded-xl space-y-2">
+                    <p className="text-[9px] font-black uppercase text-amber-600 dark:text-amber-400 tracking-wider flex items-center gap-1">
+                      <BookOpen size={10} /> Revise estas palavras
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {diagnostic.termsToReview.map(term => (
+                        <span
+                          key={term}
+                          className="text-[10px] font-extrabold text-amber-700 dark:text-amber-300 bg-amber-500/15 border border-amber-500/25 px-2 py-1 rounded-lg"
+                        >
+                          {term}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="text-[9px] text-muted-foreground font-semibold leading-relaxed">
+                      Você errou {diagnostic.wrongReadingCount} de leitura e {diagnostic.wrongListeningCount} de áudio.
+                      Reforce estes termos nas suas revisões antes de tentar de novo.
+                    </p>
+                  </div>
+                )}
+
+                <details className="p-4 bg-muted/40 border border-border/40 rounded-xl">
+                  <summary className="text-[9px] font-black uppercase text-muted-foreground tracking-wider cursor-pointer">
+                    Ver o gabarito dos {diagnostic.wrong.length} erros
+                  </summary>
+                  <div className="mt-3 space-y-3">
+                    {diagnostic.wrong.map(w => (
+                      <div key={w.questionId} className="text-[10px] space-y-0.5 border-b border-border/30 pb-2 last:border-0">
+                        <p className="font-bold text-foreground/90">{w.questionText}</p>
+                        <p className="text-destructive font-semibold">
+                          Sua resposta: {w.yourAnswer || '(em branco)'}
+                        </p>
+                        <p className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                          Correta: {w.correctAnswer}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              </div>
+            )}
+
             <div className="w-full pt-2">
-              <Button 
+              <Button
                 onClick={onClose}
                 className="w-full bg-primary hover:bg-primary/95 text-primary-foreground font-black text-xs h-11 rounded-xl cursor-pointer"
               >

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseLrcToLines, parsePlainLyricsToLines } from './lyricsProvider';
+import { parseLrcToLines, parsePlainLyricsToLines, formatLrc } from './lyricsProvider';
 
 describe('parseLrcToLines', () => {
   it('converte marcações de tempo em linhas ordenadas', () => {
@@ -70,6 +70,31 @@ describe('parseLrcToLines', () => {
   it('retorna vazio para entrada vazia ou sem marcações', () => {
     expect(parseLrcToLines('')).toEqual([]);
     expect(parseLrcToLines('linha sem tempo\noutra linha')).toEqual([]);
+  });
+});
+
+describe('formatLrc', () => {
+  it('gera cabeçalho de título e uma marcação por linha', () => {
+    const lrc = formatLrc([{ text: 'Look at the stars', startTime: 35.66 }], 'Yellow');
+
+    expect(lrc).toContain('[ti:Yellow]');
+    expect(lrc).toContain('[00:35.66] Look at the stars');
+  });
+
+  it('formata minutos e segundos com preenchimento', () => {
+    const lrc = formatLrc([{ text: 'Linha', startTime: 5.5 }], 't');
+    expect(lrc).toContain('[00:05.50] Linha');
+  });
+
+  it('sobrevive à ida e volta pelo parser', () => {
+    const original = [
+      { text: 'Primeira', startTime: 10 },
+      { text: 'Segunda', startTime: 22.5 }
+    ];
+    const reparsed = parseLrcToLines(formatLrc(original, 'Teste'));
+
+    expect(reparsed.map(l => l.text)).toEqual(['Primeira', 'Segunda']);
+    expect(reparsed.map(l => l.startTime)).toEqual([10, 22.5]);
   });
 });
 

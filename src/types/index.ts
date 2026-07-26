@@ -305,6 +305,7 @@ export interface CefrExam {
     questionText: string;
     options: string[]; // Múltipla escolha
     correctAnswer: string;
+    sourceTerm?: string; // Termo de vocabulário de origem (questões geradas): liga o erro ao card a revisar
   }[];
   writingPrompt: {
     topic: string;

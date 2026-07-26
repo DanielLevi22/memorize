@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getPassingCut, calculateExamScore } from './cefrExamHelper';
+import { getPassingCut, calculateExamScore, buildExamDiagnostic } from './cefrExamHelper';
 import type { CefrExam } from '../types';
 
 // Mock do simulado B2 para testes
@@ -81,5 +81,70 @@ describe('cefrExamHelper: Lógica de Correção de Provas', () => {
     expect(result.listeningScore).toBe(100);
     expect(result.overallScore).toBe(72);
     expect(result.passed).toBe(true);
+  });
+});
+
+describe('buildExamDiagnostic', () => {
+  const exam: CefrExam = {
+    id: 'e',
+    level: 'B1',
+    title: 't',
+    description: 'd',
+    questions: [
+      { id: 'q1', section: 'reading', questionText: 'meaning of house?', options: ['casa', 'carro', 'gato', 'sol'], correctAnswer: 'casa', sourceTerm: 'house' },
+      { id: 'q2', section: 'reading', questionText: 'meaning of car?', options: ['casa', 'carro', 'gato', 'sol'], correctAnswer: 'carro', sourceTerm: 'car' },
+      { id: 'q3', section: 'listening', questionText: 'listen', options: ['a', 'b', 'c', 'd'], correctAnswer: 'a', sourceTerm: 'cat' }
+    ],
+    writingPrompt: { topic: 'x', instructions: 'y', minWords: 10, maxWords: 20 }
+  };
+
+  it('lista apenas as questões erradas', () => {
+    const diag = buildExamDiagnostic({ q1: 'casa', q2: 'gato', q3: 'a' }, exam);
+
+    expect(diag.wrong).toHaveLength(1);
+    expect(diag.wrong[0].questionId).toBe('q2');
+    expect(diag.wrong[0].yourAnswer).toBe('gato');
+    expect(diag.wrong[0].correctAnswer).toBe('carro');
+  });
+
+  it('reúne os termos a revisar a partir dos erros', () => {
+    const diag = buildExamDiagnostic({ q1: 'gato', q2: 'gato', q3: 'b' }, exam);
+
+    expect(diag.termsToReview.sort()).toEqual(['car', 'cat', 'house']);
+  });
+
+  it('conta erros por seção', () => {
+    const diag = buildExamDiagnostic({ q1: 'gato', q2: 'carro', q3: 'b' }, exam);
+
+    expect(diag.wrongReadingCount).toBe(1);
+    expect(diag.wrongListeningCount).toBe(1);
+  });
+
+  it('trata questão em branco como erro', () => {
+    const diag = buildExamDiagnostic({ q1: 'casa', q2: 'carro' }, exam);
+
+    expect(diag.wrong).toHaveLength(1);
+    expect(diag.wrong[0].questionId).toBe('q3');
+    expect(diag.wrong[0].yourAnswer).toBe('');
+  });
+
+  it('deduplica termos repetidos e ignora questões sem sourceTerm', () => {
+    const seedExam: CefrExam = {
+      ...exam,
+      questions: [
+        { id: 's1', section: 'reading', questionText: 'q', options: ['a', 'b', 'c', 'd'], correctAnswer: 'a' }
+      ]
+    };
+    const diag = buildExamDiagnostic({ s1: 'b' }, seedExam);
+
+    expect(diag.wrong).toHaveLength(1);
+    expect(diag.termsToReview).toEqual([]);
+  });
+
+  it('não retorna nada quando tudo está certo', () => {
+    const diag = buildExamDiagnostic({ q1: 'casa', q2: 'carro', q3: 'a' }, exam);
+
+    expect(diag.wrong).toHaveLength(0);
+    expect(diag.termsToReview).toEqual([]);
   });
 });
