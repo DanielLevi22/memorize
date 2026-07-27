@@ -507,5 +507,72 @@ export const cefrReadingsSeedData: ReadingText[] = [
       ['The mind, unburdened, makes room for the present.', 'A mente, aliviada, abre espaço para o presente.', ['unburdened']],
       ['And in that forgetting, curiously, we become free to begin again.', 'E nesse esquecimento, curiosamente, ficamos livres para recomeçar.', ['curiously', 'begin again']]
     ]
+  ),
+
+  // ————— Clássicos de domínio público (fábulas de Esopo) —————
+  // Literatura real e famosa, livre de direitos autorais, naturalmente curta e graduada.
+
+  buildReading(
+    'seed-story-a2-tortoise-hare',
+    '📚 The Tortoise and the Hare (A2) — Esopo',
+    'A fábula clássica sobre persistência: devagar e sempre.',
+    'A2',
+    [
+      ['A fast hare laughed at a slow tortoise.', 'Uma lebre veloz zombava de uma tartaruga lenta.', ['fast', 'slow']],
+      ['"You are so slow! Let\'s have a race," said the hare.', '"Você é tão lenta! Vamos apostar uma corrida", disse a lebre.', ['race']],
+      ['The tortoise agreed, and the race began.', 'A tartaruga concordou, e a corrida começou.', ['agreed', 'began']],
+      ['The hare ran far ahead and decided to rest.', 'A lebre correu bem à frente e resolveu descansar.', ['ahead', 'rest']],
+      ['She fell asleep under a shady tree.', 'Ela adormeceu debaixo de uma árvore sombreada.', ['fell asleep']],
+      ['The tortoise walked slowly but never stopped.', 'A tartaruga andou devagar, mas nunca parou.', ['never stopped']],
+      ['When the hare woke up, the tortoise was already at the finish line.', 'Quando a lebre acordou, a tartaruga já estava na linha de chegada.', ['woke up', 'finish line']],
+      ['Slow and steady wins the race.', 'Devagar e sempre se ganha a corrida.', ['steady']]
+    ]
+  ),
+  buildReading(
+    'seed-story-a2-boy-wolf',
+    '📚 The Boy Who Cried Wolf (A2) — Esopo',
+    'Sobre mentiras e confiança: ninguém acredita em um mentiroso.',
+    'A2',
+    [
+      ['A young shepherd watched his sheep on a green hill.', 'Um jovem pastor cuidava de suas ovelhas em uma colina verde.', ['shepherd', 'sheep']],
+      ['He was bored, so he shouted, "Wolf! Wolf!"', 'Ele estava entediado, então gritou: "Lobo! Lobo!"', ['bored', 'shouted']],
+      ['The villagers ran to help him, but there was no wolf.', 'Os moradores correram para ajudá-lo, mas não havia lobo nenhum.', ['villagers']],
+      ['The boy laughed at them and did the same trick again.', 'O menino riu deles e repetiu a mesma brincadeira de novo.', ['trick']],
+      ['One day, a real wolf came to the sheep.', 'Um dia, um lobo de verdade veio até as ovelhas.', ['real']],
+      ['"Wolf! Wolf!" the boy cried, but nobody came.', '"Lobo! Lobo!", o menino gritou, mas ninguém veio.', ['cried', 'nobody']],
+      ['The villagers no longer believed him.', 'Os moradores já não acreditavam nele.', ['no longer', 'believed']],
+      ['Nobody believes a liar, even when he tells the truth.', 'Ninguém acredita em um mentiroso, mesmo quando ele diz a verdade.', ['liar', 'truth']]
+    ]
+  ),
+  buildReading(
+    'seed-story-b1-fox-grapes',
+    '📚 The Fox and the Grapes (B1) — Esopo',
+    'A origem da expressão "uvas verdes": desprezar o que não se pode ter.',
+    'B1',
+    [
+      ['One hot day, a hungry fox saw grapes hanging from a high vine.', 'Num dia quente, uma raposa faminta viu uvas penduradas em uma parreira alta.', ['hungry', 'vine']],
+      ['They looked ripe, juicy, and absolutely delicious.', 'Elas pareciam maduras, suculentas e absolutamente deliciosas.', ['ripe', 'juicy']],
+      ['The fox jumped as high as she could to reach them.', 'A raposa pulou o mais alto que pôde para alcançá-las.', ['reach']],
+      ['Again and again she tried, but she always failed.', 'Vez após vez ela tentou, mas sempre fracassava.', ['failed']],
+      ['Finally, tired and annoyed, she gave up and walked away.', 'Por fim, cansada e irritada, ela desistiu e foi embora.', ['annoyed', 'gave up']],
+      ['"Those grapes are probably sour anyway," she muttered.', '"Aquelas uvas provavelmente estão azedas mesmo", ela resmungou.', ['sour', 'muttered']],
+      ['It is easy to despise what you cannot have.', 'É fácil desprezar aquilo que não se pode ter.', ['despise']]
+    ]
+  ),
+  buildReading(
+    'seed-story-b1-wind-sun',
+    '📚 The North Wind and the Sun (B1) — Esopo',
+    'Uma disputa entre o vento e o sol: a gentileza vence a força.',
+    'B1',
+    [
+      ['The North Wind and the Sun argued about which of them was stronger.', 'O Vento Norte e o Sol discutiam sobre qual dos dois era mais forte.', ['argued', 'stronger']],
+      ['They saw a traveler walking along the road in a warm coat.', 'Eles viram um viajante caminhando pela estrada com um casaco quente.', ['traveler', 'coat']],
+      ['"Whoever makes him remove his coat is the winner," they agreed.', '"Quem fizer ele tirar o casaco é o vencedor", combinaram.', ['remove', 'winner']],
+      ['The North Wind blew as hard and as cold as he could.', 'O Vento Norte soprou o mais forte e o mais frio que pôde.', ['blew']],
+      ['But the harder he blew, the tighter the traveler held his coat.', 'Mas quanto mais forte ele soprava, mais o viajante segurava o casaco.', ['tighter', 'held']],
+      ['Then the Sun shone gently and warmed the air.', 'Então o Sol brilhou suavemente e aqueceu o ar.', ['shone', 'gently']],
+      ['Soon the traveler grew hot and took off his coat by himself.', 'Logo o viajante ficou com calor e tirou o casaco por conta própria.', ['took off']],
+      ['Gentleness and warmth achieve more than force and fury.', 'A gentileza e o calor conseguem mais do que a força e a fúria.', ['gentleness', 'fury']]
+    ]
   )
 ];
