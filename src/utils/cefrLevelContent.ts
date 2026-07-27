@@ -18,6 +18,9 @@ export interface LevelContentProgress {
   remaining: number; // textos ainda a estudar até a meta (>= 0)
 }
 
+/** Os seis níveis CEFR em ordem crescente. */
+export const CEFR_LEVELS: CefrLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+
 /**
  * Meta de textos por nível. Cresce com o nível porque a competência exigida aumenta.
  * São alvos pedagógicos, não limites: o aluno pode ler além.
@@ -61,4 +64,28 @@ export const getLevelContentProgress = (
   const remaining = Math.max(0, target - studied);
 
   return { level, total, studied, target, percent, remaining };
+};
+
+export interface StudyLevelShelf<T extends Pick<TextResource, 'cefrLevel' | 'lines'>> {
+  level: CefrLevel;
+  texts: T[];
+  progress: LevelContentProgress;
+}
+
+/**
+ * Organiza os textos de estudo em prateleiras por nível (A1→C2), cada uma com seus textos e
+ * o progresso correspondente. É a fonte de dados da vitrine de leitura por nível.
+ *
+ * Considera "texto de estudo" qualquer texto com `cefrLevel` definido — inclui tanto o
+ * conteúdo curado semeado quanto textos que o próprio usuário marcou com um nível.
+ */
+export const buildStudyLibrary = <T extends Pick<TextResource, 'cefrLevel' | 'lines'>>(
+  texts: T[],
+  studiedPredicate: (t: Pick<TextResource, 'lines'>) => boolean = isTextStudied
+): StudyLevelShelf<T>[] => {
+  return CEFR_LEVELS.map(level => ({
+    level,
+    texts: texts.filter(t => t.cefrLevel === level),
+    progress: getLevelContentProgress(texts, level, studiedPredicate)
+  }));
 };

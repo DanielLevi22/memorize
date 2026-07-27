@@ -5,7 +5,7 @@ import {
   Search, Settings, Sun, Moon,
   ChevronLeft, LayoutDashboard, TrendingUp, ClipboardList,
   BookOpen, Info, MessageSquare, Timer, RefreshCw, Cloud, Headphones,
-  Lock, Key, Eye, EyeOff, Mic, Bot
+  Lock, Key, Eye, EyeOff, Mic, Bot, GraduationCap
 } from 'lucide-react';
 
 // Banco de Dados e Types
@@ -27,6 +27,7 @@ import { ProfilePage } from './pages/ProfilePage';
 import { SettingsPage } from './pages/SettingsPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { ReadingPage } from './pages/ReadingPage';
+import { CefrLibraryPage } from './pages/CefrLibraryPage';
 import { ConversationPage } from './pages/ConversationPage';
 import { PlaylistPage } from './pages/PlaylistPage';
 import { KaraokePage } from './pages/KaraokePage';
@@ -102,7 +103,7 @@ function MainApp() {
   // --- ESTADO DA SIDEBAR E NAVEGAÇÃO INTERNA ---
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDesktopSidebarOpen, setIsDesktopSidebarOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke' | 'mining'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke' | 'library' | 'mining'>('dashboard');
   const [activeKaraokeTrackId, setActiveKaraokeTrackId] = useState<string | null>(null);
   const [isKaraokeFullscreen, setIsKaraokeFullscreen] = useState(false);
   const [guideInitialTab, setGuideInitialTab] = useState<'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math' | 'ollama_setup'>('overview');
@@ -110,7 +111,7 @@ function MainApp() {
   const [isPomodoroOpen, setIsPomodoroOpen] = useState(false);
 
   const handleSetActiveTab = (
-    tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke',
+    tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke' | 'library',
     subTab?: 'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math' | 'ollama_setup'
   ) => {
     setActiveTab(tab);
@@ -1227,7 +1228,7 @@ function MainApp() {
   }, []);
 
   // --- FLUXO NAVEGAÇÃO SIDEBAR ---
-  const handleNavigateFromSidebar = (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke' | 'mining') => {
+  const handleNavigateFromSidebar = (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke' | 'library' | 'mining') => {
     setActiveTab(tab);
     setGuideInitialTab('overview');
     setCurrentView('dashboard');
@@ -1454,11 +1455,29 @@ function MainApp() {
               </div>
             </Button>
 
-            <Button 
+            <Button
               variant="ghost"
               className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
-                activeTab === 'conversation' 
-                  ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                activeTab === 'library'
+                  ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+              }`}
+              onClick={() => {
+                setActiveTab('library');
+                setCurrentView('dashboard');
+              }}
+            >
+              <div className="flex items-center gap-3">
+                <GraduationCap size={16} />
+                <span>Trilha de Leitura</span>
+              </div>
+            </Button>
+
+            <Button
+              variant="ghost"
+              className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
+                activeTab === 'conversation'
+                  ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20'
                   : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
               }`}
               onClick={() => {
@@ -1762,11 +1781,26 @@ function MainApp() {
                     </div>
                   </Button>
 
-                  <Button 
+                  <Button
                     variant="ghost"
                     className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
-                      activeTab === 'conversation' 
-                        ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20' 
+                      activeTab === 'library'
+                        ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+                    }`}
+                    onClick={() => handleNavigateFromSidebar('library')}
+                  >
+                    <div className="flex items-center gap-3">
+                      <GraduationCap size={16} />
+                      <span>Trilha de Leitura</span>
+                    </div>
+                  </Button>
+
+                  <Button
+                    variant="ghost"
+                    className={`w-full justify-start font-semibold text-sm h-11 px-4 rounded-xl cursor-pointer transition-all duration-200 ${
+                      activeTab === 'conversation'
+                        ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20'
                         : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
                     }`}
                     onClick={() => handleNavigateFromSidebar('conversation')}
@@ -2119,6 +2153,17 @@ function MainApp() {
                 ttsVoice={ttsVoice}
                 isZenMode={isReadingZenMode}
                 setIsZenMode={setIsReadingZenMode}
+              />
+            )}
+
+            {/* TAB: TRILHA DE LEITURA (vitrine de textos por nível CEFR) */}
+            {activeTab === 'library' && (
+              <CefrLibraryPage
+                onOpenText={(textId) => {
+                  // A ReadingPage lê este id do localStorage ao montar; trocar de aba a remonta
+                  localStorage.setItem('memorize_active_reading_id', textId);
+                  setActiveTab('reading');
+                }}
               />
             )}
 

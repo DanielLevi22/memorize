@@ -110,7 +110,7 @@ interface FeedbackBalloon {
 interface KaraokePageProps {
   initialTrackId: string | null;
   onClearTrack: () => void;
-  setActiveTab: (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke') => void;
+  setActiveTab: (tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke' | 'library') => void;
   isFullscreenMode?: boolean;
   setIsFullscreenMode?: (fs: boolean) => void;
 }

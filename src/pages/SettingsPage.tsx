@@ -54,7 +54,7 @@ interface SettingsPageProps {
   driveAccessToken: string;
   handleDisconnectDrive: () => Promise<void>;
   onNavigateTab?: (
-    tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke',
+    tab: 'dashboard' | 'stats' | 'cards' | 'profile' | 'settings' | 'history' | 'reading' | 'guide' | 'conversation' | 'playlist' | 'cefr' | 'exams' | 'karaoke' | 'library',
     subTab?: 'overview' | 'shortcuts' | 'reading' | 'srs_presets' | 'srs_math' | 'ollama_setup'
   ) => void;
 }

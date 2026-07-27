@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getLevelContentProgress, isTextStudied, LEVEL_TEXT_TARGET } from './cefrLevelContent';
+import { getLevelContentProgress, isTextStudied, LEVEL_TEXT_TARGET, buildStudyLibrary, CEFR_LEVELS } from './cefrLevelContent';
 import type { TextResource } from '../types';
 
 const text = (level: string, mastered: boolean[]): Pick<TextResource, 'cefrLevel' | 'lines'> => ({
@@ -67,5 +67,30 @@ describe('getLevelContentProgress', () => {
     const predicate = (t: { lines?: { mastered: boolean }[] }) =>
       (t.lines ?? []).some(l => l.mastered);
     expect(getLevelContentProgress(texts, 'A1', predicate).studied).toBe(3);
+  });
+});
+
+describe('buildStudyLibrary', () => {
+  const texts = [
+    text('A1', [true]),
+    text('A1', [false]),
+    text('B2', [true])
+  ];
+
+  it('retorna uma prateleira por nível, em ordem A1→C2', () => {
+    const shelves = buildStudyLibrary(texts);
+    expect(shelves.map(s => s.level)).toEqual(CEFR_LEVELS);
+  });
+
+  it('agrupa os textos no nível certo', () => {
+    const shelves = buildStudyLibrary(texts);
+    expect(shelves.find(s => s.level === 'A1')!.texts).toHaveLength(2);
+    expect(shelves.find(s => s.level === 'B2')!.texts).toHaveLength(1);
+    expect(shelves.find(s => s.level === 'C1')!.texts).toHaveLength(0);
+  });
+
+  it('anexa o progresso de cada nível', () => {
+    const shelves = buildStudyLibrary(texts);
+    expect(shelves.find(s => s.level === 'A1')!.progress.studied).toBe(1);
   });
 });
