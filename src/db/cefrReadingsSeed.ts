@@ -407,5 +407,105 @@ export const cefrReadingsSeedData: ReadingText[] = [
       ['Such command is seldom achieved through memorisation alone.', 'Tal domínio raramente é alcançado apenas por memorização.', ['seldom', 'command']],
       ['It is forged, rather, in sustained and meaningful exposure.', 'Ele é forjado, antes, em exposição sustentada e significativa.', ['forged', 'sustained']]
     ]
+  ),
+
+  // ————— Histórias graduadas —————
+  // Narrativas completas (começo, meio e fim), não frases soltas de prática.
+  // Níveis A1–B1 inspirados em fábulas de domínio público; B2–C2 são narrativas originais.
+
+  buildReading(
+    'seed-story-a1-cat-box',
+    '📚 Tom and the Box (A1) — História',
+    'Uma história curta no presente simples sobre um gato e uma caixa.',
+    'A1',
+    [
+      ['Tom is a small cat.', 'Tom é um gato pequeno.', ['cat']],
+      ['He lives in a big house with a girl named Ana.', 'Ele mora em uma casa grande com uma menina chamada Ana.', ['lives', 'house']],
+      ['One day, Ana gets a new box.', 'Um dia, Ana ganha uma caixa nova.', ['box', 'new']],
+      ['Tom looks at the box. He likes it a lot.', 'Tom olha para a caixa. Ele gosta muito dela.', ['looks', 'likes']],
+      ['He jumps into the box and sleeps.', 'Ele pula dentro da caixa e dorme.', ['jumps', 'sleeps']],
+      ['Ana laughs. "The box is for you now," she says.', 'Ana ri. "A caixa é sua agora", ela diz.', ['laughs', 'says']],
+      ['Tom is very happy in his new home.', 'Tom está muito feliz em sua nova casa.', ['happy', 'home']]
+    ]
+  ),
+  buildReading(
+    'seed-story-a2-lion-mouse',
+    '📚 The Lion and the Mouse (A2) — História',
+    'A fábula clássica no passado simples: uma boa ação nunca é desperdiçada.',
+    'A2',
+    [
+      ['One afternoon, a lion was sleeping under a tree.', 'Uma tarde, um leão estava dormindo debaixo de uma árvore.', ['afternoon', 'sleeping']],
+      ['A little mouse ran across his paw and woke him up.', 'Um ratinho correu sobre a pata dele e o acordou.', ['ran', 'woke up']],
+      ['The angry lion caught the mouse in his claws.', 'O leão bravo pegou o rato em suas garras.', ['angry', 'caught']],
+      ['"Please let me go, and one day I will help you," said the mouse.', '"Por favor, me solte, e um dia eu vou te ajudar", disse o rato.', ['let me go', 'help']],
+      ['The lion laughed, but he let the little mouse go.', 'O leão riu, mas soltou o ratinho.', ['laughed', 'let go']],
+      ['A week later, hunters caught the lion in a strong net.', 'Uma semana depois, caçadores prenderam o leão em uma rede forte.', ['hunters', 'net']],
+      ['The mouse heard him and quickly bit through the ropes.', 'O rato o ouviu e rapidamente roeu as cordas.', ['heard', 'ropes']],
+      ['"Thank you, little friend," said the free lion.', '"Obrigado, pequeno amigo", disse o leão livre.', ['thank you', 'free']]
+    ]
+  ),
+  buildReading(
+    'seed-story-b1-ant-grasshopper',
+    '📚 The Ant and the Grasshopper (B1) — História',
+    'Uma fábula sobre esforço e preparação, com um dilema moral no fim.',
+    'B1',
+    [
+      ['All summer long, the ant worked hard to store food for the winter.', 'Durante todo o verão, a formiga trabalhou duro para guardar comida para o inverno.', ['worked hard', 'store']],
+      ['The grasshopper, however, spent his days singing and dancing.', 'O gafanhoto, porém, passava os dias cantando e dançando.', ['however', 'spent']],
+      ['"Why work so much? Come and enjoy the sunshine!" he told the ant.', '"Por que trabalhar tanto? Venha aproveitar o sol!", ele disse à formiga.', ['enjoy', 'sunshine']],
+      ['But the ant kept collecting grain without stopping.', 'Mas a formiga continuou juntando grãos sem parar.', ['kept', 'grain']],
+      ['When winter finally arrived, the fields were cold and empty.', 'Quando o inverno finalmente chegou, os campos estavam frios e vazios.', ['arrived', 'empty']],
+      ['The hungry grasshopper had nothing to eat.', 'O gafanhoto faminto não tinha nada para comer.', ['hungry']],
+      ['He knocked on the ant\'s door and humbly asked for help.', 'Ele bateu na porta da formiga e humildemente pediu ajuda.', ['knocked', 'humbly']],
+      ['The ant shared her food, but reminded him that preparation matters.', 'A formiga dividiu sua comida, mas o lembrou de que preparação importa.', ['shared', 'preparation']]
+    ]
+  ),
+  buildReading(
+    'seed-story-b2-last-train',
+    '📚 The Last Train (B2) — História',
+    'Uma narrativa original sobre acaso e perspectiva.',
+    'B2',
+    [
+      ['Marina reached the station just as the last train was leaving.', 'Marina chegou à estação bem quando o último trem estava partindo.', ['reached', 'leaving']],
+      ['She had missed it by only a few seconds.', 'Ela o havia perdido por apenas alguns segundos.', ['missed']],
+      ['Frustrated, she sat down on a cold bench and sighed.', 'Frustrada, ela se sentou em um banco frio e suspirou.', ['frustrated', 'sighed']],
+      ['An old man beside her smiled and offered her a coffee.', 'Um senhor idoso ao lado dela sorriu e lhe ofereceu um café.', ['beside', 'offered']],
+      ['"Sometimes the train we miss saves us from the wrong journey," he said.', '"Às vezes o trem que perdemos nos salva da viagem errada", ele disse.', ['journey']],
+      ['Marina wasn\'t sure what he meant, but his words stayed with her.', 'Marina não tinha certeza do que ele queria dizer, mas as palavras dele ficaram com ela.', ['meant', 'stayed']],
+      ['The next morning, she learned that the train had broken down for hours.', 'Na manhã seguinte, ela soube que o trem havia quebrado por horas.', ['learned', 'broken down']],
+      ['She smiled, remembering the stranger, and walked home slowly.', 'Ela sorriu, lembrando do estranho, e caminhou para casa devagar.', ['stranger', 'slowly']]
+    ]
+  ),
+  buildReading(
+    'seed-story-c1-lighthouse',
+    '📚 The Lighthouse Keeper (C1) — História',
+    'Uma narrativa literária sobre dever, solidão e aceitação.',
+    'C1',
+    [
+      ['For thirty years, Elias had tended the lighthouse on the edge of the cliff.', 'Por trinta anos, Elias cuidou do farol na beira do penhasco.', ['tended', 'cliff']],
+      ['He knew every rock, every current, and every mood of the restless sea.', 'Ele conhecia cada rocha, cada corrente e cada humor do mar inquieto.', ['current', 'restless']],
+      ['The villagers rarely visited, yet he never felt truly alone.', 'Os moradores raramente o visitavam, mas ele nunca se sentia verdadeiramente sozinho.', ['rarely', 'truly']],
+      ['The light itself was his companion, faithful and demanding.', 'A própria luz era sua companheira, fiel e exigente.', ['companion', 'demanding']],
+      ['When the new electric beacon arrived, his work became unnecessary.', 'Quando o novo farol elétrico chegou, seu trabalho se tornou desnecessário.', ['beacon', 'unnecessary']],
+      ['He packed his few belongings without complaint or bitterness.', 'Ele arrumou seus poucos pertences sem reclamação nem amargura.', ['belongings', 'bitterness']],
+      ['On his last night, he lit the old lamp one final time.', 'Em sua última noite, ele acendeu a antiga lâmpada uma última vez.', ['lit', 'final']],
+      ['Then he watched the dawn, grateful for a life spent guarding others.', 'Então observou o amanhecer, grato por uma vida passada protegendo os outros.', ['dawn', 'grateful']]
+    ]
+  ),
+  buildReading(
+    'seed-story-c2-forgetting',
+    '📚 On Forgetting (C2) — Ensaio',
+    'Um breve ensaio literário sobre memória e esquecimento.',
+    'C2',
+    [
+      ['Memory, we like to believe, is the faithful archivist of our lives.', 'A memória, gostamos de acreditar, é a arquivista fiel de nossas vidas.', ['archivist']],
+      ['In reality, it is a restless editor, forever revising the past.', 'Na realidade, ela é uma editora inquieta, revisando eternamente o passado.', ['restless', 'revising']],
+      ['Each time we recall an event, we subtly rewrite it.', 'Cada vez que recordamos um evento, nós o reescrevemos sutilmente.', ['recall', 'subtly']],
+      ['What we call remembering is, more often, an act of invention.', 'O que chamamos de lembrar é, mais frequentemente, um ato de invenção.', ['invention']],
+      ['Perhaps this is not a flaw but a mercy.', 'Talvez isso não seja um defeito, mas uma misericórdia.', ['flaw', 'mercy']],
+      ['To forget is to be released from the tyranny of the unchangeable.', 'Esquecer é ser libertado da tirania do imutável.', ['released', 'tyranny']],
+      ['The mind, unburdened, makes room for the present.', 'A mente, aliviada, abre espaço para o presente.', ['unburdened']],
+      ['And in that forgetting, curiously, we become free to begin again.', 'E nesse esquecimento, curiosamente, ficamos livres para recomeçar.', ['curiously', 'begin again']]
+    ]
   )
 ];
